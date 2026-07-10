@@ -1,0 +1,1 @@
+"""FamilyHub backend package."""

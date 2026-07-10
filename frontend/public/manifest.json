@@ -1,0 +1,16 @@
+{
+  "name": "FamilyHub",
+  "short_name": "FamilyHub",
+  "description": "Family command center for groceries, meals, tasks, and reminders.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f6f8fb",
+  "theme_color": "#2563eb",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}
