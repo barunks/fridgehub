@@ -11,7 +11,7 @@ from app.schemas.familyhub import (
 )
 from app.services.audit_service import write_audit_log
 from app.services.family_service import (
-    invalidate_family_cache,
+    invalidate_entity,
     serialize_emergency_contact,
     serialize_member,
 )
@@ -57,7 +57,7 @@ def create_member(db: Session, payload: FamilyMemberCreate, family_id: int, user
     )
     db.commit()
     db.refresh(member)
-    invalidate_family_cache(family_id)
+    invalidate_entity("members", family_id)
     return serialize_member(member)
 
 
@@ -91,7 +91,7 @@ def update_member(db: Session, member_user_id: int, payload: FamilyMemberUpdate,
     )
     db.commit()
     db.refresh(member)
-    invalidate_family_cache(family_id)
+    invalidate_entity("members", family_id)
     return serialize_member(member)
 
 
@@ -99,7 +99,8 @@ def delete_member(db: Session, member_user_id: int, family_id: int, user_id: int
     member = db.query(FamilyMember).filter_by(family_id=family_id, user_id=member_user_id).first()
     if not member:
         raise HTTPException(status_code=404, detail="Family member not found")
-    db.delete(member)
+    # Soft-delete: deactivate user account instead of hard delete
+    member.user.is_active = False
     write_audit_log(
         db,
         user_id=user_id,
@@ -109,7 +110,7 @@ def delete_member(db: Session, member_user_id: int, family_id: int, user_id: int
         entity_id=member_user_id,
     )
     db.commit()
-    invalidate_family_cache(family_id)
+    invalidate_entity("members", family_id)
 
 
 def list_emergency_contacts(db: Session, family_id: int) -> list[dict]:
@@ -131,7 +132,7 @@ def create_emergency_contact(db: Session, payload: EmergencyContactCreate, famil
     )
     db.commit()
     db.refresh(contact)
-    invalidate_family_cache(family_id)
+    invalidate_entity("contacts", family_id)
     return serialize_emergency_contact(contact)
 
 
@@ -161,7 +162,7 @@ def update_emergency_contact(
     )
     db.commit()
     db.refresh(contact)
-    invalidate_family_cache(family_id)
+    invalidate_entity("contacts", family_id)
     return serialize_emergency_contact(contact)
 
 
@@ -179,4 +180,4 @@ def delete_emergency_contact(db: Session, contact_id: int, family_id: int, user_
         entity_id=contact_id,
     )
     db.commit()
-    invalidate_family_cache(family_id)
+    invalidate_entity("contacts", family_id)

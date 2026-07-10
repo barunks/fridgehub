@@ -62,3 +62,14 @@ def logout(current_user: CurrentUser, token_jti: str | None = None) -> dict[str,
             ttl_seconds=int(timedelta(days=settings.token_revocation_ttl_days).total_seconds()),
         )
     return {"status": "logged_out", "user": current_user.user.username}
+
+
+def change_password(db: Session, current_user: CurrentUser, current_password: str, new_password: str) -> dict[str, str]:
+    from app.core.security import hash_password
+
+    if not verify_password(current_password, current_user.user.password_hash):
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+
+    current_user.user.password_hash = hash_password(new_password)
+    db.commit()
+    return {"status": "password_changed"}

@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from app.models import Recipe
 from app.schemas.familyhub import RecipeCreate, RecipeUpdate
 from app.services.audit_service import write_audit_log
-from app.services.family_service import invalidate_family_cache, serialize_recipe
+from app.services.family_service import invalidate_entity, serialize_recipe
 from app.utils.sanitize import sanitize_text
 
 
@@ -35,7 +35,7 @@ def create_recipe(db: Session, payload: RecipeCreate, family_id: int, user_id: i
     )
     db.commit()
     db.refresh(recipe)
-    invalidate_family_cache(family_id)
+    invalidate_entity("recipes", family_id)
     return serialize_recipe(recipe)
 
 
@@ -76,7 +76,7 @@ def update_recipe(db: Session, recipe_id: int, payload: RecipeUpdate, family_id:
     )
     db.commit()
     db.refresh(recipe)
-    invalidate_family_cache(family_id)
+    invalidate_entity("recipes", family_id)
     return serialize_recipe(recipe)
 
 
@@ -94,4 +94,4 @@ def delete_recipe(db: Session, recipe_id: int, family_id: int, user_id: int) -> 
         entity_id=recipe_id,
     )
     db.commit()
-    invalidate_family_cache(family_id)
+    invalidate_entity("recipes", family_id)

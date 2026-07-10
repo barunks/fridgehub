@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.core.dependencies import CurrentUser, get_current_user, require_parent
 from app.core.database import get_db
-from app.schemas.familyhub import TaskCreate, TaskOut, TaskUpdate
+from app.schemas.familyhub import ErrorResponse, TaskCreate, TaskOut, TaskUpdate
 from app.services import task_service
 
 router = APIRouter()
@@ -20,7 +20,16 @@ def get_tasks(
     return task_service.list_tasks(db, current_user.family_id, status, limit, offset)
 
 
-@router.post("", response_model=TaskOut)
+@router.get("/{task_id}", response_model=TaskOut, responses={404: {"model": ErrorResponse}})
+def get_task(
+    task_id: int,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    return task_service.get_task(db, task_id, current_user.family_id)
+
+
+@router.post("", response_model=TaskOut, responses={403: {"model": ErrorResponse}})
 def create_task(
     payload: TaskCreate,
     current_user: CurrentUser = Depends(require_parent),
@@ -29,7 +38,7 @@ def create_task(
     return task_service.create_task(db, payload, current_user.family_id, current_user.user_id)
 
 
-@router.patch("/{task_id}", response_model=TaskOut)
+@router.patch("/{task_id}", response_model=TaskOut, responses={403: {"model": ErrorResponse}, 404: {"model": ErrorResponse}})
 def update_task(
     task_id: int,
     payload: TaskUpdate,
@@ -39,7 +48,7 @@ def update_task(
     return task_service.update_task(db, task_id, payload, current_user.family_id, current_user.user_id)
 
 
-@router.delete("/{task_id}", status_code=204)
+@router.delete("/{task_id}", status_code=204, responses={403: {"model": ErrorResponse}, 404: {"model": ErrorResponse}})
 def delete_task(
     task_id: int,
     current_user: CurrentUser = Depends(require_parent),

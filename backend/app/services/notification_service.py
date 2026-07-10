@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Notification
 from app.services.audit_service import write_audit_log
-from app.services.family_service import invalidate_family_cache, serialize_notification
+from app.services.family_service import invalidate_entity, serialize_notification
 
 
 def create_notification(
@@ -26,7 +26,7 @@ def create_notification(
     )
     db.add(notification)
     db.flush()
-    invalidate_family_cache(family_id)
+    invalidate_entity("notifications", family_id)
     return notification
 
 
@@ -64,5 +64,17 @@ def mark_read(db: Session, notification_id: int, user_id: int, family_id: int) -
         entity_id=notification.id,
     )
     db.commit()
-    invalidate_family_cache(family_id)
+    invalidate_entity("notifications", family_id)
     return serialize_notification(notification)
+
+
+def bulk_mark_read(db: Session, user_id: int, family_id: int) -> int:
+    """Mark all unread notifications as read for a user. Returns count."""
+    count = (
+        db.query(Notification)
+        .filter_by(user_id=user_id, family_id=family_id, is_read=False)
+        .update({"is_read": True, "read_at": datetime.now(UTC)})
+    )
+    db.commit()
+    invalidate_entity("notifications", family_id)
+    return count

@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from app.models import Task
 from app.schemas.familyhub import TaskCreate, TaskUpdate
 from app.services.audit_service import write_audit_log
-from app.services.family_service import invalidate_family_cache, serialize_task
+from app.services.family_service import invalidate_entity, serialize_task
 from app.services.notification_service import create_notification
 from app.utils.sanitize import sanitize_optional_text, sanitize_text
 
@@ -16,6 +16,13 @@ def list_tasks(db: Session, family_id: int, status: str | None = None, limit: in
     limit = max(1, min(limit, 100))
     offset = max(0, offset)
     return [serialize_task(task) for task in query.order_by(Task.due_date).offset(offset).limit(limit).all()]
+
+
+def get_task(db: Session, task_id: int, family_id: int) -> dict:
+    task = db.get(Task, task_id)
+    if not task or task.family_id != family_id or not task.is_active:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return serialize_task(task)
 
 
 def create_task(db: Session, payload: TaskCreate, family_id: int, user_id: int) -> dict:
@@ -55,7 +62,7 @@ def create_task(db: Session, payload: TaskCreate, family_id: int, user_id: int) 
     )
     db.commit()
     db.refresh(task)
-    invalidate_family_cache(family_id)
+    invalidate_entity("tasks", family_id)
     return serialize_task(task)
 
 
@@ -95,7 +102,7 @@ def update_task(db: Session, task_id: int, payload: TaskUpdate, family_id: int, 
     )
     db.commit()
     db.refresh(task)
-    invalidate_family_cache(family_id)
+    invalidate_entity("tasks", family_id)
     return serialize_task(task)
 
 
@@ -113,4 +120,4 @@ def delete_task(db: Session, task_id: int, family_id: int, user_id: int) -> None
         entity_id=task_id,
     )
     db.commit()
-    invalidate_family_cache(family_id)
+    invalidate_entity("tasks", family_id)

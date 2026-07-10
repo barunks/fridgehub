@@ -45,19 +45,29 @@ const cycleLengthDays = {
   quarterly: 90,
 }
 
-export const useFamilyHub = () => {
+export const useFamilyHub = (isAuthenticated = true) => {
   const [state, setState] = useState<FamilyHubState>(loadState)
   const [isLoading, setIsLoading] = useState(false)
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
 
+  // Auto-dismiss toast after 4 seconds
+  useEffect(() => {
+    if (!feedback) return
+    const timer = setTimeout(() => setFeedback(null), 4000)
+    return () => clearTimeout(timer)
+  }, [feedback])
+
   const refreshFromApi = () => {
+    if (!isAuthenticated) return
     setIsLoading(true)
     api
       .bootstrap()
       .then((payload) => setState(payload))
       .catch((error: unknown) => {
-        setFeedback({ type: 'error', message: error instanceof Error ? error.message : 'API refresh failed' })
-        // Offline-first fallback keeps the UI usable before the backend is running.
+        const msg = error instanceof Error ? error.message : 'API refresh failed'
+        if (msg !== 'AUTH_REQUIRED') {
+          setFeedback({ type: 'error', message: msg })
+        }
       })
       .finally(() => setIsLoading(false))
   }
@@ -77,7 +87,7 @@ export const useFamilyHub = () => {
 
   useEffect(() => {
     refreshFromApi()
-  }, [])
+  }, [isAuthenticated])
 
   useEffect(() => {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
@@ -241,6 +251,23 @@ export const useFamilyHub = () => {
     syncApi(api.regenerateGroceryCycles(), 'Grocery cycles regenerated')
   }
 
+  const addListType = (listName: string, description: string, colorClass: string) => {
+    setState((current) => ({
+      ...current,
+      listTypes: [
+        ...current.listTypes,
+        {
+          id: nextId(current.listTypes),
+          listName,
+          listType: 'standard',
+          description,
+          colorClass,
+        },
+      ],
+    }))
+    syncApi(api.createListType(listName, description, colorClass), 'Shopping list added')
+  }
+
   const addTask = (input: NewTaskInput) => {
     setState((current) => {
       const dueDate = input.dueAt || dateTimeOffsetIso(0, 18)
@@ -257,7 +284,7 @@ export const useFamilyHub = () => {
             status: 'pending',
             dueAt: dueDate,
             reminderAt: dueDate,
-            recurrenceType: 'none',
+            recurrenceType: input.recurrenceType || 'none',
             recurrenceInterval: 1,
             assignedTo: input.assignedTo,
             category: input.category,
@@ -271,6 +298,14 @@ export const useFamilyHub = () => {
       }
     })
     syncApi(api.createTask(input), 'Task added')
+  }
+
+  const reassignTask = (taskId: number, assignedTo: number) => {
+    setState((current) => ({
+      ...current,
+      tasks: current.tasks.map((task) => (task.id === taskId ? { ...task, assignedTo } : task)),
+    }))
+    syncApi(api.updateTask(taskId, { assignedTo }), 'Task reassigned')
   }
 
   const updateMeal = (mealId: number, mealName: string) => {
@@ -402,8 +437,10 @@ export const useFamilyHub = () => {
     toggleGroceryPurchased,
     toggleCurrentStock,
     addGroceryItem,
+    addListType,
     regenerateGroceryCycles,
     addTask,
+    reassignTask,
     updateMeal,
     applyWeeklyTemplate,
     markNotificationRead,

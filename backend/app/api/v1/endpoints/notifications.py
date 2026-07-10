@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from app.core.dependencies import CurrentUser, get_current_user
 from app.core.database import get_db
 from app.schemas.familyhub import NotificationOut
-from app.services.notification_service import list_notifications, mark_read
+from app.services.notification_service import bulk_mark_read, list_notifications, mark_read
 
 router = APIRouter()
 
@@ -18,6 +18,15 @@ def get_notifications(
     db: Session = Depends(get_db),
 ) -> list[dict]:
     return list_notifications(db, current_user.user_id, current_user.family_id, unread_only, limit, offset)
+
+
+@router.post("/mark-all-read")
+def mark_all_read(
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    count = bulk_mark_read(db, current_user.user_id, current_user.family_id)
+    return {"marked": count}
 
 
 @router.patch("/{notification_id}/read", response_model=NotificationOut)

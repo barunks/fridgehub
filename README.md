@@ -6,7 +6,8 @@ The implementation now includes the React UI, FastAPI backend, SQLAlchemy data m
 
 ## What Is Implemented
 
-- React + TypeScript frontend with dashboard, groceries, meal plans, tasks, family workspace, assistant, and implementation-readiness views.
+- React + TypeScript frontend with routed dashboard, groceries, meal plans, tasks, family workspace, assistant, and implementation-readiness views.
+- Dark/light theme persistence, drag-and-drop task reassignment, and lazy-loaded Recharts household analytics.
 - FastAPI backend with versioned REST routes under `/api/v1`.
 - SQLAlchemy models for the document's core tables: users, families, family members, grocery types, frequency types, grocery list types, grocery items, purchase cycles, sub-lists, tasks, meal plans, meal templates, recipes, audit logs, and notifications.
 - Extra UI-backed tables for announcements and emergency contacts.
@@ -76,6 +77,19 @@ API docs: http://localhost:8000/docs
 
 The frontend tries `http://localhost:8000` by default. If the backend is unavailable, it falls back to local browser state.
 
+Frontend route map:
+
+```text
+/                 Dashboard — stat cards, today's agenda, tasks, meals, groceries, assistant, family
+/tasks            Drag-and-drop assignment board
+/groceries        Grocery master list and cycle tools
+/meals            Weekly meal planner and recipes
+/family           Members, announcements, contacts, notifications
+/analytics        Household analytics — task flow, pantry coverage, calories, reward points
+/assistant        Family assistant chat
+/implementation   Build and deployment readiness
+```
+
 ## Docker Deployment
 
 ```bash
@@ -100,9 +114,11 @@ Key routes:
 
 ```text
 GET    /health
+GET    /api/versions
 POST   /api/v1/auth/login
 POST   /api/v1/auth/refresh
 POST   /api/v1/auth/logout
+POST   /api/v1/auth/change-password
 GET    /api/v1/family/bootstrap
 GET    /api/v1/family/members
 POST   /api/v1/family/members
@@ -114,15 +130,23 @@ PATCH  /api/v1/family/emergency-contacts/{contact_id}
 DELETE /api/v1/family/emergency-contacts/{contact_id}
 POST   /api/v1/family/announcements
 DELETE /api/v1/family/announcements/{announcement_id}
+GET    /api/v1/family/audit-logs
+GET    /api/v1/grocery/types
+GET    /api/v1/grocery/types/{type_id}
+POST   /api/v1/grocery/types
+PATCH  /api/v1/grocery/types/{type_id}
+DELETE /api/v1/grocery/types/{type_id}
 GET    /api/v1/grocery/list-types
 GET    /api/v1/grocery/master-types
 GET    /api/v1/grocery/frequency-types
 GET    /api/v1/grocery/items
+GET    /api/v1/grocery/items/{item_id}
 POST   /api/v1/grocery/items
 PATCH  /api/v1/grocery/items/{item_id}
 DELETE /api/v1/grocery/items/{item_id}
 POST   /api/v1/grocery/regenerate-cycles
 GET    /api/v1/tasks
+GET    /api/v1/tasks/{task_id}
 POST   /api/v1/tasks
 PATCH  /api/v1/tasks/{task_id}
 DELETE /api/v1/tasks/{task_id}
@@ -136,6 +160,8 @@ DELETE /api/v1/meal-plan/recipes/{recipe_id}
 POST   /api/v1/assistant/recommendations
 GET    /api/v1/notifications
 PATCH  /api/v1/notifications/{notification_id}/read
+POST   /api/v1/notifications/mark-all-read
+GET    /api/v1/cache/stats
 ```
 
 Demo login:
@@ -147,7 +173,19 @@ Demo login:
 }
 ```
 
-All application routes except `/health`, `/api/v1/auth/login`, and `/api/v1/auth/refresh` require `Authorization: Bearer <access-token>`. Parent-role users can perform mutations. Child-role users can read family-scoped data but receive `403` for parent-only operations.
+All application routes except `/health`, `/api/versions`, `/api/v1/auth/login`, and `/api/v1/auth/refresh` require `Authorization: Bearer <access-token>`. Parent-role users can perform mutations. Child-role users can read family-scoped data but receive `403` for parent-only operations.
+
+## API Versioning
+
+The API uses explicit URL-path versioning (`/api/v1/...`). A version discovery endpoint is available:
+
+```text
+GET /api/versions
+```
+
+Returns the registry of all mounted versions with their deprecation status. All responses under `/api/v1` include an `X-API-Version: v1` header. When a version is deprecated, responses include `Deprecation: true` and an optional `Sunset` header with the removal date.
+
+To add a future `/api/v2`, register it in `app/core/versioning.py` and mount a new router in `main.py`. The v1 router continues to serve traffic until its sunset date.
 
 ## Database
 
@@ -204,6 +242,7 @@ Frontend:
 cd frontend
 npm run build
 npm run lint
+npm run test:e2e
 ```
 
 Alembic smoke test:
@@ -236,3 +275,12 @@ Addressed from the audit report:
 - Redis invalidation without SCAN plus bootstrap stampede protection.
 - Celery crontab schedules.
 - Frontend JWT integration, loading state, toast feedback, confirmation prompts, mobile notification access, PWA manifest, and removal of developer metadata.
+- React Router route-level navigation.
+- Persistent dark/light mode.
+- Drag-and-drop task assignment board.
+- Lazy-loaded Recharts analytics for task status, grocery coverage, meal calories, and reward points.
+- Playwright E2E coverage for routing, theme persistence, and drag/drop reassignment.
+- API versioning with `X-API-Version` response header, `/api/versions` discovery endpoint, and deprecation/sunset support.
+- GroceryType admin CRUD (parent-only) for managing the grocery category reference table.
+- Cmd+K command palette for global fuzzy search across tasks, groceries, meals, and family members.
+- Service worker for offline PWA support with cache-first static assets and network-first API responses.

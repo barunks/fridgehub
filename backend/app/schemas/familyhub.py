@@ -15,6 +15,29 @@ class CamelModel(BaseModel):
     model_config = ConfigDict(populate_by_name=True, from_attributes=True)
 
 
+class ErrorDetail(CamelModel):
+    """Standard error response body."""
+    detail: str
+    code: str = "error"
+    field: str | None = None
+
+
+class ErrorResponse(CamelModel):
+    """Envelope for all API error responses."""
+    error: ErrorDetail
+
+
+class ValidationErrorItem(CamelModel):
+    field: str
+    message: str
+
+
+class ValidationErrorResponse(CamelModel):
+    """Returned on request body validation failures."""
+    error: ErrorDetail
+    validationErrors: list[ValidationErrorItem] = []
+
+
 class TokenResponse(CamelModel):
     accessToken: str
     refreshToken: str
@@ -28,6 +51,11 @@ class RefreshRequest(CamelModel):
 class LoginRequest(CamelModel):
     username: str
     password: str
+
+
+class ChangePasswordRequest(CamelModel):
+    currentPassword: str = Field(min_length=1)
+    newPassword: str = Field(min_length=8, max_length=128)
 
 
 class FamilyOut(CamelModel):
@@ -77,9 +105,36 @@ class GroceryListTypeOut(CamelModel):
     colorClass: str
 
 
+class GroceryListTypeCreate(CamelModel):
+    listName: str = Field(min_length=1, max_length=100)
+    description: str = ""
+    colorClass: str = "bg-slate-500"
+
+
+class GroceryListTypeUpdate(CamelModel):
+    listName: str | None = None
+    description: str | None = None
+    colorClass: str | None = None
+
+
 class GroceryTypeOut(CamelModel):
     id: int
     typeName: str
+    description: str | None = None
+    icon: str | None = None
+    color: str | None = None
+    isSystem: bool = False
+
+
+class GroceryTypeCreate(CamelModel):
+    typeName: str = Field(min_length=1, max_length=50)
+    description: str | None = None
+    icon: str | None = None
+    color: str | None = None
+
+
+class GroceryTypeUpdate(CamelModel):
+    typeName: str | None = None
     description: str | None = None
     icon: str | None = None
     color: str | None = None
@@ -189,10 +244,17 @@ class MealPlanItemOut(CamelModel):
     prepTime: int
     recipeId: int | None = None
     colorClass: str
+    assignedTo: int | None = None
+    dietaryFlags: list[str] = []
 
 
 class MealUpdate(CamelModel):
-    mealName: str = Field(min_length=1, max_length=255)
+    mealName: str | None = None
+    description: str | None = None
+    calories: int | None = None
+    prepTime: int | None = None
+    assignedTo: int | None = None
+    dietaryFlags: list[str] | None = None
 
 
 class RecipeOut(CamelModel):

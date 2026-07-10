@@ -10,11 +10,14 @@ from app.tasks.celery_app import celery_app
 def scan_due_reminders() -> dict[str, int]:
     db = SessionLocal()
     try:
-        now = datetime.now(UTC).replace(tzinfo=None)
+        now = datetime.now(UTC)
         soon = now + timedelta(minutes=15)
+        # Compare using timezone-aware datetimes; for naive DB columns, strip tz at query level
+        now_naive = now.replace(tzinfo=None)
+        soon_naive = soon.replace(tzinfo=None)
         tasks = (
             db.query(Task)
-            .filter(Task.status.in_(["pending", "in_progress"]), Task.reminder_date >= now, Task.reminder_date <= soon)
+            .filter(Task.status.in_(["pending", "in_progress"]), Task.reminder_date >= now_naive, Task.reminder_date <= soon_naive)
             .all()
         )
         for task in tasks:

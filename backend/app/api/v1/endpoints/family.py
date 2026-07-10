@@ -10,11 +10,13 @@ from app.schemas.familyhub import (
     EmergencyContactCreate,
     EmergencyContactOut,
     EmergencyContactUpdate,
+    ErrorResponse,
     FamilyMemberCreate,
     FamilyMemberOut,
     FamilyMemberUpdate,
 )
 from app.services.announcement_service import create_announcement, delete_announcement
+from app.services.audit_service import list_audit_logs
 from app.services.family_service import bootstrap_state
 from app.services import family_management_service
 
@@ -24,6 +26,17 @@ router = APIRouter()
 @router.get("/bootstrap", response_model=BootstrapState)
 def bootstrap(current_user: CurrentUser = Depends(get_current_user), db: Session = Depends(get_db)) -> dict:
     return bootstrap_state(db, current_user.family_id)
+
+
+@router.get("/audit-logs")
+def get_audit_logs(
+    entity_type: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+    current_user: CurrentUser = Depends(require_parent),
+    db: Session = Depends(get_db),
+) -> list[dict]:
+    return list_audit_logs(db, current_user.family_id, entity_type, limit, offset)
 
 
 @router.post("/announcements", response_model=AnnouncementOut)
@@ -49,7 +62,7 @@ def get_members(current_user: CurrentUser = Depends(get_current_user), db: Sessi
     return family_management_service.list_members(db, current_user.family_id)
 
 
-@router.post("/members", response_model=FamilyMemberOut)
+@router.post("/members", response_model=FamilyMemberOut, responses={403: {"model": ErrorResponse}, 409: {"model": ErrorResponse}})
 def add_member(
     payload: FamilyMemberCreate,
     current_user: CurrentUser = Depends(require_parent),
@@ -58,7 +71,7 @@ def add_member(
     return family_management_service.create_member(db, payload, current_user.family_id, current_user.user_id)
 
 
-@router.patch("/members/{member_user_id}", response_model=FamilyMemberOut)
+@router.patch("/members/{member_user_id}", response_model=FamilyMemberOut, responses={403: {"model": ErrorResponse}, 404: {"model": ErrorResponse}})
 def update_member(
     member_user_id: int,
     payload: FamilyMemberUpdate,
@@ -68,7 +81,7 @@ def update_member(
     return family_management_service.update_member(db, member_user_id, payload, current_user.family_id, current_user.user_id)
 
 
-@router.delete("/members/{member_user_id}", status_code=204)
+@router.delete("/members/{member_user_id}", status_code=204, responses={403: {"model": ErrorResponse}, 404: {"model": ErrorResponse}})
 def remove_member(
     member_user_id: int,
     current_user: CurrentUser = Depends(require_parent),

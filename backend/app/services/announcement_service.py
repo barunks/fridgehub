@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from app.models import Announcement
 from app.schemas.familyhub import AnnouncementCreate
 from app.services.audit_service import write_audit_log
-from app.services.family_service import invalidate_family_cache, serialize_announcement
+from app.services.family_service import invalidate_entity, serialize_announcement
 from app.utils.sanitize import sanitize_text
 
 
@@ -29,7 +29,7 @@ def create_announcement(db: Session, payload: AnnouncementCreate, family_id: int
     )
     db.commit()
     db.refresh(announcement)
-    invalidate_family_cache(family_id)
+    invalidate_entity("announcements", family_id)
     return serialize_announcement(announcement)
 
 
@@ -47,4 +47,4 @@ def delete_announcement(db: Session, announcement_id: int, family_id: int, user_
         entity_id=announcement_id,
     )
     db.commit()
-    invalidate_family_cache(family_id)
+    invalidate_entity("announcements", family_id)

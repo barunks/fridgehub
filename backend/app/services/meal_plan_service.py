@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from app.models import MealPlan, MealPlanTemplate, Recipe
 from app.schemas.familyhub import MealUpdate
 from app.services.audit_service import write_audit_log
-from app.services.family_service import invalidate_family_cache, serialize_meal, serialize_recipe
+from app.services.family_service import invalidate_entity, serialize_meal, serialize_recipe
 from app.services.notification_service import create_notification
 from app.utils.dates import start_of_week
 from app.utils.sanitize import sanitize_text
@@ -35,7 +35,21 @@ def update_meal(db: Session, meal_id: int, payload: MealUpdate, family_id: int, 
     meal = db.get(MealPlan, meal_id)
     if not meal or meal.family_id != family_id:
         raise HTTPException(status_code=404, detail="Meal not found")
-    meal.meal_name = sanitize_text(payload.mealName)
+
+    updates = payload.model_dump(exclude_unset=True)
+    if "mealName" in updates and updates["mealName"]:
+        meal.meal_name = sanitize_text(updates["mealName"])
+    if "description" in updates:
+        meal.description = sanitize_text(updates["description"]) if updates["description"] else None
+    if "calories" in updates:
+        meal.calories = updates["calories"]
+    if "prepTime" in updates:
+        meal.prep_time = updates["prepTime"]
+    if "assignedTo" in updates:
+        meal.assigned_to = updates["assignedTo"]
+    if "dietaryFlags" in updates:
+        meal.dietary_flags = updates["dietaryFlags"]
+
     write_audit_log(
         db,
         user_id=user_id,
@@ -43,11 +57,11 @@ def update_meal(db: Session, meal_id: int, payload: MealUpdate, family_id: int, 
         action="update",
         entity_type="meal_plan",
         entity_id=meal.id,
-        changes={"meal_name": meal.meal_name},
+        changes=updates,
     )
     db.commit()
     db.refresh(meal)
-    invalidate_family_cache(family_id)
+    invalidate_entity("meals", family_id)
     return serialize_meal(meal)
 
 
@@ -110,5 +124,5 @@ def apply_template(db: Session, family_id: int, user_id: int, template_name: str
         entity_id=template_name,
     )
     db.commit()
-    invalidate_family_cache(family_id)
+    invalidate_entity("meals", family_id)
     return weekly_meals(db, family_id)

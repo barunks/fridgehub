@@ -17,19 +17,10 @@ const saveTokens = (tokens: TokenResponse) => {
 }
 
 const login = async () => {
-  const username = import.meta.env.VITE_DEMO_USERNAME || 'meera'
-  const password = import.meta.env.VITE_DEMO_PASSWORD || 'familyhub'
-  const response = await fetch(`${apiBaseUrl}/api/v1/auth/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, password }),
-  })
-  if (!response.ok) {
-    throw new Error(`Login failed: ${response.statusText}`)
-  }
-  const tokens = (await response.json()) as TokenResponse
-  saveTokens(tokens)
-  return tokens.accessToken
+  // This path is only hit when a request is made without a token.
+  // The useAuth hook handles interactive login; this is a fallback that throws
+  // so the UI can redirect to the login page.
+  throw new Error('AUTH_REQUIRED')
 }
 
 const refreshAccessToken = async () => {
@@ -92,6 +83,11 @@ const request = async <T>(path: string, init?: RequestInit): Promise<T> => {
 export const api = {
   login,
   bootstrap: () => request<FamilyHubState>('/api/v1/family/bootstrap'),
+  changePassword: (currentPassword: string, newPassword: string) =>
+    request('/api/v1/auth/change-password', {
+      method: 'POST',
+      body: JSON.stringify({ currentPassword, newPassword }),
+    }),
   createGroceryItem: (payload: NewGroceryItemInput) =>
     request('/api/v1/grocery/items', {
       method: 'POST',
@@ -106,10 +102,26 @@ export const api = {
     request('/api/v1/grocery/regenerate-cycles', {
       method: 'POST',
     }),
+  createListType: (listName: string, description: string, colorClass: string) =>
+    request('/api/v1/grocery/list-types', {
+      method: 'POST',
+      body: JSON.stringify({ listName, description, colorClass }),
+    }),
+  deleteListType: (listTypeId: number) =>
+    request(`/api/v1/grocery/list-types/${listTypeId}`, {
+      method: 'DELETE',
+    }),
   createTask: (payload: NewTaskInput) =>
     request('/api/v1/tasks', {
       method: 'POST',
-      body: JSON.stringify(payload),
+      body: JSON.stringify({
+        title: payload.title,
+        category: payload.category,
+        priority: payload.priority,
+        dueAt: payload.dueAt,
+        assignedTo: payload.assignedTo,
+        recurrenceType: payload.recurrenceType || 'none',
+      }),
     }),
   updateTask: (taskId: number, payload: Record<string, unknown>) =>
     request(`/api/v1/tasks/${taskId}`, {

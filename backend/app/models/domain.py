@@ -178,6 +178,8 @@ class GrocerySubList(Base, TimestampMixin):
     is_purchased: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     purchased_quantity: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), default=0)
     notes: Mapped[str | None] = mapped_column(Text)
+    is_adhoc: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    carried_forward: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     purchase_cycle: Mapped["GroceryPurchaseCycle"] = relationship(back_populates="sub_list_items")
     item: Mapped["GroceryItem"] = relationship(back_populates="sub_list_items")
@@ -213,7 +215,7 @@ class Task(Base, TimestampMixin, ActiveMixin):
 class MealPlan(Base, TimestampMixin, ActiveMixin):
     __tablename__ = "meal_plans"
     __table_args__ = (
-        UniqueConstraint("family_id", "plan_date", "meal_type", name="unique_meal"),
+        UniqueConstraint("family_id", "plan_date", "meal_type", "assigned_to", name="unique_meal"),
         Index("idx_meal_plan_family_date", "family_id", "plan_date"),
     )
 
@@ -230,6 +232,8 @@ class MealPlan(Base, TimestampMixin, ActiveMixin):
     recipe_id: Mapped[int | None] = mapped_column(ForeignKey("recipes.id", ondelete="SET NULL"))
     color_class: Mapped[str] = mapped_column(String(64), default="bg-blue-500", nullable=False)
     created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    assigned_to: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), index=True)
+    dietary_flags: Mapped[list[str] | None] = mapped_column(JSON)
 
     family: Mapped["Family"] = relationship(back_populates="meal_plans")
     recipe: Mapped["Recipe | None"] = relationship(back_populates="meal_plans")

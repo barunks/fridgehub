@@ -2,6 +2,14 @@
 
 Vite React + TypeScript frontend for the FamilyHub command center. It hydrates from `VITE_API_URL` when available and falls back to local demo data when the backend is offline.
 
+Implemented UI platform features:
+
+- React Router routes for dashboard, tasks, groceries, meals, family, assistant, and implementation views.
+- Persistent light/dark theme toggle.
+- Drag-and-drop task reassignment board powered by `@dnd-kit`.
+- Lazy-loaded Recharts analytics for household operations.
+- Playwright E2E tests for routing, theme persistence, and drag/drop behavior.
+
 ```bash
 npm install
 npm run dev
@@ -18,6 +26,7 @@ Verification:
 ```bash
 npm run build
 npm run lint
+npm run test:e2e
 ```
 
 See the root `README.md` for the document analysis, implementation scope, and backend integration map.

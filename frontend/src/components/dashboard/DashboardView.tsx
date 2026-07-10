@@ -29,24 +29,36 @@ const StatCard = ({
   value,
   icon: Icon,
   toneClass,
+  onClick,
 }: {
   label: string
   value: number | string
   icon: typeof CalendarClock
   toneClass: string
-}) => (
-  <Card>
-    <CardContent className="flex items-center gap-4">
-      <div className={cn('flex size-12 items-center justify-center rounded-lg', toneClass)}>
-        <Icon className="size-6" aria-hidden="true" />
+  onClick?: () => void
+}) => {
+  const Wrapper = onClick ? 'button' : 'div'
+  return (
+    <Wrapper
+      className={cn(
+        'rounded-lg border border-slate-200 bg-white shadow-sm text-left w-full',
+        onClick && 'cursor-pointer transition hover:border-blue-300 hover:shadow-md',
+      )}
+      onClick={onClick}
+      type={onClick ? 'button' : undefined}
+    >
+      <div className="flex items-center gap-4 px-5 py-4">
+        <div className={cn('flex size-12 items-center justify-center rounded-lg', toneClass)}>
+          <Icon className="size-6" aria-hidden="true" />
+        </div>
+        <div>
+          <p className="text-sm text-slate-500">{label}</p>
+          <p className="text-2xl font-bold text-slate-950">{value}</p>
+        </div>
       </div>
-      <div>
-        <p className="text-sm text-slate-500">{label}</p>
-        <p className="text-2xl font-bold text-slate-950">{value}</p>
-      </div>
-    </CardContent>
-  </Card>
-)
+    </Wrapper>
+  )
+}
 
 export const DashboardView = ({ store, onNavigate }: DashboardViewProps) => {
   const { state, stats, toggleTaskStatus, toggleGroceryPurchased } = store
@@ -61,24 +73,28 @@ export const DashboardView = ({ store, onNavigate }: DashboardViewProps) => {
         <StatCard
           icon={CalendarClock}
           label="Tasks today"
+          onClick={() => onNavigate('tasks')}
           toneClass="bg-blue-50 text-blue-600"
           value={stats.todayTasks.length}
         />
         <StatCard
           icon={ShoppingBag}
           label="Pending purchases"
+          onClick={() => onNavigate('groceries')}
           toneClass="bg-amber-50 text-amber-600"
           value={stats.pendingPurchases.length}
         />
         <StatCard
           icon={AlertTriangle}
           label="Expiring items"
+          onClick={() => onNavigate('groceries')}
           toneClass="bg-rose-50 text-rose-600"
           value={stats.expiringItems.length}
         />
         <StatCard
           icon={ChefHat}
           label="Meals today"
+          onClick={() => onNavigate('meals')}
           toneClass="bg-emerald-50 text-emerald-600"
           value={stats.todayMeals.length}
         />
@@ -184,8 +200,12 @@ export const DashboardView = ({ store, onNavigate }: DashboardViewProps) => {
               </CardHeader>
               <CardContent>
                 <Badge tone="amber">Dinner suggestion</Badge>
-                <p className="mt-3 text-xl font-semibold text-slate-950">Veggie pasta</p>
-                <p className="mt-1 text-sm text-slate-500">Uses expiring spinach</p>
+                <p className="mt-3 text-xl font-semibold text-slate-950">
+                  {stats.todayMeals.find((m) => m.mealType === 'dinner')?.mealName || 'No dinner planned'}
+                </p>
+                <p className="mt-1 text-sm text-slate-500">
+                  {stats.todayMeals.find((m) => m.mealType === 'dinner')?.description || 'Add a meal to your plan'}
+                </p>
                 <Button className="mt-4 w-full" onClick={() => onNavigate('meals')} variant="secondary">
                   <ChefHat className="size-4" aria-hidden="true" />
                   Open meals
@@ -291,10 +311,15 @@ export const DashboardView = ({ store, onNavigate }: DashboardViewProps) => {
             <CardContent className="flex items-start gap-3">
               <Clock className="mt-1 size-5 text-blue-600" aria-hidden="true" />
               <div>
-                <p className="font-semibold text-slate-950">Vacation tracker</p>
-                <p className="text-sm text-slate-600">12 days until the planned family break.</p>
+                <p className="font-semibold text-slate-950">Task completion</p>
+                <p className="text-sm text-slate-600">
+                  {stats.completedTasks.length} of {state.tasks.length} tasks completed this cycle.
+                </p>
                 <div className="mt-3 h-2 rounded-full bg-white">
-                  <div className="h-2 w-2/3 rounded-full bg-sky-500" />
+                  <div
+                    className="h-2 rounded-full bg-sky-500 transition-all"
+                    style={{ width: `${completionRate}%` }}
+                  />
                 </div>
               </div>
             </CardContent>

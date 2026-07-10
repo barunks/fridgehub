@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.core.dependencies import CurrentUser, get_current_user, require_parent
 from app.core.database import get_db
-from app.schemas.familyhub import MealPlanItemOut, MealUpdate, RecipeCreate, RecipeOut, RecipeUpdate
+from app.schemas.familyhub import ErrorResponse, MealPlanItemOut, MealUpdate, RecipeCreate, RecipeOut, RecipeUpdate
 from app.services import meal_plan_service
 from app.services import recipe_service
 
@@ -15,7 +15,7 @@ def get_week(current_user: CurrentUser = Depends(get_current_user), db: Session 
     return meal_plan_service.weekly_meals(db, current_user.family_id)
 
 
-@router.patch("/{meal_id}", response_model=MealPlanItemOut)
+@router.patch("/{meal_id}", response_model=MealPlanItemOut, responses={403: {"model": ErrorResponse}, 404: {"model": ErrorResponse}})
 def update_meal(
     meal_id: int,
     payload: MealUpdate,
@@ -43,7 +43,7 @@ def get_recipes(
     return meal_plan_service.recipes(db, current_user.family_id, limit, offset)
 
 
-@router.post("/recipes", response_model=RecipeOut)
+@router.post("/recipes", response_model=RecipeOut, responses={403: {"model": ErrorResponse}})
 def create_recipe(
     payload: RecipeCreate,
     current_user: CurrentUser = Depends(require_parent),
@@ -52,7 +52,7 @@ def create_recipe(
     return recipe_service.create_recipe(db, payload, current_user.family_id, current_user.user_id)
 
 
-@router.patch("/recipes/{recipe_id}", response_model=RecipeOut)
+@router.patch("/recipes/{recipe_id}", response_model=RecipeOut, responses={403: {"model": ErrorResponse}, 404: {"model": ErrorResponse}})
 def update_recipe(
     recipe_id: int,
     payload: RecipeUpdate,
@@ -62,7 +62,7 @@ def update_recipe(
     return recipe_service.update_recipe(db, recipe_id, payload, current_user.family_id, current_user.user_id)
 
 
-@router.delete("/recipes/{recipe_id}", status_code=204)
+@router.delete("/recipes/{recipe_id}", status_code=204, responses={403: {"model": ErrorResponse}, 404: {"model": ErrorResponse}})
 def delete_recipe(
     recipe_id: int,
     current_user: CurrentUser = Depends(require_parent),

@@ -24,6 +24,25 @@ from app.models import (
 
 _bootstrap_locks: dict[int, Lock] = {}
 
+# Entity cache key helpers
+ENTITIES = ("members", "list_types", "groceries", "cycles", "tasks", "meals", "recipes", "notifications", "announcements", "contacts")
+
+
+def _entity_key(entity: str, family_id: int) -> str:
+    return cache_key(entity, family_id=family_id)
+
+
+def invalidate_entity(entity: str, family_id: int) -> None:
+    """Invalidate a single entity cache for a family."""
+    cache.delete(_entity_key(entity, family_id))
+
+
+def invalidate_family_cache(family_id: int) -> None:
+    """Invalidate all entity caches for a family (used for bulk operations)."""
+    for entity in ENTITIES:
+        cache.delete(_entity_key(entity, family_id))
+    cache.delete(_entity_key("family", family_id))
+
 
 def _number(value: Decimal | int | float | None) -> float:
     return float(value or 0)
@@ -34,10 +53,6 @@ def get_family(db: Session, family_id: int) -> Family:
     if not family:
         raise HTTPException(status_code=404, detail="Family not found")
     return family
-
-
-def invalidate_family_cache(family_id: int) -> None:
-    cache.invalidate_prefix(cache_key("bootstrap", family_id=family_id))
 
 
 def serialize_family(family: Family) -> dict[str, Any]:
@@ -141,6 +156,8 @@ def serialize_meal(meal: MealPlan) -> dict[str, Any]:
         "prepTime": meal.prep_time or 0,
         "recipeId": meal.recipe_id,
         "colorClass": meal.color_class,
+        "assignedTo": meal.assigned_to,
+        "dietaryFlags": meal.dietary_flags or [],
     }
 
 
@@ -200,18 +217,14 @@ def default_assistant_messages() -> list[dict[str, Any]]:
     ]
 
 
-def bootstrap_state(db: Session, family_id: int) -> dict[str, Any]:
-    key = cache_key("bootstrap", family_id=family_id)
+def _fetch_entity(db: Session, entity: str, family_id: int) -> Any:
+    """Fetch and cache a single entity for a family."""
+    key = _entity_key(entity, family_id)
     cached = cache.get(key)
-    if cached:
+    if cached is not None:
         return cached
 
-    lock = _bootstrap_locks.setdefault(family_id, Lock())
-    with lock:
-        cached = cache.get(key)
-        if cached:
-            return cached
-
+    if entity == "family":
         family = (
             db.query(Family)
             .options(selectinload(Family.members).selectinload(FamilyMember.user))
@@ -220,36 +233,61 @@ def bootstrap_state(db: Session, family_id: int) -> dict[str, Any]:
         )
         if not family:
             raise HTTPException(status_code=404, detail="Family not found")
-
-        list_types = db.query(GroceryListType).filter_by(family_id=family_id, is_active=True).order_by(GroceryListType.id).all()
-        grocery_items = (
+        data = serialize_family(family)
+    elif entity == "members":
+        family = (
+            db.query(Family)
+            .options(selectinload(Family.members).selectinload(FamilyMember.user))
+            .filter(Family.id == family_id)
+            .first()
+        )
+        data = [serialize_member(m) for m in (family.members if family else [])]
+    elif entity == "list_types":
+        data = [serialize_list_type(lt) for lt in db.query(GroceryListType).filter_by(family_id=family_id, is_active=True).order_by(GroceryListType.id).all()]
+    elif entity == "groceries":
+        items = (
             db.query(GroceryItem)
             .options(selectinload(GroceryItem.sub_list_items).selectinload(GrocerySubList.purchase_cycle))
             .filter_by(family_id=family_id, is_active=True)
             .order_by(GroceryItem.id)
             .all()
         )
-        cycles = db.query(GroceryPurchaseCycle).filter_by(family_id=family_id).order_by(GroceryPurchaseCycle.id).all()
-        tasks = db.query(Task).filter_by(family_id=family_id, is_active=True).order_by(Task.due_date).all()
-        meals = db.query(MealPlan).filter_by(family_id=family_id, is_active=True).order_by(MealPlan.plan_date, MealPlan.id).all()
-        recipes = db.query(Recipe).filter(Recipe.family_id.in_([family_id, None]), Recipe.is_active.is_(True)).order_by(Recipe.id).all()
-        notifications = db.query(Notification).filter_by(family_id=family_id).order_by(Notification.created_at.desc()).all()
-        announcements = db.query(Announcement).filter_by(family_id=family_id).order_by(Announcement.created_at.desc()).all()
-        emergency_contacts = db.query(EmergencyContact).filter_by(family_id=family_id).order_by(EmergencyContact.id).all()
+        data = [serialize_grocery_item(i) for i in items]
+    elif entity == "cycles":
+        data = [serialize_cycle(c) for c in db.query(GroceryPurchaseCycle).filter_by(family_id=family_id).order_by(GroceryPurchaseCycle.id).all()]
+    elif entity == "tasks":
+        data = [serialize_task(t) for t in db.query(Task).filter_by(family_id=family_id, is_active=True).order_by(Task.due_date).all()]
+    elif entity == "meals":
+        data = [serialize_meal(m) for m in db.query(MealPlan).filter_by(family_id=family_id, is_active=True).order_by(MealPlan.plan_date, MealPlan.id).all()]
+    elif entity == "recipes":
+        data = [serialize_recipe(r) for r in db.query(Recipe).filter(Recipe.family_id.in_([family_id, None]), Recipe.is_active.is_(True)).order_by(Recipe.id).all()]
+    elif entity == "notifications":
+        data = [serialize_notification(n) for n in db.query(Notification).filter_by(family_id=family_id).order_by(Notification.created_at.desc()).all()]
+    elif entity == "announcements":
+        data = [serialize_announcement(a) for a in db.query(Announcement).filter_by(family_id=family_id).order_by(Announcement.created_at.desc()).all()]
+    elif entity == "contacts":
+        data = [serialize_emergency_contact(c) for c in db.query(EmergencyContact).filter_by(family_id=family_id).order_by(EmergencyContact.id).all()]
+    else:
+        data = []
 
-        payload = {
-            "family": serialize_family(family),
-            "members": [serialize_member(member) for member in family.members],
-            "listTypes": [serialize_list_type(list_type) for list_type in list_types],
-            "groceryItems": [serialize_grocery_item(item) for item in grocery_items],
-            "groceryCycles": [serialize_cycle(cycle) for cycle in cycles],
-            "tasks": [serialize_task(task) for task in tasks],
-            "meals": [serialize_meal(meal) for meal in meals],
-            "recipes": [serialize_recipe(recipe) for recipe in recipes],
-            "notifications": [serialize_notification(notification) for notification in notifications],
-            "announcements": [serialize_announcement(announcement) for announcement in announcements],
-            "emergencyContacts": [serialize_emergency_contact(contact) for contact in emergency_contacts],
+    cache.set(key, data, ttl_seconds=300)
+    return data
+
+
+def bootstrap_state(db: Session, family_id: int) -> dict[str, Any]:
+    lock = _bootstrap_locks.setdefault(family_id, Lock())
+    with lock:
+        return {
+            "family": _fetch_entity(db, "family", family_id),
+            "members": _fetch_entity(db, "members", family_id),
+            "listTypes": _fetch_entity(db, "list_types", family_id),
+            "groceryItems": _fetch_entity(db, "groceries", family_id),
+            "groceryCycles": _fetch_entity(db, "cycles", family_id),
+            "tasks": _fetch_entity(db, "tasks", family_id),
+            "meals": _fetch_entity(db, "meals", family_id),
+            "recipes": _fetch_entity(db, "recipes", family_id),
+            "notifications": _fetch_entity(db, "notifications", family_id),
+            "announcements": _fetch_entity(db, "announcements", family_id),
+            "emergencyContacts": _fetch_entity(db, "contacts", family_id),
             "assistantMessages": default_assistant_messages(),
         }
-        cache.set(key, payload, ttl_seconds=300)
-        return payload

@@ -6,6 +6,7 @@ export type ViewKey =
   | 'meals'
   | 'tasks'
   | 'family'
+  | 'analytics'
   | 'assistant'
   | 'implementation'
 
@@ -19,6 +20,7 @@ export interface NavItem {
   key: ViewKey
   label: string
   icon: LucideIcon
+  path: string
 }
 
 export interface Family {
@@ -99,6 +101,8 @@ export interface MealPlanItem {
   prepTime: number
   recipeId?: number
   colorClass: string
+  assignedTo?: number | null
+  dietaryFlags?: string[]
 }
 
 export interface Recipe {
@@ -185,4 +189,5 @@ export interface NewTaskInput {
   priority: Priority
   dueAt: string
   assignedTo: number
+  recurrenceType?: RecurrenceType
 }
