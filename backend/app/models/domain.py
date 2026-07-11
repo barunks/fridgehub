@@ -33,6 +33,7 @@ class User(Base, TimestampMixin, ActiveMixin):
     full_name: Mapped[str | None] = mapped_column(String(255))
     family_role: Mapped[str | None] = mapped_column(String(50))
     token_version: Mapped[int] = mapped_column(default=0, nullable=False)
+    max_devices: Mapped[int] = mapped_column(default=5, nullable=False)
 
     family_memberships: Mapped[list["FamilyMember"]] = relationship(back_populates="user")
     devices: Mapped[list["Device"]] = relationship(back_populates="user")

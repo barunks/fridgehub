@@ -1488,7 +1488,51 @@ def test_device_registered_audit_event() -> None:
         headers = {"Authorization": f"Bearer {r.json()['accessToken']}"}
 
         # Check audit logs for device_registered event
-        r = client.get("/api/v1/family/audit-logs?limit=10", headers=headers)
+        r = client.get("/api/v1/family/audit-logs?limit=50", headers=headers)
         logs = r.json()
         device_logs = [log for log in logs if log["action"] == "device_registered" and log["changes"].get("device_id") == unique_device_id]
         assert len(device_logs) >= 1
+
+
+def test_max_devices_per_user_limit() -> None:
+    """User cannot register more than user.max_devices (default 5) active devices."""
+    import uuid
+    from app.core.database import SessionLocal
+    from app.models import User
+
+    # Temporarily lower ava's max_devices to test the limit
+    db = SessionLocal()
+    ava = db.query(User).filter_by(username="ava").one()
+    original_max = ava.max_devices
+
+    with TestClient(app) as client:
+        # Check how many active devices ava currently has
+        login_r = client.post("/api/v1/auth/login", json={"username": "ava", "password": "familyhub"})
+        assert login_r.status_code == 200
+        headers = {"Authorization": f"Bearer {login_r.json()['accessToken']}"}
+        r = client.get("/api/v1/auth/devices", headers=headers)
+        existing_active = len([d for d in r.json() if not d["isRevoked"]])
+
+        # Set limit to existing + 1 so we can register exactly 1 more
+        ava.max_devices = existing_active + 1
+        db.commit()
+
+        try:
+            # Register one more device — should succeed
+            did1 = f"limit-ok-{uuid.uuid4().hex[:8]}"
+            r1 = client.post("/api/v1/auth/login", json={"username": "ava", "password": "familyhub", "deviceId": did1})
+            assert r1.status_code == 200
+
+            # Next new device should be rejected
+            did2 = f"limit-fail-{uuid.uuid4().hex[:8]}"
+            r2 = client.post("/api/v1/auth/login", json={"username": "ava", "password": "familyhub", "deviceId": did2})
+            assert r2.status_code == 403
+            assert "Maximum number of devices" in r2.json()["error"]["detail"]
+
+            # Existing device should still work (not a new registration)
+            r3 = client.post("/api/v1/auth/login", json={"username": "ava", "password": "familyhub", "deviceId": did1})
+            assert r3.status_code == 200
+        finally:
+            ava.max_devices = original_max
+            db.commit()
+            db.close()

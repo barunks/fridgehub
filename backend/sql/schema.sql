@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS users (
   full_name VARCHAR(255),
   family_role VARCHAR(50),
   token_version INT NOT NULL DEFAULT 0,
+  max_devices INT NOT NULL DEFAULT 5,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   is_active BOOLEAN DEFAULT TRUE,
@@ -323,3 +324,27 @@ CREATE TABLE IF NOT EXISTS emergency_contacts (
   FOREIGN KEY (family_id) REFERENCES families(id) ON DELETE CASCADE,
   INDEX idx_family (family_id)
 );
+
+-- Enforce max devices per user at DB level
+DELIMITER //
+CREATE TRIGGER trg_enforce_max_devices
+BEFORE INSERT ON devices
+FOR EACH ROW
+BEGIN
+    DECLARE device_count INT;
+    DECLARE user_max INT;
+
+    SELECT COUNT(*) INTO device_count
+    FROM devices
+    WHERE user_id = NEW.user_id AND is_active = 1 AND is_revoked = 0;
+
+    SELECT COALESCE(max_devices, 5) INTO user_max
+    FROM users
+    WHERE id = NEW.user_id;
+
+    IF device_count >= user_max THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'Maximum number of devices reached for this user';
+    END IF;
+END//
+DELIMITER ;

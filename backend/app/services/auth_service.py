@@ -88,6 +88,17 @@ def _register_device(
     if device and device.is_revoked:
         raise HTTPException(status_code=403, detail="This device has been revoked. Contact a family admin.")
     if not device:
+        # Enforce max devices per user (stored on user row, default 5)
+        active_device_count = (
+            db.query(Device)
+            .filter(Device.user_id == user.id, Device.is_active.is_(True), Device.is_revoked.is_(False))
+            .count()
+        )
+        if active_device_count >= user.max_devices:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Maximum number of devices ({user.max_devices}) reached. Revoke an existing device to register a new one.",
+            )
         device = Device(
             user_id=user.id,
             family_id=family_id,
