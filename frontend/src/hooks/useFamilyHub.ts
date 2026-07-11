@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createInitialFamilyHubState } from '@/data/seed'
 import { api } from '@/services/api'
 import type {
@@ -73,6 +73,8 @@ export const useFamilyHub = (
   const [isBackendUnavailable, setIsBackendUnavailable] = useState(false)
   const [isBrowserOffline, setIsBrowserOffline] = useState(() => (typeof navigator === 'undefined' ? false : !navigator.onLine))
   const [pagination, setPagination] = useState(createPagination)
+  const paginationRef = useRef(pagination)
+  paginationRef.current = pagination
   const [groceryPageItems, setGroceryPageItems] = useState<GroceryItem[] | null>(null)
   const [taskPageItems, setTaskPageItems] = useState<Task[] | null>(null)
   const [recipePageItems, setRecipePageItems] = useState<Recipe[] | null>(null)
@@ -214,78 +216,80 @@ export const useFamilyHub = (
     }
   }
 
-  const loadGroceryPage = (offset = pagination.groceryItems.offset, listTypeId?: number | 'all') => {
+  const loadGroceryPage = useCallback((offset?: number, listTypeId?: number | 'all') => {
     const key: PaginationKey = 'groceryItems'
-    const nextOffset = Math.max(0, offset)
+    const p = paginationRef.current[key]
+    const nextOffset = Math.max(0, offset ?? p.offset)
     setPageLoading(key, true)
     api
-      .listGroceryItems({ limit: pagination.groceryItems.limit, offset: nextOffset, listTypeId })
+      .listGroceryItems({ limit: p.limit, offset: nextOffset, listTypeId })
       .then((items) => {
         setGroceryPageItems(items)
         setIsBackendUnavailable(false)
         updatePageState(key, nextOffset, items.length)
       })
       .catch((error) => pageError(key, error))
-  }
+  }, [])
 
-  const loadTaskPage = (offset = pagination.tasks.offset, status?: string | 'all') => {
+  const loadTaskPage = useCallback((offset?: number, status?: string | 'all') => {
     const key: PaginationKey = 'tasks'
-    const nextOffset = Math.max(0, offset)
+    const p = paginationRef.current[key]
+    const nextOffset = Math.max(0, offset ?? p.offset)
     setPageLoading(key, true)
     api
-      .listTasks({ limit: pagination.tasks.limit, offset: nextOffset, status })
+      .listTasks({ limit: p.limit, offset: nextOffset, status })
       .then((items) => {
         setTaskPageItems(items)
         setIsBackendUnavailable(false)
         updatePageState(key, nextOffset, items.length)
       })
       .catch((error) => pageError(key, error))
-  }
+  }, [])
 
-  const loadRecipePage = (offset = pagination.recipes.offset) => {
+  const loadRecipePage = useCallback((offset?: number) => {
     const key: PaginationKey = 'recipes'
-    const nextOffset = Math.max(0, offset)
+    const p = paginationRef.current[key]
+    const nextOffset = Math.max(0, offset ?? p.offset)
     setPageLoading(key, true)
     api
-      .listRecipes({ limit: pagination.recipes.limit, offset: nextOffset })
+      .listRecipes({ limit: p.limit, offset: nextOffset })
       .then((items) => {
         setRecipePageItems(items)
         setIsBackendUnavailable(false)
         updatePageState(key, nextOffset, items.length)
       })
       .catch((error) => pageError(key, error))
-  }
+  }, [])
 
-  const loadNotificationPage = (offset = pagination.notifications.offset, unreadOnly = false) => {
+  const loadNotificationPage = useCallback((offset?: number, unreadOnly = false) => {
     const key: PaginationKey = 'notifications'
-    const nextOffset = Math.max(0, offset)
+    const p = paginationRef.current[key]
+    const nextOffset = Math.max(0, offset ?? p.offset)
     setPageLoading(key, true)
     api
-      .listNotifications({ limit: pagination.notifications.limit, offset: nextOffset, unreadOnly })
+      .listNotifications({ limit: p.limit, offset: nextOffset, unreadOnly })
       .then((items) => {
         setNotificationPageItems(items)
         setIsBackendUnavailable(false)
         updatePageState(key, nextOffset, items.length)
       })
       .catch((error) => pageError(key, error))
-  }
+  }, [])
 
-  const loadAuditLogs = (offset = pagination.auditLogs.offset, entityType?: string) => {
-    if (!guardPermission('view_audit')) {
-      return
-    }
+  const loadAuditLogs = useCallback((offset?: number, entityType?: string) => {
     const key: PaginationKey = 'auditLogs'
-    const nextOffset = Math.max(0, offset)
+    const p = paginationRef.current[key]
+    const nextOffset = Math.max(0, offset ?? p.offset)
     setPageLoading(key, true)
     api
-      .listAuditLogs({ limit: pagination.auditLogs.limit, offset: nextOffset, entityType })
+      .listAuditLogs({ limit: p.limit, offset: nextOffset, entityType })
       .then((items) => {
         setAuditLogs(items)
         setIsBackendUnavailable(false)
         updatePageState(key, nextOffset, items.length)
       })
       .catch((error) => pageError(key, error))
-  }
+  }, [])
 
   useEffect(() => {
     refreshFromApi()

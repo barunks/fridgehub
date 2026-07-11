@@ -26,7 +26,7 @@ const emptyItem: NewGroceryItemInput = {
 type Tab = 'master' | 'shopping'
 
 export const GroceryView = ({ store }: { store: FamilyHubStore }) => {
-  const { state, addGroceryItem, addListType, regenerateGroceryCycles, toggleCurrentStock, toggleGroceryPurchased } = store
+  const { state, addGroceryItem, addListType, loadGroceryPage, regenerateGroceryCycles, toggleCurrentStock, toggleGroceryPurchased } = store
   const canManageGroceries = store.can('manage_groceries')
   const page = store.pagination.groceryItems
   const pageItems = store.paged.groceryItems ?? state.groceryItems
@@ -39,8 +39,8 @@ export const GroceryView = ({ store }: { store: FamilyHubStore }) => {
   const [showAddPlace, setShowAddPlace] = useState(false)
 
   useEffect(() => {
-    store.loadGroceryPage(0, selectedListId)
-  }, [store, selectedListId])
+    loadGroceryPage(0, selectedListId)
+  }, [loadGroceryPage, selectedListId])
 
   const filteredItems = useMemo(() => {
     const normalized = search.toLowerCase().trim()

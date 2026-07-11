@@ -19,7 +19,7 @@ const mealColumns: { key: MealType; label: string }[] = [
 const dayOrder = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
 
 export const MealPlanView = ({ store }: { store: FamilyHubStore }) => {
-  const { state, mealsByDay, updateMeal, applyWeeklyTemplate } = store
+  const { state, mealsByDay, updateMeal, applyWeeklyTemplate, loadRecipePage } = store
   const canManageMeals = store.can('manage_meals')
   const page = store.pagination.recipes
   const recipes = store.paged.recipes ?? state.recipes
@@ -28,8 +28,8 @@ export const MealPlanView = ({ store }: { store: FamilyHubStore }) => {
   const [draftName, setDraftName] = useState(selectedMeal?.mealName ?? '')
 
   useEffect(() => {
-    store.loadRecipePage(0)
-  }, [store])
+    loadRecipePage(0)
+  }, [loadRecipePage])
 
   const mealStats = useMemo(() => {
     const averagePrep = Math.round(

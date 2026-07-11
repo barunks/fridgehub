@@ -10,7 +10,7 @@ import type { FamilyHubStore } from '@/hooks/useFamilyHub'
 import { formatCompactDate } from '@/utils/date'
 
 export const FamilyView = ({ store }: { store: FamilyHubStore }) => {
-  const { state, addAnnouncement, markNotificationRead } = store
+  const { state, addAnnouncement, markNotificationRead, loadNotificationPage, loadAuditLogs } = store
   const canManageAnnouncements = store.can('manage_announcements')
   const canViewAudit = store.can('view_audit')
   const notifications = store.paged.notifications ?? state.notifications
@@ -20,14 +20,14 @@ export const FamilyView = ({ store }: { store: FamilyHubStore }) => {
   const [message, setMessage] = useState('')
 
   useEffect(() => {
-    store.loadNotificationPage(0)
-  }, [store])
+    loadNotificationPage(0)
+  }, [loadNotificationPage])
 
   useEffect(() => {
     if (canViewAudit) {
-      store.loadAuditLogs(0)
+      loadAuditLogs(0)
     }
-  }, [store, canViewAudit])
+  }, [loadAuditLogs, canViewAudit])
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
