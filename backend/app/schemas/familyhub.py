@@ -2,7 +2,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 Priority = Literal["low", "medium", "high"]
 TaskStatus = Literal["pending", "in_progress", "completed", "cancelled"]
@@ -40,22 +40,37 @@ class ValidationErrorResponse(CamelModel):
 
 class TokenResponse(CamelModel):
     accessToken: str
-    refreshToken: str
+    refreshToken: str | None = None
     tokenType: str = "bearer"
 
 
 class RefreshRequest(CamelModel):
-    refreshToken: str
+    refreshToken: str | None = None
+    familyId: int | None = None
 
 
 class LoginRequest(CamelModel):
     username: str
     password: str
+    familyId: int | None = None
+
+
+def validate_password_strength(value: str) -> str:
+    if any(character.isspace() for character in value):
+        raise ValueError("Password cannot contain whitespace")
+    if not any(character.isalpha() for character in value) or not any(character.isdigit() for character in value):
+        raise ValueError("Password must include at least one letter and one number")
+    return value
 
 
 class ChangePasswordRequest(CamelModel):
     currentPassword: str = Field(min_length=1)
     newPassword: str = Field(min_length=8, max_length=128)
+
+    @field_validator("newPassword")
+    @classmethod
+    def validate_new_password(cls, value: str) -> str:
+        return validate_password_strength(value)
 
 
 class FamilyOut(CamelModel):
@@ -70,6 +85,7 @@ class FamilyMemberOut(CamelModel):
     id: int
     name: str
     role: str
+    permissions: list[str] = []
     colorClass: str
     initial: str
     status: str
@@ -83,18 +99,32 @@ class FamilyMemberCreate(CamelModel):
     username: str = Field(min_length=2, max_length=100)
     password: str = Field(min_length=8, max_length=128)
     role: str = "member"
+    permissions: list[str] | None = None
     status: str = "Active"
     colorClass: str = "bg-slate-500"
     dietaryNotes: list[str] | None = None
+
+    @field_validator("password")
+    @classmethod
+    def validate_member_password(cls, value: str) -> str:
+        return validate_password_strength(value)
 
 
 class FamilyMemberUpdate(CamelModel):
     name: str | None = None
     role: str | None = None
+    permissions: list[str] | None = None
     status: str | None = None
     colorClass: str | None = None
     points: int | None = None
     dietaryNotes: list[str] | None = None
+
+
+class CurrentSessionOut(CamelModel):
+    userId: int
+    familyId: int
+    role: str
+    capabilities: list[str]
 
 
 class GroceryListTypeOut(CamelModel):
@@ -161,6 +191,7 @@ class GroceryItemOut(CamelModel):
     notes: str
     familyId: int
     purchased: bool
+    needsPurchase: bool
 
 
 class GroceryItemCreate(CamelModel):
@@ -214,6 +245,7 @@ class TaskCreate(CamelModel):
     category: str = "chore"
     priority: Priority = "medium"
     dueAt: datetime
+    reminderAt: datetime | None = None
     assignedTo: int
     description: str | None = None
     recurrenceType: RecurrenceType = "none"
@@ -362,7 +394,21 @@ class AssistantResponse(CamelModel):
     insights: list[AssistantInsightOut]
 
 
+class AuditLogOut(CamelModel):
+    id: int
+    userId: int | None = None
+    action: str | None = None
+    entityType: str | None = None
+    entityId: str | None = None
+    changes: dict | None = None
+    ipAddress: str | None = None
+    userAgent: str | None = None
+    createdAt: datetime
+
+
 class BootstrapState(CamelModel):
+    currentUser: CurrentSessionOut
+    capabilities: list[str]
     family: FamilyOut
     members: list[FamilyMemberOut]
     listTypes: list[GroceryListTypeOut]
@@ -375,3 +421,4 @@ class BootstrapState(CamelModel):
     announcements: list[AnnouncementOut]
     emergencyContacts: list[EmergencyContactOut]
     assistantMessages: list[AssistantMessageOut]
+    assistantInsights: list[AssistantInsightOut]

@@ -7,6 +7,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.cache import cache, cache_key
+from app.core.permissions import effective_permissions
 from app.models import (
     Announcement,
     EmergencyContact,
@@ -20,7 +21,9 @@ from app.models import (
     Notification,
     Recipe,
     Task,
+    User,
 )
+from app.services.assistant_rules import generate_insights
 
 _bootstrap_locks: dict[int, Lock] = {}
 
@@ -29,19 +32,20 @@ ENTITIES = ("members", "list_types", "groceries", "cycles", "tasks", "meals", "r
 
 
 def _entity_key(entity: str, family_id: int) -> str:
-    return cache_key(entity, family_id=family_id)
+    namespace = f"family:{family_id}:{entity}"
+    version = cache.namespace_version(namespace)
+    return cache_key(entity, family_id=family_id, version=version)
 
 
 def invalidate_entity(entity: str, family_id: int) -> None:
     """Invalidate a single entity cache for a family."""
-    cache.delete(_entity_key(entity, family_id))
+    cache.bump_namespace(f"family:{family_id}:{entity}")
 
 
 def invalidate_family_cache(family_id: int) -> None:
     """Invalidate all entity caches for a family (used for bulk operations)."""
-    for entity in ENTITIES:
-        cache.delete(_entity_key(entity, family_id))
-    cache.delete(_entity_key("family", family_id))
+    for entity in (*ENTITIES, "family"):
+        invalidate_entity(entity, family_id)
 
 
 def _number(value: Decimal | int | float | None) -> float:
@@ -70,6 +74,7 @@ def serialize_member(member: FamilyMember) -> dict[str, Any]:
         "id": member.user_id,
         "name": member.user.full_name or member.user.username,
         "role": member.role,
+        "permissions": sorted(effective_permissions(member.role, member.permissions)),
         "colorClass": member.color_class,
         "initial": member.initial,
         "status": member.status,
@@ -89,6 +94,8 @@ def serialize_list_type(list_type: GroceryListType) -> dict[str, Any]:
 
 
 def item_is_purchased(item: GroceryItem) -> bool:
+    if not item.is_active:
+        return False
     active_sub_items = [sub_item for sub_item in item.sub_list_items if sub_item.purchase_cycle and not sub_item.purchase_cycle.is_completed]
     if not active_sub_items:
         return False
@@ -96,6 +103,7 @@ def item_is_purchased(item: GroceryItem) -> bool:
 
 
 def serialize_grocery_item(item: GroceryItem) -> dict[str, Any]:
+    purchased = item_is_purchased(item)
     return {
         "id": item.id,
         "itemNumber": item.item_number,
@@ -109,7 +117,8 @@ def serialize_grocery_item(item: GroceryItem) -> dict[str, Any]:
         "expiryDate": item.expiry_date,
         "notes": item.notes or "",
         "familyId": item.family_id,
-        "purchased": item_is_purchased(item),
+        "purchased": purchased,
+        "needsPurchase": not item.current_stock and not purchased,
     }
 
 
@@ -235,13 +244,19 @@ def _fetch_entity(db: Session, entity: str, family_id: int) -> Any:
             raise HTTPException(status_code=404, detail="Family not found")
         data = serialize_family(family)
     elif entity == "members":
-        family = (
-            db.query(Family)
-            .options(selectinload(Family.members).selectinload(FamilyMember.user))
-            .filter(Family.id == family_id)
-            .first()
+        members = (
+            db.query(FamilyMember)
+            .options(selectinload(FamilyMember.user))
+            .join(User, FamilyMember.user_id == User.id)
+            .filter(
+                FamilyMember.family_id == family_id,
+                FamilyMember.is_active.is_(True),
+                User.is_active.is_(True),
+            )
+            .order_by(FamilyMember.id)
+            .all()
         )
-        data = [serialize_member(m) for m in (family.members if family else [])]
+        data = [serialize_member(m) for m in members]
     elif entity == "list_types":
         data = [serialize_list_type(lt) for lt in db.query(GroceryListType).filter_by(family_id=family_id, is_active=True).order_by(GroceryListType.id).all()]
     elif entity == "groceries":
@@ -254,7 +269,21 @@ def _fetch_entity(db: Session, entity: str, family_id: int) -> Any:
         )
         data = [serialize_grocery_item(i) for i in items]
     elif entity == "cycles":
-        data = [serialize_cycle(c) for c in db.query(GroceryPurchaseCycle).filter_by(family_id=family_id).order_by(GroceryPurchaseCycle.id).all()]
+        cycles = (
+            db.query(GroceryPurchaseCycle)
+            .join(GroceryListType, GroceryPurchaseCycle.list_type_id == GroceryListType.id)
+            .join(GrocerySubList, GrocerySubList.purchase_cycle_id == GroceryPurchaseCycle.id)
+            .join(GroceryItem, GrocerySubList.item_id == GroceryItem.id)
+            .filter(
+                GroceryPurchaseCycle.family_id == family_id,
+                GroceryListType.is_active.is_(True),
+                GroceryItem.is_active.is_(True),
+            )
+            .distinct()
+            .order_by(GroceryPurchaseCycle.id)
+            .all()
+        )
+        data = [serialize_cycle(c) for c in cycles]
     elif entity == "tasks":
         data = [serialize_task(t) for t in db.query(Task).filter_by(family_id=family_id, is_active=True).order_by(Task.due_date).all()]
     elif entity == "meals":
@@ -277,7 +306,7 @@ def _fetch_entity(db: Session, entity: str, family_id: int) -> Any:
 def bootstrap_state(db: Session, family_id: int) -> dict[str, Any]:
     lock = _bootstrap_locks.setdefault(family_id, Lock())
     with lock:
-        return {
+        state = {
             "family": _fetch_entity(db, "family", family_id),
             "members": _fetch_entity(db, "members", family_id),
             "listTypes": _fetch_entity(db, "list_types", family_id),
@@ -291,3 +320,5 @@ def bootstrap_state(db: Session, family_id: int) -> dict[str, Any]:
             "emergencyContacts": _fetch_entity(db, "contacts", family_id),
             "assistantMessages": default_assistant_messages(),
         }
+        state["assistantInsights"] = generate_insights(state)
+        return state

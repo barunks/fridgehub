@@ -14,7 +14,6 @@ import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import type { FamilyHubStore } from '@/hooks/useFamilyHub'
-import { generateAssistantInsights } from '@/services/assistantEngine'
 import type { ViewKey } from '@/types/familyHub'
 import { formatDueLabel } from '@/utils/date'
 import { cn } from '@/utils/style'
@@ -29,31 +28,33 @@ const StatCard = ({
   value,
   icon: Icon,
   toneClass,
+  iconBg,
   onClick,
 }: {
   label: string
   value: number | string
   icon: typeof CalendarClock
   toneClass: string
+  iconBg: string
   onClick?: () => void
 }) => {
   const Wrapper = onClick ? 'button' : 'div'
   return (
     <Wrapper
       className={cn(
-        'rounded-lg border border-slate-200 bg-white shadow-sm text-left w-full',
-        onClick && 'cursor-pointer transition hover:border-blue-300 hover:shadow-md',
+        'group rounded-2xl border border-slate-200/60 bg-white/90 shadow-sm text-left w-full backdrop-blur-sm transition-all duration-200',
+        onClick && 'cursor-pointer hover:shadow-lg hover:scale-[1.02] hover:border-slate-300/80',
       )}
       onClick={onClick}
       type={onClick ? 'button' : undefined}
     >
-      <div className="flex items-center gap-4 px-5 py-4">
-        <div className={cn('flex size-12 items-center justify-center rounded-lg', toneClass)}>
-          <Icon className="size-6" aria-hidden="true" />
+      <div className="flex items-center gap-4 px-5 py-5">
+        <div className={cn('flex size-12 items-center justify-center rounded-2xl transition-transform duration-200 group-hover:scale-110', iconBg)}>
+          <Icon className={cn('size-5', toneClass)} aria-hidden="true" />
         </div>
         <div>
-          <p className="text-sm text-slate-500">{label}</p>
-          <p className="text-2xl font-bold text-slate-950">{value}</p>
+          <p className="text-xs font-medium tracking-wide text-slate-400">{label}</p>
+          <p className="text-2xl font-bold tracking-tight text-slate-900">{value}</p>
         </div>
       </div>
     </Wrapper>
@@ -62,51 +63,57 @@ const StatCard = ({
 
 export const DashboardView = ({ store, onNavigate }: DashboardViewProps) => {
   const { state, stats, toggleTaskStatus, toggleGroceryPurchased } = store
-  const insights = generateAssistantInsights(state)
+  const insights = state.assistantInsights
+  const canManageTasks = store.can('manage_tasks')
+  const canManageGroceries = store.can('manage_groceries')
   const completionRate =
     state.tasks.length === 0 ? 0 : Math.round((stats.completedTasks.length / state.tasks.length) * 100)
   const rewardStars = state.members.reduce((total, member) => total + member.points, 0)
 
   return (
-    <div className="grid gap-5">
+    <div className="grid gap-6">
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <StatCard
           icon={CalendarClock}
+          iconBg="bg-indigo-50"
           label="Tasks today"
           onClick={() => onNavigate('tasks')}
-          toneClass="bg-blue-50 text-blue-600"
+          toneClass="text-indigo-600"
           value={stats.todayTasks.length}
         />
         <StatCard
           icon={ShoppingBag}
+          iconBg="bg-amber-50"
           label="Pending purchases"
           onClick={() => onNavigate('groceries')}
-          toneClass="bg-amber-50 text-amber-600"
+          toneClass="text-amber-600"
           value={stats.pendingPurchases.length}
         />
         <StatCard
           icon={AlertTriangle}
+          iconBg="bg-rose-50"
           label="Expiring items"
           onClick={() => onNavigate('groceries')}
-          toneClass="bg-rose-50 text-rose-600"
+          toneClass="text-rose-500"
           value={stats.expiringItems.length}
         />
         <StatCard
           icon={ChefHat}
+          iconBg="bg-emerald-50"
           label="Meals today"
           onClick={() => onNavigate('meals')}
-          toneClass="bg-emerald-50 text-emerald-600"
+          toneClass="text-emerald-600"
           value={stats.todayMeals.length}
         />
       </div>
 
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1.45fr)_minmax(360px,0.8fr)]">
-        <div className="grid gap-5">
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1.45fr)_minmax(360px,0.8fr)]">
+        <div className="grid gap-6">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between gap-3">
               <div>
                 <CardTitle>Today</CardTitle>
-                <p className="mt-1 text-sm text-slate-500">Agenda, reminders, traffic, and weather risk</p>
+                <p className="mt-1 text-xs text-slate-400">Agenda, reminders, and progress</p>
               </div>
               <Badge tone="green">{completionRate}% complete</Badge>
             </CardHeader>
@@ -116,34 +123,35 @@ export const DashboardView = ({ store, onNavigate }: DashboardViewProps) => {
 
                 return (
                   <div
-                    className="grid gap-3 rounded-lg border border-slate-100 bg-slate-50 p-3 sm:grid-cols-[1fr_auto]"
+                    className="group grid gap-3 rounded-xl border border-slate-100/80 bg-slate-50/50 p-4 transition-all duration-200 hover:bg-white hover:shadow-sm hover:border-slate-200 sm:grid-cols-[1fr_auto]"
                     key={task.id}
                   >
                     <div className="flex min-w-0 items-center gap-3">
                       {member && (
                         <Avatar
-                          className="size-11"
+                          className="size-10"
                           colorClass={member.colorClass}
                           initial={member.initial}
                           label={member.name}
                         />
                       )}
                       <div className="min-w-0">
-                        <p className="truncate font-semibold text-slate-950">{task.title}</p>
-                        <p className="text-sm text-slate-500">
-                          {member?.name ?? 'Unassigned'} - {formatDueLabel(task.dueAt)}
+                        <p className="truncate text-sm font-semibold text-slate-900">{task.title}</p>
+                        <p className="text-xs text-slate-400">
+                          {member?.name ?? 'Unassigned'} · {formatDueLabel(task.dueAt)}
                         </p>
                       </div>
                     </div>
                     <div className="flex items-center gap-2 sm:justify-end">
-                      {task.actionLabel && <Badge tone={task.priority === 'high' ? 'rose' : 'blue'}>{task.actionLabel}</Badge>}
+                      {task.actionLabel && <Badge tone={task.priority === 'high' ? 'rose' : 'indigo'}>{task.actionLabel}</Badge>}
                       <button
                         className={cn(
-                          'flex size-9 items-center justify-center rounded-md border transition',
+                          'flex size-9 items-center justify-center rounded-xl border transition-all duration-200',
                           task.status === 'completed'
                             ? 'border-emerald-200 bg-emerald-50 text-emerald-600'
-                            : 'border-slate-200 bg-white text-slate-400 hover:text-blue-600',
+                            : 'border-slate-200 bg-white text-slate-300 hover:text-indigo-600 hover:border-indigo-200 hover:shadow-sm',
                         )}
+                        disabled={!canManageTasks}
                         onClick={() => toggleTaskStatus(task.id)}
                         title="Toggle complete"
                         type="button"
@@ -161,7 +169,7 @@ export const DashboardView = ({ store, onNavigate }: DashboardViewProps) => {
             <Card>
               <CardHeader>
                 <CardTitle>Tasks</CardTitle>
-                <p className="mt-1 text-sm text-slate-500">Chores and rewards</p>
+                <p className="mt-1 text-xs text-slate-400">Chores and rewards</p>
               </CardHeader>
               <CardContent className="grid gap-4">
                 {state.tasks
@@ -172,38 +180,38 @@ export const DashboardView = ({ store, onNavigate }: DashboardViewProps) => {
 
                     return (
                       <div key={task.id}>
-                        <div className="mb-2 flex items-center justify-between text-sm">
-                          <span className="font-medium text-slate-800">
+                        <div className="mb-2 flex items-center justify-between text-xs">
+                          <span className="font-medium text-slate-700">
                             {member?.name}: {task.title.toLowerCase()}
                           </span>
                           <span className="text-slate-400">{task.status === 'completed' ? 'done' : 'open'}</span>
                         </div>
-                        <div className="h-2 rounded-full bg-slate-100">
+                        <div className="h-2 overflow-hidden rounded-full bg-slate-100">
                           <div
                             className={cn(
-                              'h-2 rounded-full',
-                              task.status === 'completed' ? 'w-full bg-emerald-500' : 'w-3/4 bg-violet-500',
+                              'h-2 rounded-full transition-all duration-500',
+                              task.status === 'completed' ? 'w-full bg-emerald-500' : 'w-3/4 bg-gradient-to-r from-violet-500 to-indigo-500',
                             )}
                           />
                         </div>
                       </div>
                     )
                   })}
-                <p className="text-sm text-slate-500">Rewards: {rewardStars} stars</p>
+                <p className="text-xs font-medium text-slate-400">⭐ {rewardStars} reward stars</p>
               </CardContent>
             </Card>
 
             <Card>
               <CardHeader>
                 <CardTitle>Meals</CardTitle>
-                <p className="mt-1 text-sm text-slate-500">Plans and recipes</p>
+                <p className="mt-1 text-xs text-slate-400">Plans and recipes</p>
               </CardHeader>
               <CardContent>
                 <Badge tone="amber">Dinner suggestion</Badge>
-                <p className="mt-3 text-xl font-semibold text-slate-950">
+                <p className="mt-3 text-lg font-bold tracking-tight text-slate-900">
                   {stats.todayMeals.find((m) => m.mealType === 'dinner')?.mealName || 'No dinner planned'}
                 </p>
-                <p className="mt-1 text-sm text-slate-500">
+                <p className="mt-1 text-xs text-slate-400">
                   {stats.todayMeals.find((m) => m.mealType === 'dinner')?.description || 'Add a meal to your plan'}
                 </p>
                 <Button className="mt-4 w-full" onClick={() => onNavigate('meals')} variant="secondary">
@@ -216,20 +224,21 @@ export const DashboardView = ({ store, onNavigate }: DashboardViewProps) => {
             <Card>
               <CardHeader>
                 <CardTitle>Groceries</CardTitle>
-                <p className="mt-1 text-sm text-slate-500">Lists and expiry</p>
+                <p className="mt-1 text-xs text-slate-400">Lists and expiry</p>
               </CardHeader>
               <CardContent className="grid gap-3">
                 {state.groceryItems.slice(0, 3).map((item) => (
-                  <label className="flex items-start gap-3 text-sm" key={item.id}>
+                  <label className="group flex cursor-pointer items-start gap-3 text-sm" key={item.id}>
                     <input
                       checked={item.purchased}
-                      className="mt-1 size-4 rounded border-slate-300 text-blue-600"
+                      className="mt-0.5 size-4 rounded-md border-slate-300 text-indigo-600 transition focus:ring-indigo-200"
+                      disabled={!canManageGroceries}
                       onChange={() => toggleGroceryPurchased(item.id)}
                       type="checkbox"
                     />
                     <span>
-                      <span className="block font-semibold text-slate-900">{item.itemName}</span>
-                      <span className="block text-slate-500">{item.notes}</span>
+                      <span className={cn('block text-sm font-medium text-slate-800 transition-colors', item.purchased && 'line-through text-slate-400')}>{item.itemName}</span>
+                      <span className="block text-xs text-slate-400">{item.notes}</span>
                     </span>
                   </label>
                 ))}
@@ -243,23 +252,25 @@ export const DashboardView = ({ store, onNavigate }: DashboardViewProps) => {
             <CardHeader className="flex flex-row items-center justify-between gap-3">
               <div>
                 <CardTitle>Family Assistant</CardTitle>
-                <p className="mt-1 text-sm text-slate-500">Smart recommendations</p>
+                <p className="mt-1 text-xs text-slate-400">Smart recommendations</p>
               </div>
-              <Sparkles className="size-5 text-blue-600" aria-hidden="true" />
+              <div className="flex size-9 items-center justify-center rounded-xl bg-indigo-50">
+                <Sparkles className="size-4 text-indigo-600" aria-hidden="true" />
+              </div>
             </CardHeader>
             <CardContent className="grid gap-3">
               {insights.map((insight) => (
                 <button
-                  className="grid gap-2 rounded-lg border border-slate-100 bg-white p-3 text-left shadow-sm transition hover:border-blue-200 hover:bg-blue-50/40"
+                  className="group grid gap-2 rounded-xl border border-slate-100/80 bg-white p-4 text-left shadow-sm transition-all duration-200 hover:border-indigo-200/60 hover:bg-indigo-50/30 hover:shadow-md"
                   key={insight.id}
                   onClick={() => onNavigate('assistant')}
                   type="button"
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <span className="font-semibold text-slate-950">{insight.title}</span>
-                    <Badge tone={insight.confidence > 85 ? 'green' : 'blue'}>{insight.confidence}%</Badge>
+                    <span className="text-sm font-semibold text-slate-900">{insight.title}</span>
+                    <Badge tone={insight.confidence > 85 ? 'green' : 'indigo'}>{insight.confidence}%</Badge>
                   </div>
-                  <p className="text-sm leading-6 text-slate-600">{insight.body}</p>
+                  <p className="text-xs leading-5 text-slate-500">{insight.body}</p>
                 </button>
               ))}
             </CardContent>
@@ -267,17 +278,17 @@ export const DashboardView = ({ store, onNavigate }: DashboardViewProps) => {
 
           <Card>
             <CardHeader>
-              <CardTitle>Family Announcements</CardTitle>
-              <p className="mt-1 text-sm text-slate-500">Shared messages</p>
+              <CardTitle>Announcements</CardTitle>
+              <p className="mt-1 text-xs text-slate-400">Shared messages</p>
             </CardHeader>
             <CardContent className="grid gap-3">
               {state.announcements.map((announcement) => (
-                <div className="rounded-lg border border-slate-100 bg-slate-50 p-3" key={announcement.id}>
+                <div className="rounded-xl border border-slate-100/80 bg-slate-50/50 p-4 transition-all duration-200 hover:bg-white hover:shadow-sm" key={announcement.id}>
                   <div className="flex items-center gap-2">
-                    <MessageSquareText className="size-4 text-blue-600" aria-hidden="true" />
-                    <p className="font-semibold text-slate-900">{announcement.title}</p>
+                    <MessageSquareText className="size-4 text-indigo-500" aria-hidden="true" />
+                    <p className="text-sm font-semibold text-slate-800">{announcement.title}</p>
                   </div>
-                  <p className="mt-1 text-sm text-slate-500">{announcement.message}</p>
+                  <p className="mt-1.5 text-xs text-slate-400">{announcement.message}</p>
                 </div>
               ))}
             </CardContent>
@@ -286,16 +297,16 @@ export const DashboardView = ({ store, onNavigate }: DashboardViewProps) => {
           <Card>
             <CardHeader>
               <CardTitle>Family</CardTitle>
-              <p className="mt-1 text-sm text-slate-500">Health, events, and roles</p>
+              <p className="mt-1 text-xs text-slate-400">Health, events, and roles</p>
             </CardHeader>
             <CardContent>
               <div className="grid grid-cols-2 gap-3">
                 {state.members.map((member) => (
-                  <div className="flex items-center gap-2 rounded-lg bg-slate-50 p-3" key={member.id}>
-                    <Avatar colorClass={member.colorClass} initial={member.initial} label={member.name} />
+                  <div className="group flex items-center gap-2.5 rounded-xl bg-slate-50/80 p-3 transition-all duration-200 hover:bg-white hover:shadow-sm" key={member.id}>
+                    <Avatar className="size-9" colorClass={member.colorClass} initial={member.initial} label={member.name} />
                     <div className="min-w-0">
-                      <p className="truncate font-semibold text-slate-950">{member.name}</p>
-                      <p className="truncate text-xs text-slate-500">{member.status}</p>
+                      <p className="truncate text-sm font-semibold text-slate-900">{member.name}</p>
+                      <p className="truncate text-[11px] text-slate-400">{member.status}</p>
                     </div>
                   </div>
                 ))}
@@ -307,17 +318,17 @@ export const DashboardView = ({ store, onNavigate }: DashboardViewProps) => {
             </CardContent>
           </Card>
 
-          <Card className="border-blue-100 bg-blue-50/60">
+          <Card className="border-indigo-100/60 bg-indigo-50/40">
             <CardContent className="flex items-start gap-3">
-              <Clock className="mt-1 size-5 text-blue-600" aria-hidden="true" />
-              <div>
-                <p className="font-semibold text-slate-950">Task completion</p>
-                <p className="text-sm text-slate-600">
-                  {stats.completedTasks.length} of {state.tasks.length} tasks completed this cycle.
+              <Clock className="mt-0.5 size-5 text-indigo-600" aria-hidden="true" />
+              <div className="flex-1">
+                <p className="text-sm font-semibold text-slate-900">Task completion</p>
+                <p className="mt-0.5 text-xs text-slate-500">
+                  {stats.completedTasks.length} of {state.tasks.length} tasks completed this cycle
                 </p>
-                <div className="mt-3 h-2 rounded-full bg-white">
+                <div className="mt-3 h-2.5 overflow-hidden rounded-full bg-white/80">
                   <div
-                    className="h-2 rounded-full bg-sky-500 transition-all"
+                    className="h-2.5 rounded-full bg-gradient-to-r from-indigo-500 to-blue-500 transition-all duration-500"
                     style={{ width: `${completionRate}%` }}
                   />
                 </div>

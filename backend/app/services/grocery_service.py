@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 from fastapi import HTTPException
@@ -185,8 +185,18 @@ def get_item(db: Session, item_id: int, family_id: int) -> dict:
     return serialize_grocery_item(item)
 
 
+def _cycle_start_for_item(item: GroceryItem, today: date | None = None) -> date:
+    current = today or date.today()
+    anchor = item.start_date or current
+    if current < anchor:
+        return anchor
+    days = {"daily": 1, "weekly": 7, "monthly": 30, "quarterly": 90}.get(item.purchase_frequency, 7)
+    elapsed = (current - anchor).days
+    return anchor + timedelta(days=(elapsed // days) * days)
+
+
 def _ensure_cycle_for_item(db: Session, item: GroceryItem) -> GroceryPurchaseCycle:
-    start = date.today()
+    start = _cycle_start_for_item(item)
     cycle = (
         db.query(GroceryPurchaseCycle)
         .filter_by(
@@ -210,14 +220,15 @@ def _ensure_cycle_for_item(db: Session, item: GroceryItem) -> GroceryPurchaseCyc
 
     existing_sub_item = db.query(GrocerySubList).filter_by(purchase_cycle_id=cycle.id, item_id=item.id).first()
     if not existing_sub_item:
+        satisfied = bool(item.current_stock)
         db.add(
             GrocerySubList(
                 purchase_cycle_id=cycle.id,
                 item_id=item.id,
                 quantity=item.quantity,
                 unit=item.unit,
-                is_purchased=False,
-                purchased_quantity=Decimal("0.00"),
+                is_purchased=satisfied,
+                purchased_quantity=item.quantity if satisfied else Decimal("0.00"),
                 notes=item.notes,
             )
         )
@@ -228,7 +239,7 @@ def _ensure_cycle_for_item(db: Session, item: GroceryItem) -> GroceryPurchaseCyc
 
 def create_item(db: Session, payload: GroceryItemCreate, family_id: int, user_id: int) -> dict:
     list_type = db.get(GroceryListType, payload.listTypeId)
-    if not list_type or list_type.family_id != family_id:
+    if not list_type or list_type.family_id != family_id or not list_type.is_active:
         raise HTTPException(status_code=404, detail="Grocery list type not found")
 
     item = GroceryItem(
@@ -275,7 +286,7 @@ def create_item(db: Session, payload: GroceryItemCreate, family_id: int, user_id
 
 def update_item(db: Session, item_id: int, payload: GroceryItemUpdate, family_id: int, user_id: int) -> dict:
     item = db.get(GroceryItem, item_id)
-    if not item or item.family_id != family_id:
+    if not item or item.family_id != family_id or not item.is_active:
         raise HTTPException(status_code=404, detail="Grocery item not found")
 
     updates = payload.model_dump(exclude_unset=True)
@@ -300,6 +311,8 @@ def update_item(db: Session, item_id: int, payload: GroceryItemUpdate, family_id
     if "purchased" in updates:
         _set_item_purchased(db, item, bool(updates["purchased"]))
         item.current_stock = bool(updates["purchased"])
+    elif "currentStock" in updates:
+        _set_item_purchased(db, item, bool(updates["currentStock"]))
 
     _ensure_cycle_for_item(db, item)
     write_audit_log(
@@ -328,9 +341,11 @@ def _set_item_purchased(db: Session, item: GroceryItem, purchased: bool) -> None
 
 def delete_item(db: Session, item_id: int, family_id: int, user_id: int) -> None:
     item = db.get(GroceryItem, item_id)
-    if not item or item.family_id != family_id:
+    if not item or item.family_id != family_id or not item.is_active:
         raise HTTPException(status_code=404, detail="Grocery item not found")
     item.is_active = False
+    for sub_item in item.sub_list_items:
+        sub_item.is_purchased = False
     write_audit_log(
         db,
         user_id=user_id,
@@ -341,6 +356,7 @@ def delete_item(db: Session, item_id: int, family_id: int, user_id: int) -> None
     )
     db.commit()
     invalidate_entity("groceries", family_id)
+    invalidate_entity("cycles", family_id)
 
 
 def regenerate_cycles(db: Session, family_id: int, user_id: int | None = None) -> list[dict]:
@@ -350,7 +366,7 @@ def regenerate_cycles(db: Session, family_id: int, user_id: int | None = None) -
     carry_forward_items: list[tuple[int, int]] = []  # (item_id, list_type_id)
     for cycle in db.query(GroceryPurchaseCycle).filter_by(family_id=family_id, is_completed=False).all():
         for sub_item in cycle.sub_list_items:
-            if not sub_item.is_purchased:
+            if sub_item.item and sub_item.item.is_active and not sub_item.item.current_stock and not sub_item.is_purchased:
                 carry_forward_items.append((sub_item.item_id, cycle.list_type_id))
         cycle.is_completed = True
     db.flush()

@@ -1,8 +1,9 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from app.core.dependencies import CurrentUser, get_current_user, require_parent
+from app.core.dependencies import CurrentUser, get_current_user, require_permission
 from app.core.database import get_db
+from app.core.permissions import Permission
 from app.schemas.familyhub import ErrorResponse, TaskCreate, TaskOut, TaskUpdate
 from app.services import task_service
 
@@ -32,7 +33,7 @@ def get_task(
 @router.post("", response_model=TaskOut, responses={403: {"model": ErrorResponse}})
 def create_task(
     payload: TaskCreate,
-    current_user: CurrentUser = Depends(require_parent),
+    current_user: CurrentUser = Depends(require_permission(Permission.MANAGE_TASKS)),
     db: Session = Depends(get_db),
 ) -> dict:
     return task_service.create_task(db, payload, current_user.family_id, current_user.user_id)
@@ -42,7 +43,7 @@ def create_task(
 def update_task(
     task_id: int,
     payload: TaskUpdate,
-    current_user: CurrentUser = Depends(require_parent),
+    current_user: CurrentUser = Depends(require_permission(Permission.MANAGE_TASKS)),
     db: Session = Depends(get_db),
 ) -> dict:
     return task_service.update_task(db, task_id, payload, current_user.family_id, current_user.user_id)
@@ -51,7 +52,7 @@ def update_task(
 @router.delete("/{task_id}", status_code=204, responses={403: {"model": ErrorResponse}, 404: {"model": ErrorResponse}})
 def delete_task(
     task_id: int,
-    current_user: CurrentUser = Depends(require_parent),
+    current_user: CurrentUser = Depends(require_permission(Permission.MANAGE_TASKS)),
     db: Session = Depends(get_db),
 ) -> None:
     task_service.delete_task(db, task_id, current_user.family_id, current_user.user_id)

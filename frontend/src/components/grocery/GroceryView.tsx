@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import { CheckCircle2, List, Plus, RefreshCw, Search, ShoppingBasket, ShoppingCart } from 'lucide-react'
 import { Badge } from '@/components/ui/Badge'
@@ -27,6 +27,9 @@ type Tab = 'master' | 'shopping'
 
 export const GroceryView = ({ store }: { store: FamilyHubStore }) => {
   const { state, addGroceryItem, addListType, regenerateGroceryCycles, toggleCurrentStock, toggleGroceryPurchased } = store
+  const canManageGroceries = store.can('manage_groceries')
+  const page = store.pagination.groceryItems
+  const pageItems = store.paged.groceryItems ?? state.groceryItems
   const [tab, setTab] = useState<Tab>('master')
   const [selectedListId, setSelectedListId] = useState<number | 'all'>('all')
   const [frequency, setFrequency] = useState<Frequency | 'all'>('all')
@@ -35,10 +38,13 @@ export const GroceryView = ({ store }: { store: FamilyHubStore }) => {
   const [newPlace, setNewPlace] = useState({ name: '', description: '', color: 'bg-slate-500' })
   const [showAddPlace, setShowAddPlace] = useState(false)
 
+  useEffect(() => {
+    store.loadGroceryPage(0, selectedListId)
+  }, [store, selectedListId])
+
   const filteredItems = useMemo(() => {
     const normalized = search.toLowerCase().trim()
-
-    return state.groceryItems.filter((item) => {
+    return pageItems.filter((item) => {
       const matchesList = selectedListId === 'all' || item.listTypeId === selectedListId
       const matchesFrequency = frequency === 'all' || item.purchaseFrequency === frequency
       const matchesSearch =
@@ -46,12 +52,10 @@ export const GroceryView = ({ store }: { store: FamilyHubStore }) => {
         item.itemName.toLowerCase().includes(normalized) ||
         item.notes.toLowerCase().includes(normalized) ||
         item.itemNumber.toLowerCase().includes(normalized)
-
       return matchesList && matchesFrequency && matchesSearch
     })
-  }, [frequency, search, selectedListId, state.groceryItems])
+  }, [frequency, pageItems, search, selectedListId])
 
-  // Group active cycles with their items for the Shopping Lists tab
   const shoppingLists = useMemo(() => {
     const activeCycles = state.groceryCycles.filter((cycle) => !cycle.isCompleted)
     return activeCycles.map((cycle) => {
@@ -66,11 +70,7 @@ export const GroceryView = ({ store }: { store: FamilyHubStore }) => {
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-
-    if (!draft.itemName.trim()) {
-      return
-    }
-
+    if (!draft.itemName.trim()) return
     addGroceryItem({
       ...draft,
       itemName: draft.itemName.trim(),
@@ -81,33 +81,32 @@ export const GroceryView = ({ store }: { store: FamilyHubStore }) => {
   }
 
   return (
-    <div className="grid gap-5">
+    <div className="grid gap-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-2xl font-semibold text-slate-950">Grocery Management</h2>
-          <p className="mt-1 text-sm text-slate-500">Master list, purchase cycles, and shopping sub-lists</p>
+          <h2 className="text-2xl font-bold tracking-tight text-slate-900">Grocery Management</h2>
+          <p className="mt-1 text-sm text-slate-400">Master list, purchase cycles, and shopping sub-lists</p>
         </div>
-        <div className="flex items-center gap-2">
-          <Button
-            onClick={() => {
-              if (window.confirm('Regenerate grocery cycles from the current master list?')) {
-                regenerateGroceryCycles()
-              }
-            }}
-            variant="secondary"
-          >
-            <RefreshCw className="size-4" aria-hidden="true" />
-            Regenerate cycles
-          </Button>
-        </div>
+        <Button
+          disabled={!canManageGroceries}
+          onClick={() => {
+            if (window.confirm('Regenerate grocery cycles from the current master list?')) {
+              regenerateGroceryCycles()
+            }
+          }}
+          variant="secondary"
+        >
+          <RefreshCw className="size-4" aria-hidden="true" />
+          Regenerate cycles
+        </Button>
       </div>
 
       {/* Tab switcher */}
-      <div className="flex gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1">
+      <div className="flex gap-1 rounded-2xl border border-slate-200/60 bg-slate-50/80 p-1.5 backdrop-blur-sm">
         <button
           className={cn(
-            'flex items-center gap-2 rounded-md px-4 py-2 text-sm font-semibold transition',
-            tab === 'master' ? 'bg-white text-slate-950 shadow-sm' : 'text-slate-500 hover:text-slate-700',
+            'flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold transition-all duration-200',
+            tab === 'master' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600',
           )}
           onClick={() => setTab('master')}
           type="button"
@@ -117,23 +116,21 @@ export const GroceryView = ({ store }: { store: FamilyHubStore }) => {
         </button>
         <button
           className={cn(
-            'flex items-center gap-2 rounded-md px-4 py-2 text-sm font-semibold transition',
-            tab === 'shopping' ? 'bg-white text-slate-950 shadow-sm' : 'text-slate-500 hover:text-slate-700',
+            'flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold transition-all duration-200',
+            tab === 'shopping' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600',
           )}
           onClick={() => setTab('shopping')}
           type="button"
         >
           <ShoppingCart className="size-4" aria-hidden="true" />
           Shopping Lists
-          {shoppingLists.length > 0 && (
-            <Badge tone="blue">{shoppingLists.length}</Badge>
-          )}
+          {shoppingLists.length > 0 && <Badge tone="indigo">{shoppingLists.length}</Badge>}
         </button>
       </div>
 
       {tab === 'master' && (
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
-          <div className="grid gap-4">
+        <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+          <div className="grid gap-5">
             <Card>
               <CardContent className="grid gap-3 lg:grid-cols-[220px_180px_minmax(0,1fr)]">
                 <FormField label="List type">
@@ -146,9 +143,7 @@ export const GroceryView = ({ store }: { store: FamilyHubStore }) => {
                   >
                     <option value="all">All lists</option>
                     {state.listTypes.map((listType) => (
-                      <option key={listType.id} value={listType.id}>
-                        {listType.listName}
-                      </option>
+                      <option key={listType.id} value={listType.id}>{listType.listName}</option>
                     ))}
                   </select>
                 </FormField>
@@ -160,20 +155,18 @@ export const GroceryView = ({ store }: { store: FamilyHubStore }) => {
                   >
                     <option value="all">All cycles</option>
                     {frequencyOptions.map((option) => (
-                      <option key={option} value={option}>
-                        {option}
-                      </option>
+                      <option key={option} value={option}>{option}</option>
                     ))}
                   </select>
                 </FormField>
                 <FormField label="Search">
                   <div className="relative">
                     <Search
-                      className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400"
+                      className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-slate-400"
                       aria-hidden="true"
                     />
                     <input
-                      className={cn(inputClass, 'pl-9')}
+                      className={cn(inputClass, 'pl-10')}
                       onChange={(event) => setSearch(event.target.value)}
                       placeholder="Search item, number, or note"
                       value={search}
@@ -187,83 +180,105 @@ export const GroceryView = ({ store }: { store: FamilyHubStore }) => {
               <CardHeader className="flex flex-row items-center justify-between gap-3">
                 <div>
                   <CardTitle>Grocery Master List</CardTitle>
-                  <p className="mt-1 text-sm text-slate-500">
-                    {filteredItems.length} items — add/remove items here, sub-lists auto-generate per cycle
+                  <p className="mt-1 text-xs text-slate-400">
+                    {filteredItems.length} items — sub-lists auto-generate per cycle
                   </p>
                 </div>
-                <Badge tone="blue">Master list</Badge>
+                <Badge tone="indigo">Master list</Badge>
               </CardHeader>
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[820px] text-left text-sm">
-                  <thead className="border-b border-slate-100 bg-slate-50 text-xs uppercase text-slate-500">
+                  <thead className="border-b border-slate-100/80 bg-slate-50/50 text-[11px] uppercase tracking-wider text-slate-400">
                     <tr>
-                      <th className="px-5 py-3">#</th>
-                      <th className="px-5 py-3">Item</th>
-                      <th className="px-5 py-3">List</th>
-                      <th className="px-5 py-3">Qty</th>
-                      <th className="px-5 py-3">Frequency</th>
-                      <th className="px-5 py-3">Stock</th>
-                      <th className="px-5 py-3">Start date</th>
-                      <th className="px-5 py-3">Notes</th>
+                      <th className="px-6 py-3.5">#</th>
+                      <th className="px-6 py-3.5">Item</th>
+                      <th className="px-6 py-3.5">List</th>
+                      <th className="px-6 py-3.5">Qty</th>
+                      <th className="px-6 py-3.5">Frequency</th>
+                      <th className="px-6 py-3.5">Stock</th>
+                      <th className="px-6 py-3.5">Start date</th>
+                      <th className="px-6 py-3.5">Notes</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-100">
+                  <tbody className="divide-y divide-slate-50">
                     {filteredItems.map((item) => {
                       const listType = state.listTypes.find((list) => list.id === item.listTypeId)
-
                       return (
-                        <tr className="bg-white align-top" key={item.id}>
-                          <td className="px-5 py-4 text-xs text-slate-400">{item.itemNumber}</td>
-                          <td className="px-5 py-4">
-                            <p className="font-semibold text-slate-950">{item.itemName}</p>
+                        <tr className="bg-white transition-colors hover:bg-slate-50/50" key={item.id}>
+                          <td className="px-6 py-4 text-xs text-slate-400">{item.itemNumber}</td>
+                          <td className="px-6 py-4">
+                            <p className="font-semibold text-slate-900">{item.itemName}</p>
                           </td>
-                          <td className="px-5 py-4">
+                          <td className="px-6 py-4">
                             <span className="inline-flex items-center gap-2">
                               <span className={cn('size-2.5 rounded-full', listType?.colorClass)} />
-                              {listType?.listName}
+                              <span className="text-xs">{listType?.listName}</span>
                             </span>
                           </td>
-                          <td className="px-5 py-4">
+                          <td className="px-6 py-4 text-xs">
                             {item.quantity} {item.unit}
                           </td>
-                          <td className="px-5 py-4">
+                          <td className="px-6 py-4">
                             <Badge tone={item.purchaseFrequency === 'weekly' ? 'green' : 'amber'}>
                               {item.purchaseFrequency}
                             </Badge>
                           </td>
-                          <td className="px-5 py-4">
+                          <td className="px-6 py-4">
                             <button
                               className={cn(
-                                'rounded-md border px-3 py-1.5 text-xs font-semibold transition',
+                                'rounded-lg border px-3 py-1.5 text-[11px] font-semibold transition-all duration-200',
                                 item.currentStock
-                                  ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                                  : 'border-rose-200 bg-rose-50 text-rose-700',
+                                  ? 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                                  : 'border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100',
                               )}
+                              disabled={!canManageGroceries}
                               onClick={() => toggleCurrentStock(item.id)}
                               type="button"
                             >
                               {item.currentStock ? 'YES' : 'NO'}
                             </button>
                           </td>
-                          <td className="px-5 py-4 text-xs">{formatCompactDate(item.startDate)}</td>
-                          <td className="px-5 py-4 text-xs text-slate-500">{item.notes}</td>
+                          <td className="px-6 py-4 text-xs text-slate-400">{formatCompactDate(item.startDate)}</td>
+                          <td className="px-6 py-4 text-xs text-slate-400">{item.notes}</td>
                         </tr>
                       )
                     })}
                   </tbody>
                 </table>
               </div>
+              <CardContent className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100">
+                <p className="text-xs font-medium text-slate-500">
+                  Page {Math.floor(page.offset / page.limit) + 1} - {filteredItems.length} loaded
+                </p>
+                <div className="flex items-center gap-2">
+                  <Button
+                    disabled={page.offset === 0 || page.isLoading}
+                    onClick={() => store.loadGroceryPage(page.offset - page.limit, selectedListId)}
+                    variant="secondary"
+                  >
+                    Previous
+                  </Button>
+                  <Button
+                    disabled={!page.hasNext || page.isLoading}
+                    onClick={() => store.loadGroceryPage(page.offset + page.limit, selectedListId)}
+                    variant="secondary"
+                  >
+                    Next
+                  </Button>
+                </div>
+              </CardContent>
             </Card>
           </div>
 
-          <aside className="grid gap-4">
+          <aside className="grid gap-5">
             <Card>
               <CardHeader>
                 <CardTitle>Add Item to Master List</CardTitle>
-                <p className="mt-1 text-sm text-slate-500">Item will be included in the next cycle generation</p>
+                <p className="mt-1 text-xs text-slate-400">Included in the next cycle generation</p>
               </CardHeader>
               <CardContent>
-                <form className="grid gap-3" onSubmit={handleSubmit}>
+                <form className="grid gap-3.5" onSubmit={handleSubmit}>
+                  <fieldset className="m-0 grid gap-3.5 border-0 p-0" disabled={!canManageGroceries}>
                   <FormField label="Item name">
                     <input
                       className={inputClass}
@@ -304,9 +319,7 @@ export const GroceryView = ({ store }: { store: FamilyHubStore }) => {
                       value={draft.listTypeId}
                     >
                       {state.listTypes.map((listType) => (
-                        <option key={listType.id} value={listType.id}>
-                          {listType.listName}
-                        </option>
+                        <option key={listType.id} value={listType.id}>{listType.listName}</option>
                       ))}
                     </select>
                   </FormField>
@@ -319,9 +332,7 @@ export const GroceryView = ({ store }: { store: FamilyHubStore }) => {
                       value={draft.purchaseFrequency}
                     >
                       {frequencyOptions.map((option) => (
-                        <option key={option} value={option}>
-                          {option}
-                        </option>
+                        <option key={option} value={option}>{option}</option>
                       ))}
                     </select>
                   </FormField>
@@ -333,10 +344,10 @@ export const GroceryView = ({ store }: { store: FamilyHubStore }) => {
                       value={draft.notes}
                     />
                   </FormField>
-                  <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
+                  <label className="flex items-center gap-2.5 text-sm font-medium text-slate-600">
                     <input
                       checked={draft.currentStock}
-                      className="size-4 rounded border-slate-300 text-blue-600"
+                      className="size-4 rounded-md border-slate-300 text-indigo-600"
                       onChange={(event) =>
                         setDraft((current) => ({ ...current, currentStock: event.target.checked }))
                       }
@@ -348,6 +359,7 @@ export const GroceryView = ({ store }: { store: FamilyHubStore }) => {
                     <Plus className="size-4" aria-hidden="true" />
                     Add to master list
                   </Button>
+                  </fieldset>
                 </form>
               </CardContent>
             </Card>
@@ -355,7 +367,7 @@ export const GroceryView = ({ store }: { store: FamilyHubStore }) => {
             <Card>
               <CardHeader>
                 <CardTitle>Purchase Cycles</CardTitle>
-                <p className="mt-1 text-sm text-slate-500">Auto-generated per list type and frequency</p>
+                <p className="mt-1 text-xs text-slate-400">Auto-generated per list type and frequency</p>
               </CardHeader>
               <CardContent className="grid gap-3">
                 {state.groceryCycles.map((cycle) => {
@@ -367,21 +379,21 @@ export const GroceryView = ({ store }: { store: FamilyHubStore }) => {
                   const progress = cycleItems.length === 0 ? 0 : Math.round((completed / cycleItems.length) * 100)
 
                   return (
-                    <div className="rounded-lg border border-slate-100 bg-slate-50 p-3" key={cycle.id}>
+                    <div className="rounded-xl border border-slate-100/80 bg-slate-50/50 p-4 transition-all duration-200 hover:bg-white hover:shadow-sm" key={cycle.id}>
                       <div className="flex items-center justify-between gap-2">
                         <div className="flex items-center gap-2">
-                          <ShoppingBasket className="size-4 text-blue-600" aria-hidden="true" />
-                          <p className="font-semibold text-slate-950">{listType?.listName}</p>
+                          <ShoppingBasket className="size-4 text-indigo-500" aria-hidden="true" />
+                          <p className="text-sm font-semibold text-slate-900">{listType?.listName}</p>
                         </div>
                         <Badge tone="teal">{cycle.frequency}</Badge>
                       </div>
-                      <p className="mt-1 text-xs text-slate-500">
+                      <p className="mt-1.5 text-[11px] text-slate-400">
                         {formatCompactDate(cycle.cycleStartDate)} → {formatCompactDate(cycle.cycleEndDate)}
                       </p>
-                      <div className="mt-3 h-2 rounded-full bg-white">
-                        <div className="h-2 rounded-full bg-blue-500 transition-all" style={{ width: `${progress}%` }} />
+                      <div className="mt-3 h-2 overflow-hidden rounded-full bg-white">
+                        <div className="h-2 rounded-full bg-gradient-to-r from-indigo-500 to-blue-500 transition-all duration-500" style={{ width: `${progress}%` }} />
                       </div>
-                      <p className="mt-2 text-xs text-slate-500">
+                      <p className="mt-2 text-[11px] text-slate-400">
                         {completed} of {cycleItems.length} purchased
                       </p>
                     </div>
@@ -394,26 +406,26 @@ export const GroceryView = ({ store }: { store: FamilyHubStore }) => {
               <CardHeader className="flex flex-row items-center justify-between gap-3">
                 <div>
                   <CardTitle>Shopping Places</CardTitle>
-                  <p className="mt-1 text-sm text-slate-500">{state.listTypes.length} stores configured</p>
+                  <p className="mt-1 text-xs text-slate-400">{state.listTypes.length} stores configured</p>
                 </div>
-                <Button variant="secondary" onClick={() => setShowAddPlace(!showAddPlace)}>
+                <Button disabled={!canManageGroceries} variant="secondary" onClick={() => setShowAddPlace(!showAddPlace)}>
                   <Plus className="size-4" aria-hidden="true" />
                   Add
                 </Button>
               </CardHeader>
-              <CardContent className="grid gap-2">
+              <CardContent className="grid gap-2.5">
                 {state.listTypes.map((lt) => (
-                  <div className="flex items-center gap-2 rounded-lg border border-slate-100 bg-slate-50 p-3" key={lt.id}>
-                    <span className={cn('size-3 rounded-full', lt.colorClass)} />
+                  <div className="flex items-center gap-2.5 rounded-xl border border-slate-100/80 bg-slate-50/50 p-3.5 transition-all duration-200 hover:bg-white hover:shadow-sm" key={lt.id}>
+                    <span className={cn('size-3 rounded-full shadow-sm', lt.colorClass)} />
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-semibold text-slate-900">{lt.listName}</p>
-                      <p className="truncate text-xs text-slate-500">{lt.description}</p>
+                      <p className="truncate text-sm font-semibold text-slate-800">{lt.listName}</p>
+                      <p className="truncate text-[11px] text-slate-400">{lt.description}</p>
                     </div>
                   </div>
                 ))}
-                {showAddPlace && (
+                {canManageGroceries && showAddPlace && (
                   <form
-                    className="mt-2 grid gap-2 rounded-lg border border-blue-100 bg-blue-50/40 p-3"
+                    className="mt-2 grid gap-3 rounded-xl border border-indigo-100/60 bg-indigo-50/30 p-4"
                     onSubmit={(e) => {
                       e.preventDefault()
                       if (!newPlace.name.trim()) return
@@ -463,13 +475,13 @@ export const GroceryView = ({ store }: { store: FamilyHubStore }) => {
       )}
 
       {tab === 'shopping' && (
-        <div className="grid gap-4">
+        <div className="grid gap-5">
           {shoppingLists.length === 0 ? (
             <Card>
-              <CardContent className="py-12 text-center">
-                <ShoppingCart className="mx-auto size-10 text-slate-300" aria-hidden="true" />
-                <p className="mt-3 text-sm font-semibold text-slate-600">No active shopping lists</p>
-                <p className="mt-1 text-sm text-slate-400">
+              <CardContent className="py-16 text-center">
+                <ShoppingCart className="mx-auto size-12 text-slate-200" aria-hidden="true" />
+                <p className="mt-4 text-sm font-semibold text-slate-600">No active shopping lists</p>
+                <p className="mt-1 text-xs text-slate-400">
                   Click "Regenerate cycles" to create shopping lists from your master list.
                 </p>
               </CardContent>
@@ -487,7 +499,7 @@ export const GroceryView = ({ store }: { store: FamilyHubStore }) => {
                         <span className={cn('size-3 rounded-full', listType?.colorClass)} />
                         {listType?.listName} — {cycle.frequency}
                       </CardTitle>
-                      <p className="mt-1 text-sm text-slate-500">
+                      <p className="mt-1 text-xs text-slate-400">
                         {formatCompactDate(cycle.cycleStartDate)} → {formatCompactDate(cycle.cycleEndDate)}
                         {' · '}{purchased} of {items.length} purchased
                       </p>
@@ -498,37 +510,38 @@ export const GroceryView = ({ store }: { store: FamilyHubStore }) => {
                     </div>
                   </CardHeader>
                   <CardContent>
-                    <div className="mb-4 h-2 rounded-full bg-slate-100">
+                    <div className="mb-5 h-2.5 overflow-hidden rounded-full bg-slate-100">
                       <div
-                        className={cn('h-2 rounded-full transition-all', allDone ? 'bg-emerald-500' : 'bg-blue-500')}
+                        className={cn('h-2.5 rounded-full transition-all duration-500', allDone ? 'bg-emerald-500' : 'bg-gradient-to-r from-indigo-500 to-blue-500')}
                         style={{ width: `${progress}%` }}
                       />
                     </div>
-                    <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                       {items.map((item) => (
                         <label
                           className={cn(
-                            'flex items-start gap-3 rounded-lg border p-3 transition cursor-pointer',
+                            'flex cursor-pointer items-start gap-3 rounded-xl border p-4 transition-all duration-200',
                             item.purchased
-                              ? 'border-emerald-200 bg-emerald-50/50'
-                              : 'border-slate-100 bg-white hover:border-blue-200',
+                              ? 'border-emerald-200/60 bg-emerald-50/40'
+                              : 'border-slate-100/80 bg-white hover:border-indigo-200 hover:shadow-sm',
                           )}
                           key={item.id}
                         >
                           <input
                             checked={item.purchased}
-                            className="mt-0.5 size-5 rounded border-slate-300 text-emerald-600"
+                            className="mt-0.5 size-5 rounded-md border-slate-300 text-emerald-600"
+                            disabled={!canManageGroceries}
                             onChange={() => toggleGroceryPurchased(item.id)}
                             type="checkbox"
                           />
                           <div className="min-w-0 flex-1">
-                            <p className={cn('font-semibold', item.purchased ? 'text-slate-400 line-through' : 'text-slate-900')}>
+                            <p className={cn('text-sm font-semibold', item.purchased ? 'text-slate-400 line-through' : 'text-slate-900')}>
                               {item.itemName}
                             </p>
-                            <p className="text-xs text-slate-500">
+                            <p className="text-[11px] text-slate-400">
                               {item.quantity} {item.unit}
                             </p>
-                            {item.notes && <p className="mt-1 text-xs text-slate-400">{item.notes}</p>}
+                            {item.notes && <p className="mt-1 text-[11px] text-slate-400">{item.notes}</p>}
                           </div>
                           {item.purchased && (
                             <CheckCircle2 className="size-5 shrink-0 text-emerald-500" aria-hidden="true" />

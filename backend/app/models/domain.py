@@ -32,6 +32,7 @@ class User(Base, TimestampMixin, ActiveMixin):
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     full_name: Mapped[str | None] = mapped_column(String(255))
     family_role: Mapped[str | None] = mapped_column(String(50))
+    token_version: Mapped[int] = mapped_column(default=0, nullable=False)
 
     family_memberships: Mapped[list["FamilyMember"]] = relationship(back_populates="user")
 
@@ -67,6 +68,8 @@ class FamilyMember(Base):
     status: Mapped[str] = mapped_column(String(255), default="Active", nullable=False)
     points: Mapped[int] = mapped_column(default=0, nullable=False)
     dietary_notes: Mapped[list[str] | None] = mapped_column(JSON)
+    permissions: Mapped[list[str] | None] = mapped_column(JSON)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     joined_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)
 
     family: Mapped["Family"] = relationship(back_populates="members")
@@ -215,7 +218,7 @@ class Task(Base, TimestampMixin, ActiveMixin):
 class MealPlan(Base, TimestampMixin, ActiveMixin):
     __tablename__ = "meal_plans"
     __table_args__ = (
-        UniqueConstraint("family_id", "plan_date", "meal_type", "assigned_to", name="unique_meal"),
+        UniqueConstraint("family_id", "plan_date", "meal_type", name="unique_meal"),
         Index("idx_meal_plan_family_date", "family_id", "plan_date"),
     )
 

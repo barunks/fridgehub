@@ -6,7 +6,10 @@ from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
+from app.core.cache import cache
 from app.core.config import settings
+from app.core.database import SessionLocal
+from app.services.audit_service import write_security_audit_log
 
 
 class LoginRateLimitMiddleware(BaseHTTPMiddleware):
@@ -22,11 +25,37 @@ class LoginRateLimitMiddleware(BaseHTTPMiddleware):
 
         client_ip = request.client.host if request.client else "unknown"
         key = f"{client_ip}:{request.url.path}"
+        shared_key = f"familyhub:rate-limit:login:{key}"
+        try:
+            if cache.increment_window(shared_key, self.window_seconds) > self.limit:
+                self._audit_rate_limit(request)
+                return JSONResponse(status_code=429, content={"error": {"detail": "Too many login attempts", "code": "rate_limited"}})
+            return await call_next(request)
+        except Exception:
+            pass
+
         now = time.monotonic()
         bucket = self.attempts[key]
         while bucket and bucket[0] <= now - self.window_seconds:
             bucket.popleft()
         if len(bucket) >= self.limit:
-            return JSONResponse(status_code=429, content={"detail": "Too many login attempts"})
+            self._audit_rate_limit(request)
+            return JSONResponse(status_code=429, content={"error": {"detail": "Too many login attempts", "code": "rate_limited"}})
         bucket.append(now)
         return await call_next(request)
+
+    def _audit_rate_limit(self, request: Request) -> None:
+        db = SessionLocal()
+        try:
+            write_security_audit_log(
+                db,
+                request,
+                action="login_rate_limited",
+                entity_id=request.client.host if request.client else "unknown",
+                changes={"path": request.url.path},
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+        finally:
+            db.close()

@@ -19,7 +19,7 @@ import type { ViewKey } from '@/types/familyHub'
 
 const App = () => {
   const auth = useAuth()
-  const store = useFamilyHub(auth.isAuthenticated)
+  const store = useFamilyHub(auth.isAuthenticated, auth.userId, auth.capabilities, auth.role)
   const theme = useTheme()
   const location = useLocation()
   const navigate = useNavigate()
@@ -30,6 +30,9 @@ const App = () => {
   }
 
   if (!auth.isAuthenticated) {
+    if (auth.isCheckingAuth) {
+      return <DashboardSkeleton />
+    }
     return <LoginPage error={auth.authError} onLogin={auth.login} />
   }
 
@@ -55,7 +58,16 @@ const App = () => {
           <Route element={<FamilyView store={store} />} path={viewPaths.family} />
           <Route element={<AnalyticsView store={store} />} path={viewPaths.analytics} />
           <Route element={<AssistantView store={store} />} path={viewPaths.assistant} />
-          <Route element={<ImplementationView store={store} />} path={viewPaths.implementation} />
+          <Route
+            element={
+              store.can('view_implementation') ? (
+                <ImplementationView store={store} />
+              ) : (
+                <Navigate replace to={viewPaths.dashboard} />
+              )
+            }
+            path={viewPaths.implementation}
+          />
           <Route element={<Navigate replace to={viewPaths.dashboard} />} path="*" />
         </Routes>
       )}

@@ -15,9 +15,9 @@ The implementation now includes the React UI, FastAPI backend, SQLAlchemy data m
 - Redis cache client with in-memory fallback for local development.
 - Celery worker/beat tasks for grocery-cycle regeneration and reminder scans.
 - MySQL `schema.sql`, Alembic initial migration, Dockerfiles, and `docker-compose.yml`.
-- Frontend API hydration from `/api/v1/family/bootstrap`, with offline fallback to local demo state.
-- JWT-protected API routes with role-aware write guards.
-- Pagination, soft-delete routes, and CRUD coverage for members, recipes, emergency contacts, groceries, tasks, notifications, and announcements.
+- Frontend API hydration from `/api/v1/family/bootstrap`; local demo data is used only before an authenticated API session is established.
+- JWT access tokens kept in frontend memory, HttpOnly refresh-token cookies, and role-aware write guards.
+- Pagination parameters on API list endpoints, soft-delete routes, and CRUD coverage for members, recipes, emergency contacts, groceries, tasks, notifications, and announcements.
 
 ## Project Structure
 
@@ -75,7 +75,7 @@ Backend:  http://localhost:8000
 API docs: http://localhost:8000/docs
 ```
 
-The frontend tries `http://localhost:8000` by default. If the backend is unavailable, it falls back to local browser state.
+The frontend tries `http://localhost:8000` by default. Authenticated app data is reconciled from the backend; the frontend no longer persists full family state in browser storage.
 
 Frontend route map:
 
@@ -173,7 +173,7 @@ Demo login:
 }
 ```
 
-All application routes except `/health`, `/api/versions`, `/api/v1/auth/login`, and `/api/v1/auth/refresh` require `Authorization: Bearer <access-token>`. Parent-role users can perform mutations. Child-role users can read family-scoped data but receive `403` for parent-only operations.
+`POST /api/v1/auth/login` returns an access token and sets the refresh token as an HttpOnly cookie. `POST /api/v1/auth/refresh` rotates that refresh cookie and returns a new access token. All application routes except `/health`, `/api/versions`, `/api/v1/auth/login`, and `/api/v1/auth/refresh` require `Authorization: Bearer <access-token>`. Parent-role users can perform mutations. Child-role users can read family-scoped data but receive `403` for parent-only operations.
 
 ## API Versioning
 
@@ -192,7 +192,7 @@ To add a future `/api/v2`, register it in `app/core/versioning.py` and mount a n
 Schema locations:
 
 - SQLAlchemy models: `backend/app/models/domain.py`
-- Alembic migration: `backend/alembic/versions/0001_initial_schema.py`
+- Alembic migrations: `backend/alembic/versions/`
 - MySQL schema: `backend/sql/schema.sql`
 
 Local SQLite is used only for fast development and tests. Docker uses MySQL:
@@ -208,9 +208,9 @@ Redis:
 - `backend/app/core/cache.py` provides JSON cache get/set/delete and prefix invalidation.
 - Bootstrap data is cached with a 5-minute TTL.
 - Mutating services invalidate the relevant family bootstrap cache.
-- Cache invalidation uses explicit key tracking instead of Redis key scans.
+- Cache invalidation uses Redis `SCAN` pattern iteration instead of an unbounded tracked-key set.
 - Bootstrap cache misses use a per-family singleflight lock to reduce stampedes.
-- If Redis is unavailable or disabled, the cache falls back to process memory for local development.
+- If Redis is unavailable or disabled, the cache falls back to locked process memory for local development. Production startup requires Redis unless `ALLOW_MEMORY_CACHE_IN_PRODUCTION=true` is explicitly set.
 
 Celery:
 
@@ -259,9 +259,9 @@ Addressed from the audit report:
 - Auth enforcement on data routes.
 - Family/user impersonation through query params removed from endpoints.
 - Parent-only RBAC for destructive/write routes.
-- Token refresh and logout/revocation.
+- HttpOnly refresh cookie rotation, token-version session revocation, and logout that revokes all active sessions for the user.
 - Login rate limiting.
-- CORS credentials disabled by default.
+- CORS credentials enabled for the configured origins so refresh cookies work.
 - Environment-only Docker secrets.
 - Dependency-aware health checks.
 - Request ID middleware.
@@ -272,9 +272,9 @@ Addressed from the audit report:
 - AuditLog writes on mutations.
 - Safer grocery item numbering based on inserted row ID.
 - Basic text sanitization for stored user text.
-- Redis invalidation without SCAN plus bootstrap stampede protection.
+- Redis `SCAN` prefix invalidation plus bootstrap stampede protection.
 - Celery crontab schedules.
-- Frontend JWT integration, loading state, toast feedback, confirmation prompts, mobile notification access, PWA manifest, and removal of developer metadata.
+- Frontend in-memory access-token integration, loading state, rollback-aware optimistic updates, toast feedback, confirmation prompts, mobile notification access, PWA manifest, and removal of developer metadata.
 - React Router route-level navigation.
 - Persistent dark/light mode.
 - Drag-and-drop task assignment board.

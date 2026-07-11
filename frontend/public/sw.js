@@ -3,7 +3,6 @@
 const CACHE_NAME = 'familyhub-v1'
 const STATIC_ASSETS = ['/', '/index.html', '/favicon.svg', '/manifest.json']
 const API_CACHE_NAME = 'familyhub-api-v1'
-const API_CACHE_MAX_AGE = 5 * 60 * 1000 // 5 minutes
 
 const sw = /** @type {ServiceWorkerGlobalScope} */ (/** @type {unknown} */ (self))
 

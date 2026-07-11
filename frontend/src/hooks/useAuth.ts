@@ -1,90 +1,102 @@
 import { useCallback, useEffect, useState } from 'react'
-
-const ACCESS_TOKEN_KEY = 'familyhub-access-token'
-const REFRESH_TOKEN_KEY = 'familyhub-refresh-token'
-
-const apiBaseUrl = (import.meta.env.VITE_API_URL || 'http://localhost:8000').replace(/\/$/, '')
-
-interface TokenResponse {
-  accessToken: string
-  refreshToken: string
-  tokenType: string
-}
-
-function parseJwtExp(token: string): number | null {
-  try {
-    const payload = JSON.parse(atob(token.split('.')[1]))
-    return payload.exp ?? null
-  } catch {
-    return null
-  }
-}
+import { api, clearAccessToken, parseAccessToken, setAccessToken } from '@/services/api'
+import type { Permission } from '@/types/familyHub'
 
 export const useAuth = () => {
-  const [isAuthenticated, setIsAuthenticated] = useState(() => !!localStorage.getItem(ACCESS_TOKEN_KEY))
+  const [isAuthenticated, setIsAuthenticated] = useState(() => !!api.getAccessToken())
+  const [isCheckingAuth, setIsCheckingAuth] = useState(true)
   const [authError, setAuthError] = useState<string | null>(null)
-  const [username, setUsername] = useState<string | null>(() => {
-    const token = localStorage.getItem(ACCESS_TOKEN_KEY)
-    if (!token) return null
-    try {
-      return JSON.parse(atob(token.split('.')[1])).username ?? null
-    } catch {
-      return null
-    }
-  })
+  const [username, setUsername] = useState<string | null>(() => parseAccessToken()?.username ?? null)
+  const [userId, setUserId] = useState<number | null>(() => Number(parseAccessToken()?.sub) || null)
+  const [role, setRole] = useState<string | null>(() => parseAccessToken()?.role ?? null)
+  const [capabilities, setCapabilities] = useState<Permission[]>(() => parseAccessToken()?.permissions ?? [])
+
+  const applyToken = useCallback((token: string | null) => {
+    setAccessToken(token)
+    const payload = parseAccessToken(token)
+    setUsername(payload?.username ?? null)
+    setUserId(Number(payload?.sub) || null)
+    setRole(payload?.role ?? null)
+    setCapabilities(payload?.permissions ?? [])
+    setIsAuthenticated(Boolean(token && payload))
+  }, [])
+
+  const clearSession = useCallback(() => {
+    clearAccessToken()
+    setIsAuthenticated(false)
+    setUsername(null)
+    setUserId(null)
+    setRole(null)
+    setCapabilities([])
+  }, [])
 
   const login = useCallback(async (user: string, password: string) => {
     setAuthError(null)
-    const response = await fetch(`${apiBaseUrl}/api/v1/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: user, password }),
-    })
-    if (!response.ok) {
-      const body = await response.json().catch(() => ({ detail: 'Login failed' }))
-      setAuthError(body.detail || 'Invalid credentials')
-      throw new Error(body.detail || 'Login failed')
-    }
-    const tokens = (await response.json()) as TokenResponse
-    localStorage.setItem(ACCESS_TOKEN_KEY, tokens.accessToken)
-    localStorage.setItem(REFRESH_TOKEN_KEY, tokens.refreshToken)
     try {
-      setUsername(JSON.parse(atob(tokens.accessToken.split('.')[1])).username ?? user)
-    } catch {
-      setUsername(user)
+      const tokens = await api.loginUser(user, password)
+      applyToken(tokens.accessToken)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Login failed'
+      setAuthError(message)
+      throw error
     }
-    setIsAuthenticated(true)
-  }, [])
+  }, [applyToken])
 
   const logout = useCallback(async () => {
-    const token = localStorage.getItem(ACCESS_TOKEN_KEY)
-    if (token) {
-      await fetch(`${apiBaseUrl}/api/v1/auth/logout`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      }).catch(() => undefined)
-    }
-    localStorage.removeItem(ACCESS_TOKEN_KEY)
-    localStorage.removeItem(REFRESH_TOKEN_KEY)
-    setIsAuthenticated(false)
-    setUsername(null)
-  }, [])
+    await api.logoutUser()
+    clearSession()
+  }, [clearSession])
 
-  // Auto-logout when token expires
+  useEffect(() => {
+    let active = true
+    api
+      .refreshAccessToken()
+      .then((token) => {
+        if (active) applyToken(token)
+      })
+      .catch(() => {
+        if (active) clearSession()
+      })
+      .finally(() => {
+        if (active) setIsCheckingAuth(false)
+      })
+    return () => {
+      active = false
+    }
+  }, [applyToken, clearSession])
+
+  useEffect(() => {
+    const handler = () => {
+      clearSession()
+    }
+    window.addEventListener('familyhub:auth-required', handler)
+    return () => window.removeEventListener('familyhub:auth-required', handler)
+  }, [clearSession])
+
   useEffect(() => {
     if (!isAuthenticated) return
-    const token = localStorage.getItem(ACCESS_TOKEN_KEY)
-    if (!token) return
-    const exp = parseJwtExp(token)
+    const exp = parseAccessToken()?.exp
     if (!exp) return
-    const msUntilExpiry = exp * 1000 - Date.now()
-    if (msUntilExpiry <= 0) {
-      logout()
-      return
-    }
-    const timer = setTimeout(() => logout(), msUntilExpiry)
-    return () => clearTimeout(timer)
-  }, [isAuthenticated, logout])
+    const msUntilRefresh = exp * 1000 - Date.now() - 60_000
+    const timer = window.setTimeout(
+      () => {
+        api.refreshAccessToken().then(applyToken).catch(clearSession)
+      },
+      Math.max(1_000, msUntilRefresh),
+    )
+    return () => window.clearTimeout(timer)
+  }, [applyToken, clearSession, isAuthenticated])
 
-  return { isAuthenticated, authError, username, login, logout }
+  return {
+    isAuthenticated,
+    isCheckingAuth,
+    authError,
+    username,
+    userId,
+    role,
+    capabilities,
+    isParent: capabilities.includes('manage_family'),
+    login,
+    logout,
+  }
 }

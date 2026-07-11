@@ -1,8 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.core.dependencies import CurrentUser, get_current_user
+from app.core.dependencies import CurrentUser, get_current_user, require_permission
 from app.core.database import get_db
+from app.core.permissions import Permission
 from app.schemas.familyhub import NotificationOut
 from app.services.notification_service import bulk_mark_read, list_notifications, mark_read
 
@@ -14,7 +15,7 @@ def get_notifications(
     unread_only: bool = False,
     limit: int = 50,
     offset: int = 0,
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission(Permission.MARK_NOTIFICATIONS)),
     db: Session = Depends(get_db),
 ) -> list[dict]:
     return list_notifications(db, current_user.user_id, current_user.family_id, unread_only, limit, offset)
@@ -22,7 +23,7 @@ def get_notifications(
 
 @router.post("/mark-all-read")
 def mark_all_read(
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission(Permission.MARK_NOTIFICATIONS)),
     db: Session = Depends(get_db),
 ) -> dict:
     count = bulk_mark_read(db, current_user.user_id, current_user.family_id)

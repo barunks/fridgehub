@@ -1,5 +1,6 @@
 import { Code2, Database, Layers3, Rocket, Server, ShieldCheck } from 'lucide-react'
 import { Badge } from '@/components/ui/Badge'
+import { Button } from '@/components/ui/Button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import type { FamilyHubStore } from '@/hooks/useFamilyHub'
 
@@ -12,7 +13,7 @@ const implementationTracks = [
   {
     title: 'Backend Boundary',
     icon: Server,
-    items: ['FastAPI REST resources', 'JWT auth and refresh tokens', 'Service layer per domain', 'Celery schedules'],
+    items: ['FastAPI REST resources', 'JWT access tokens and HttpOnly refresh cookies', 'Service layer per domain', 'Celery schedules'],
   },
   {
     title: 'Data Layer',
@@ -40,38 +41,33 @@ export const ImplementationView = ({ store }: { store: FamilyHubStore }) => {
   const { resetDemoData } = store
 
   return (
-    <div className="grid gap-5">
+    <div className="grid gap-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-2xl font-semibold text-slate-950">Implementation Readiness</h2>
-          <p className="mt-1 text-sm text-slate-500">UI scope aligned to the Family_Hub.docx implementation plan</p>
+          <h2 className="text-2xl font-bold tracking-tight text-slate-900">Implementation Readiness</h2>
+          <p className="mt-1 text-sm text-slate-400">UI scope aligned to the Family_Hub.docx plan</p>
         </div>
-        <button
-          className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-rose-200 bg-rose-50 px-3.5 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-100"
-          onClick={resetDemoData}
-          type="button"
-        >
+        <Button variant="danger" onClick={resetDemoData}>
           Reset demo data
-        </button>
+        </Button>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-4">
+      <div className="grid gap-5 lg:grid-cols-4">
         {implementationTracks.map((track) => {
           const Icon = track.icon
-
           return (
-            <Card key={track.title}>
+            <Card key={track.title} className="group">
               <CardHeader>
-                <div className="mb-3 flex size-11 items-center justify-center rounded-lg bg-blue-50 text-blue-600">
+                <div className="mb-3 flex size-11 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600 transition-transform duration-200 group-hover:scale-110">
                   <Icon className="size-5" aria-hidden="true" />
                 </div>
                 <CardTitle>{track.title}</CardTitle>
               </CardHeader>
               <CardContent>
-                <ul className="grid gap-2 text-sm text-slate-600">
+                <ul className="grid gap-2.5 text-sm text-slate-500">
                   {track.items.map((item) => (
                     <li className="flex items-start gap-2" key={item}>
-                      <ShieldCheck className="mt-0.5 size-4 shrink-0 text-emerald-600" aria-hidden="true" />
+                      <ShieldCheck className="mt-0.5 size-4 shrink-0 text-emerald-500" aria-hidden="true" />
                       <span>{item}</span>
                     </li>
                   ))}
@@ -82,29 +78,29 @@ export const ImplementationView = ({ store }: { store: FamilyHubStore }) => {
         })}
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_420px]">
         <Card>
           <CardHeader>
             <CardTitle>API Integration Map</CardTitle>
-            <p className="mt-1 text-sm text-slate-500">Current UI actions are isolated behind replaceable state methods</p>
+            <p className="mt-1 text-xs text-slate-400">UI actions are isolated behind replaceable state methods</p>
           </CardHeader>
           <div className="overflow-x-auto">
             <table className="w-full min-w-[720px] text-left text-sm">
-              <thead className="border-b border-slate-100 bg-slate-50 text-xs uppercase text-slate-500">
+              <thead className="border-b border-slate-100/80 bg-slate-50/50 text-[11px] uppercase tracking-wider text-slate-400">
                 <tr>
-                  <th className="px-5 py-3">Method</th>
-                  <th className="px-5 py-3">Endpoint</th>
-                  <th className="px-5 py-3">UI usage</th>
+                  <th className="px-6 py-3.5">Method</th>
+                  <th className="px-6 py-3.5">Endpoint</th>
+                  <th className="px-6 py-3.5">UI usage</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
+              <tbody className="divide-y divide-slate-50">
                 {apiResources.map(([method, endpoint, usage]) => (
-                  <tr key={`${method}-${endpoint}`}>
-                    <td className="px-5 py-4">
-                      <Badge tone={method === 'GET' ? 'green' : 'blue'}>{method}</Badge>
+                  <tr className="transition-colors hover:bg-slate-50/50" key={`${method}-${endpoint}`}>
+                    <td className="px-6 py-4">
+                      <Badge tone={method === 'GET' ? 'green' : 'indigo'}>{method}</Badge>
                     </td>
-                    <td className="px-5 py-4 font-mono text-xs text-slate-700">{endpoint}</td>
-                    <td className="px-5 py-4 text-slate-600">{usage}</td>
+                    <td className="px-6 py-4 font-mono text-xs text-slate-600">{endpoint}</td>
+                    <td className="px-6 py-4 text-xs text-slate-500">{usage}</td>
                   </tr>
                 ))}
               </tbody>
@@ -112,7 +108,7 @@ export const ImplementationView = ({ store }: { store: FamilyHubStore }) => {
           </div>
         </Card>
 
-        <div className="grid gap-4">
+        <div className="grid gap-5">
           <Card className="overflow-hidden">
             <CardHeader>
               <CardTitle>Command Center Reference</CardTitle>
@@ -128,15 +124,15 @@ export const ImplementationView = ({ store }: { store: FamilyHubStore }) => {
             <CardHeader>
               <CardTitle>Schema Coverage</CardTitle>
             </CardHeader>
-            <CardContent className="grid gap-3">
+            <CardContent className="grid gap-2.5">
               {[
                 'users, families, family_members',
                 'grocery_list_types, grocery_items, grocery_purchase_cycles',
                 'tasks, meal_plans, meal_plan_templates, recipes',
                 'notifications, audit_logs, frequency_types',
               ].map((item) => (
-                <div className="flex items-start gap-2 rounded-lg bg-slate-50 p-3 text-sm text-slate-600" key={item}>
-                  <Code2 className="mt-0.5 size-4 shrink-0 text-blue-600" aria-hidden="true" />
+                <div className="flex items-start gap-2.5 rounded-xl bg-slate-50/80 p-3.5 text-xs text-slate-500" key={item}>
+                  <Code2 className="mt-0.5 size-4 shrink-0 text-indigo-500" aria-hidden="true" />
                   <span>{item}</span>
                 </div>
               ))}

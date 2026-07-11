@@ -1,7 +1,7 @@
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from app.models import Task
+from app.models import FamilyMember, Task
 from app.schemas.familyhub import TaskCreate, TaskUpdate
 from app.services.audit_service import write_audit_log
 from app.services.family_service import invalidate_entity, serialize_task
@@ -25,14 +25,25 @@ def get_task(db: Session, task_id: int, family_id: int) -> dict:
     return serialize_task(task)
 
 
+def _ensure_active_member(db: Session, family_id: int, user_id: int) -> None:
+    membership = (
+        db.query(FamilyMember)
+        .filter_by(family_id=family_id, user_id=user_id, is_active=True)
+        .first()
+    )
+    if not membership:
+        raise HTTPException(status_code=400, detail="Assigned user is not an active family member")
+
+
 def create_task(db: Session, payload: TaskCreate, family_id: int, user_id: int) -> dict:
+    _ensure_active_member(db, family_id, payload.assignedTo)
     task = Task(
         title=sanitize_text(payload.title),
         description=sanitize_optional_text(payload.description) or f"{sanitize_text(payload.category)} reminder",
         priority=payload.priority,
         status="pending",
         due_date=payload.dueAt,
-        reminder_date=payload.dueAt,
+        reminder_date=payload.reminderAt,
         recurrence_type=payload.recurrenceType,
         recurrence_interval=payload.recurrenceInterval,
         family_id=family_id,
@@ -54,7 +65,7 @@ def create_task(db: Session, payload: TaskCreate, family_id: int, user_id: int) 
     )
     create_notification(
         db,
-        user_id=user_id,
+        user_id=task.assigned_to or user_id,
         family_id=family_id,
         title="Task created",
         message=f"{payload.title} is now on the family board.",
@@ -68,10 +79,12 @@ def create_task(db: Session, payload: TaskCreate, family_id: int, user_id: int) 
 
 def update_task(db: Session, task_id: int, payload: TaskUpdate, family_id: int, user_id: int) -> dict:
     task = db.get(Task, task_id)
-    if not task or task.family_id != family_id:
+    if not task or task.family_id != family_id or not task.is_active:
         raise HTTPException(status_code=404, detail="Task not found")
 
     updates = payload.model_dump(exclude_unset=True)
+    if "assignedTo" in updates and updates["assignedTo"]:
+        _ensure_active_member(db, family_id, int(updates["assignedTo"]))
     field_map = {
         "title": "title",
         "description": "description",
@@ -108,7 +121,7 @@ def update_task(db: Session, task_id: int, payload: TaskUpdate, family_id: int, 
 
 def delete_task(db: Session, task_id: int, family_id: int, user_id: int) -> None:
     task = db.get(Task, task_id)
-    if not task or task.family_id != family_id:
+    if not task or task.family_id != family_id or not task.is_active:
         raise HTTPException(status_code=404, detail="Task not found")
     task.is_active = False
     write_audit_log(

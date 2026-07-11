@@ -1,10 +1,12 @@
 # FamilyHub Frontend
 
-Vite React + TypeScript frontend for the FamilyHub command center. It hydrates from `VITE_API_URL` when available and falls back to local demo data when the backend is offline.
+Vite React + TypeScript frontend for the FamilyHub command center. It hydrates authenticated app state from `VITE_API_URL`; local demo data is only the pre-auth/session placeholder.
 
 Implemented UI platform features:
 
 - React Router routes for dashboard, tasks, groceries, meals, family, assistant, and implementation views.
+- In-memory access-token handling with HttpOnly refresh-cookie rotation through the backend.
+- Rollback-aware optimistic updates for the main mutation workflows.
 - Persistent light/dark theme toggle.
 - Drag-and-drop task reassignment board powered by `@dnd-kit`.
 - Lazy-loaded Recharts analytics for household operations.

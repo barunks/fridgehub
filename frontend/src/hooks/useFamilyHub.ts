@@ -1,26 +1,19 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { createInitialFamilyHubState } from '@/data/seed'
-import { answerAssistantQuery } from '@/services/assistantEngine'
 import { api } from '@/services/api'
 import type {
+  AuditLogEntry,
   FamilyHubState,
+  GroceryItem,
   MealPlanItem,
   NewGroceryItemInput,
   NewTaskInput,
   Notification,
+  Permission,
+  Recipe,
+  Task,
 } from '@/types/familyHub'
 import { dateOffsetIso, dateTimeOffsetIso, todayIso } from '@/utils/date'
-
-const STORAGE_KEY = 'familyhub-ui-state-v1'
-
-const loadState = (): FamilyHubState => {
-  try {
-    const stored = window.localStorage.getItem(STORAGE_KEY)
-    return stored ? (JSON.parse(stored) as FamilyHubState) : createInitialFamilyHubState()
-  } catch {
-    return createInitialFamilyHubState()
-  }
-}
 
 const nextId = (items: { id: number }[]) => Math.max(0, ...items.map((item) => item.id)) + 1
 
@@ -45,10 +38,63 @@ const cycleLengthDays = {
   quarterly: 90,
 }
 
-export const useFamilyHub = (isAuthenticated = true) => {
-  const [state, setState] = useState<FamilyHubState>(loadState)
+type PaginationKey = 'groceryItems' | 'tasks' | 'recipes' | 'notifications' | 'auditLogs'
+
+interface PaginationState {
+  limit: number
+  offset: number
+  hasNext: boolean
+  isLoading: boolean
+}
+
+const defaultPaginationState = (): PaginationState => ({
+  limit: 10,
+  offset: 0,
+  hasNext: false,
+  isLoading: false,
+})
+
+const createPagination = (): Record<PaginationKey, PaginationState> => ({
+  groceryItems: defaultPaginationState(),
+  tasks: defaultPaginationState(),
+  recipes: defaultPaginationState(),
+  notifications: defaultPaginationState(),
+  auditLogs: defaultPaginationState(),
+})
+
+export const useFamilyHub = (
+  isAuthenticated = true,
+  currentUserId: number | null = null,
+  authCapabilities: Permission[] = [],
+  authRole: string | null = null,
+) => {
+  const [state, setState] = useState<FamilyHubState>(createInitialFamilyHubState)
   const [isLoading, setIsLoading] = useState(false)
+  const [isBackendUnavailable, setIsBackendUnavailable] = useState(false)
+  const [isBrowserOffline, setIsBrowserOffline] = useState(() => (typeof navigator === 'undefined' ? false : !navigator.onLine))
+  const [pagination, setPagination] = useState(createPagination)
+  const [groceryPageItems, setGroceryPageItems] = useState<GroceryItem[] | null>(null)
+  const [taskPageItems, setTaskPageItems] = useState<Task[] | null>(null)
+  const [recipePageItems, setRecipePageItems] = useState<Recipe[] | null>(null)
+  const [notificationPageItems, setNotificationPageItems] = useState<Notification[] | null>(null)
+  const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([])
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      return
+    }
+    setState((current) => ({
+      ...current,
+      capabilities: authCapabilities,
+      currentUser: {
+        ...current.currentUser,
+        userId: currentUserId ?? current.currentUser.userId,
+        role: authRole ?? current.currentUser.role,
+        capabilities: authCapabilities,
+      },
+    }))
+  }, [authCapabilities, authRole, currentUserId, isAuthenticated])
 
   // Auto-dismiss toast after 4 seconds
   useEffect(() => {
@@ -57,46 +103,198 @@ export const useFamilyHub = (isAuthenticated = true) => {
     return () => clearTimeout(timer)
   }, [feedback])
 
-  const refreshFromApi = () => {
-    if (!isAuthenticated) return
+  useEffect(() => {
+    const updateOnlineState = () => setIsBrowserOffline(!navigator.onLine)
+    window.addEventListener('online', updateOnlineState)
+    window.addEventListener('offline', updateOnlineState)
+    return () => {
+      window.removeEventListener('online', updateOnlineState)
+      window.removeEventListener('offline', updateOnlineState)
+    }
+  }, [])
+
+  const can = (permission: Permission) => (state.capabilities ?? []).includes(permission)
+
+  const guardPermission = (permission: Permission, message = 'This action is not available for your family role') => {
+    if (can(permission)) {
+      return true
+    }
+    setFeedback({ type: 'error', message })
+    return false
+  }
+
+  const refreshFromApi = useCallback(() => {
+    if (!isAuthenticated) {
+      setState(createInitialFamilyHubState())
+      setIsLoading(false)
+      return
+    }
     setIsLoading(true)
     api
       .bootstrap()
-      .then((payload) => setState(payload))
+      .then((payload) => {
+        setState(payload)
+        setIsBackendUnavailable(false)
+      })
       .catch((error: unknown) => {
         const msg = error instanceof Error ? error.message : 'API refresh failed'
         if (msg !== 'AUTH_REQUIRED') {
+          setIsBackendUnavailable(true)
           setFeedback({ type: 'error', message: msg })
         }
       })
       .finally(() => setIsLoading(false))
-  }
+  }, [isAuthenticated])
 
-  const syncApi = (operation: Promise<unknown>, successMessage: string) => {
+  const syncApi = (operation: Promise<unknown>, successMessage: string, rollback?: () => void) => {
     setIsLoading(true)
     operation
       .then(() => {
+        setIsBackendUnavailable(false)
         setFeedback({ type: 'success', message: successMessage })
         refreshFromApi()
       })
       .catch((error: unknown) => {
-        setFeedback({ type: 'error', message: error instanceof Error ? error.message : 'Save failed' })
+        rollback?.()
+        const message = error instanceof Error ? error.message : 'Save failed'
+        if (message === 'Failed to fetch' || message === 'NetworkError') {
+          setIsBackendUnavailable(true)
+        }
+        setFeedback({ type: 'error', message })
         setIsLoading(false)
       })
   }
 
-  useEffect(() => {
-    refreshFromApi()
-  }, [isAuthenticated])
+  const mutateWithRollback = (
+    update: (current: FamilyHubState) => FamilyHubState,
+    operation: Promise<unknown>,
+    successMessage: string,
+  ) => {
+    let snapshot: FamilyHubState | null = null
+    setState((current) => {
+      snapshot = current
+      return update(current)
+    })
+    syncApi(operation, successMessage, () => {
+      if (snapshot) setState(snapshot)
+    })
+  }
+
+  const updatePageState = (key: PaginationKey, offset: number, resultCount: number) => {
+    setPagination((current) => {
+      const limit = current[key].limit
+      return {
+        ...current,
+        [key]: {
+          ...current[key],
+          offset,
+          hasNext: resultCount === limit,
+          isLoading: false,
+        },
+      }
+    })
+  }
+
+  const setPageLoading = (key: PaginationKey, isLoading: boolean) => {
+    setPagination((current) => ({
+      ...current,
+      [key]: {
+        ...current[key],
+        isLoading,
+      },
+    }))
+  }
+
+  const pageError = (key: PaginationKey, error: unknown) => {
+    setPageLoading(key, false)
+    const message = error instanceof Error ? error.message : 'Page load failed'
+    if (message !== 'AUTH_REQUIRED') {
+      setIsBackendUnavailable(true)
+      setFeedback({ type: 'error', message })
+    }
+  }
+
+  const loadGroceryPage = (offset = pagination.groceryItems.offset, listTypeId?: number | 'all') => {
+    const key: PaginationKey = 'groceryItems'
+    const nextOffset = Math.max(0, offset)
+    setPageLoading(key, true)
+    api
+      .listGroceryItems({ limit: pagination.groceryItems.limit, offset: nextOffset, listTypeId })
+      .then((items) => {
+        setGroceryPageItems(items)
+        setIsBackendUnavailable(false)
+        updatePageState(key, nextOffset, items.length)
+      })
+      .catch((error) => pageError(key, error))
+  }
+
+  const loadTaskPage = (offset = pagination.tasks.offset, status?: string | 'all') => {
+    const key: PaginationKey = 'tasks'
+    const nextOffset = Math.max(0, offset)
+    setPageLoading(key, true)
+    api
+      .listTasks({ limit: pagination.tasks.limit, offset: nextOffset, status })
+      .then((items) => {
+        setTaskPageItems(items)
+        setIsBackendUnavailable(false)
+        updatePageState(key, nextOffset, items.length)
+      })
+      .catch((error) => pageError(key, error))
+  }
+
+  const loadRecipePage = (offset = pagination.recipes.offset) => {
+    const key: PaginationKey = 'recipes'
+    const nextOffset = Math.max(0, offset)
+    setPageLoading(key, true)
+    api
+      .listRecipes({ limit: pagination.recipes.limit, offset: nextOffset })
+      .then((items) => {
+        setRecipePageItems(items)
+        setIsBackendUnavailable(false)
+        updatePageState(key, nextOffset, items.length)
+      })
+      .catch((error) => pageError(key, error))
+  }
+
+  const loadNotificationPage = (offset = pagination.notifications.offset, unreadOnly = false) => {
+    const key: PaginationKey = 'notifications'
+    const nextOffset = Math.max(0, offset)
+    setPageLoading(key, true)
+    api
+      .listNotifications({ limit: pagination.notifications.limit, offset: nextOffset, unreadOnly })
+      .then((items) => {
+        setNotificationPageItems(items)
+        setIsBackendUnavailable(false)
+        updatePageState(key, nextOffset, items.length)
+      })
+      .catch((error) => pageError(key, error))
+  }
+
+  const loadAuditLogs = (offset = pagination.auditLogs.offset, entityType?: string) => {
+    if (!guardPermission('view_audit')) {
+      return
+    }
+    const key: PaginationKey = 'auditLogs'
+    const nextOffset = Math.max(0, offset)
+    setPageLoading(key, true)
+    api
+      .listAuditLogs({ limit: pagination.auditLogs.limit, offset: nextOffset, entityType })
+      .then((items) => {
+        setAuditLogs(items)
+        setIsBackendUnavailable(false)
+        updatePageState(key, nextOffset, items.length)
+      })
+      .catch((error) => pageError(key, error))
+  }
 
   useEffect(() => {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
-  }, [state])
+    refreshFromApi()
+  }, [refreshFromApi])
 
   const stats = useMemo(() => {
     const activeTasks = state.tasks.filter((task) => task.status !== 'completed' && task.status !== 'cancelled')
     const todayTasks = activeTasks.filter((task) => task.dueAt.slice(0, 10) === todayIso())
-    const pendingPurchases = state.groceryItems.filter((item) => !item.purchased && !item.currentStock)
+    const pendingPurchases = state.groceryItems.filter((item) => item.needsPurchase)
     const expiringItems = state.groceryItems.filter((item) => {
       if (!item.expiryDate) {
         return false
@@ -122,245 +320,324 @@ export const useFamilyHub = (isAuthenticated = true) => {
   }, [state])
 
   const toggleTaskStatus = (taskId: number) => {
+    if (!guardPermission('manage_tasks')) {
+      return
+    }
     const task = state.tasks.find((item) => item.id === taskId)
     const nextStatus = task?.status === 'completed' ? 'pending' : 'completed'
 
-    setState((current) => ({
-      ...current,
-      tasks: current.tasks.map((task) =>
-        task.id === taskId
-          ? {
-              ...task,
-              status: task.status === 'completed' ? 'pending' : 'completed',
-            }
-          : task,
-      ),
-    }))
-    syncApi(api.updateTask(taskId, { status: nextStatus }), 'Task updated')
+    mutateWithRollback(
+      (current) => ({
+        ...current,
+        tasks: current.tasks.map((task) =>
+          task.id === taskId
+            ? {
+                ...task,
+                status: task.status === 'completed' ? 'pending' : 'completed',
+              }
+            : task,
+        ),
+      }),
+      api.updateTask(taskId, { status: nextStatus }),
+      'Task updated',
+    )
   }
 
   const toggleGroceryPurchased = (itemId: number) => {
+    if (!guardPermission('manage_groceries')) {
+      return
+    }
     const item = state.groceryItems.find((current) => current.id === itemId)
     const purchased = !item?.purchased
 
-    setState((current) => ({
-      ...current,
-      groceryItems: current.groceryItems.map((item) =>
-        item.id === itemId
-          ? {
-              ...item,
-              purchased: !item.purchased,
-              currentStock: !item.purchased,
-            }
-          : item,
-      ),
-    }))
-    syncApi(api.updateGroceryItem(itemId, { purchased }), 'Grocery item updated')
+    mutateWithRollback(
+      (current) => ({
+        ...current,
+        groceryItems: current.groceryItems.map((item) =>
+          item.id === itemId
+            ? {
+                ...item,
+                purchased: !item.purchased,
+                currentStock: !item.purchased,
+                needsPurchase: item.purchased,
+              }
+            : item,
+        ),
+      }),
+      api.updateGroceryItem(itemId, { purchased }),
+      'Grocery item updated',
+    )
   }
 
   const toggleCurrentStock = (itemId: number) => {
+    if (!guardPermission('manage_groceries')) {
+      return
+    }
     const item = state.groceryItems.find((current) => current.id === itemId)
     const currentStock = !item?.currentStock
 
-    setState((current) => ({
-      ...current,
-      groceryItems: current.groceryItems.map((item) =>
-        item.id === itemId
-          ? {
-              ...item,
-              currentStock: !item.currentStock,
-            }
-          : item,
-      ),
-    }))
-    syncApi(api.updateGroceryItem(itemId, { currentStock }), 'Stock updated')
+    mutateWithRollback(
+      (current) => ({
+        ...current,
+        groceryItems: current.groceryItems.map((item) =>
+          item.id === itemId
+            ? {
+                ...item,
+                currentStock: !item.currentStock,
+                purchased: !item.currentStock,
+                needsPurchase: item.currentStock,
+              }
+            : item,
+        ),
+      }),
+      api.updateGroceryItem(itemId, { currentStock }),
+      'Stock updated',
+    )
   }
 
   const addGroceryItem = (input: NewGroceryItemInput) => {
-    setState((current) => {
-      const id = nextId(current.groceryItems)
-      const itemNumber = `GRC-${String(id).padStart(4, '0')}`
+    if (!guardPermission('manage_groceries')) {
+      return
+    }
+    mutateWithRollback(
+      (current) => {
+        const id = nextId(current.groceryItems)
+        const itemNumber = `GRC-${String(id).padStart(4, '0')}`
 
-      return {
-        ...current,
-        groceryItems: [
-          ...current.groceryItems,
-          {
-            id,
-            itemNumber,
-            itemName: input.itemName,
-            listTypeId: input.listTypeId,
-            quantity: input.quantity,
-            unit: input.unit,
-            purchaseFrequency: input.purchaseFrequency,
-            currentStock: input.currentStock,
-            startDate: todayIso(),
-            expiryDate: input.purchaseFrequency === 'weekly' ? dateOffsetIso(5) : undefined,
-            notes: input.notes,
-            familyId: current.family.id,
-            purchased: false,
-          },
-        ],
-        notifications: [
-          createNotification(
-            current.notifications,
-            'Grocery item added',
-            `${input.itemName} was added to the master list.`,
-            'grocery',
-          ),
-          ...current.notifications,
-        ],
-      }
-    })
-    syncApi(api.createGroceryItem(input), 'Grocery item added')
+        return {
+          ...current,
+          groceryItems: [
+            ...current.groceryItems,
+            {
+              id,
+              itemNumber,
+              itemName: input.itemName,
+              listTypeId: input.listTypeId,
+              quantity: input.quantity,
+              unit: input.unit,
+              purchaseFrequency: input.purchaseFrequency,
+              currentStock: input.currentStock,
+              startDate: todayIso(),
+              expiryDate: input.purchaseFrequency === 'weekly' ? dateOffsetIso(5) : undefined,
+              notes: input.notes,
+              familyId: current.family.id,
+              purchased: input.currentStock,
+              needsPurchase: !input.currentStock,
+            },
+          ],
+          notifications: [
+            createNotification(
+              current.notifications,
+              'Grocery item added',
+              `${input.itemName} was added to the master list.`,
+              'grocery',
+            ),
+            ...current.notifications,
+          ],
+        }
+      },
+      api.createGroceryItem(input),
+      'Grocery item added',
+    )
   }
 
   const regenerateGroceryCycles = () => {
-    setState((current) => {
-      const cycleKeys = Array.from(
-        new Set(current.groceryItems.map((item) => `${item.listTypeId}:${item.purchaseFrequency}`)),
-      )
-      const cycles = cycleKeys.map((key, index) => {
-        const [listTypeId, frequency] = key.split(':')
-        const days = cycleLengthDays[frequency as keyof typeof cycleLengthDays]
+    if (!guardPermission('manage_groceries')) {
+      return
+    }
+    mutateWithRollback(
+      (current) => {
+        const cycleKeys = Array.from(
+          new Set(current.groceryItems.map((item) => `${item.listTypeId}:${item.purchaseFrequency}`)),
+        )
+        const cycles = cycleKeys.map((key, index) => {
+          const [listTypeId, frequency] = key.split(':')
+          const days = cycleLengthDays[frequency as keyof typeof cycleLengthDays]
+
+          return {
+            id: index + 1,
+            listTypeId: Number(listTypeId),
+            frequency: frequency as keyof typeof cycleLengthDays,
+            cycleStartDate: todayIso(),
+            cycleEndDate: dateOffsetIso(days - 1),
+            isCompleted: false,
+          }
+        })
 
         return {
-          id: index + 1,
-          listTypeId: Number(listTypeId),
-          frequency: frequency as keyof typeof cycleLengthDays,
-          cycleStartDate: todayIso(),
-          cycleEndDate: dateOffsetIso(days - 1),
-          isCompleted: false,
+          ...current,
+          groceryCycles: cycles,
+          notifications: [
+            createNotification(
+              current.notifications,
+              'Grocery cycles regenerated',
+              `${cycles.length} purchase cycle${cycles.length === 1 ? '' : 's'} were rebuilt from the master list.`,
+              'grocery',
+            ),
+            ...current.notifications,
+          ],
         }
-      })
-
-      return {
-        ...current,
-        groceryCycles: cycles,
-        notifications: [
-          createNotification(
-            current.notifications,
-            'Grocery cycles regenerated',
-            `${cycles.length} purchase cycle${cycles.length === 1 ? '' : 's'} were rebuilt from the master list.`,
-            'grocery',
-          ),
-          ...current.notifications,
-        ],
-      }
-    })
-    syncApi(api.regenerateGroceryCycles(), 'Grocery cycles regenerated')
+      },
+      api.regenerateGroceryCycles(),
+      'Grocery cycles regenerated',
+    )
   }
 
   const addListType = (listName: string, description: string, colorClass: string) => {
-    setState((current) => ({
-      ...current,
-      listTypes: [
-        ...current.listTypes,
-        {
-          id: nextId(current.listTypes),
-          listName,
-          listType: 'standard',
-          description,
-          colorClass,
-        },
-      ],
-    }))
-    syncApi(api.createListType(listName, description, colorClass), 'Shopping list added')
+    if (!guardPermission('manage_groceries')) {
+      return
+    }
+    mutateWithRollback(
+      (current) => ({
+        ...current,
+        listTypes: [
+          ...current.listTypes,
+          {
+            id: nextId(current.listTypes),
+            listName,
+            listType: 'standard',
+            description,
+            colorClass,
+          },
+        ],
+      }),
+      api.createListType(listName, description, colorClass),
+      'Shopping list added',
+    )
   }
 
   const addTask = (input: NewTaskInput) => {
-    setState((current) => {
-      const dueDate = input.dueAt || dateTimeOffsetIso(0, 18)
+    if (!guardPermission('manage_tasks')) {
+      return
+    }
+    mutateWithRollback(
+      (current) => {
+        const dueDate = input.dueAt || dateTimeOffsetIso(0, 18)
 
-      return {
-        ...current,
-        tasks: [
-          ...current.tasks,
-          {
-            id: nextId(current.tasks),
-            title: input.title,
-            description: `${input.category} reminder`,
-            priority: input.priority,
-            status: 'pending',
-            dueAt: dueDate,
-            reminderAt: dueDate,
-            recurrenceType: input.recurrenceType || 'none',
-            recurrenceInterval: 1,
-            assignedTo: input.assignedTo,
-            category: input.category,
-            actionLabel: 'New',
-          },
-        ],
-        notifications: [
-          createNotification(current.notifications, 'Task created', `${input.title} is now on the family board.`, 'task'),
-          ...current.notifications,
-        ],
-      }
-    })
-    syncApi(api.createTask(input), 'Task added')
+        return {
+          ...current,
+          tasks: [
+            ...current.tasks,
+            {
+              id: nextId(current.tasks),
+              title: input.title,
+              description: `${input.category} reminder`,
+              priority: input.priority,
+              status: 'pending',
+              dueAt: dueDate,
+              reminderAt: input.reminderAt || dueDate,
+              recurrenceType: input.recurrenceType || 'none',
+              recurrenceInterval: 1,
+              assignedTo: input.assignedTo,
+              category: input.category,
+              actionLabel: 'New',
+            },
+          ],
+          notifications: [
+            createNotification(current.notifications, 'Task created', `${input.title} is now on the family board.`, 'task'),
+            ...current.notifications,
+          ],
+        }
+      },
+      api.createTask(input),
+      'Task added',
+    )
   }
 
   const reassignTask = (taskId: number, assignedTo: number) => {
-    setState((current) => ({
-      ...current,
-      tasks: current.tasks.map((task) => (task.id === taskId ? { ...task, assignedTo } : task)),
-    }))
-    syncApi(api.updateTask(taskId, { assignedTo }), 'Task reassigned')
+    if (!guardPermission('manage_tasks')) {
+      return
+    }
+    mutateWithRollback(
+      (current) => ({
+        ...current,
+        tasks: current.tasks.map((task) => (task.id === taskId ? { ...task, assignedTo } : task)),
+      }),
+      api.updateTask(taskId, { assignedTo }),
+      'Task reassigned',
+    )
   }
 
   const updateMeal = (mealId: number, mealName: string) => {
-    setState((current) => ({
-      ...current,
-      meals: current.meals.map((meal) => (meal.id === mealId ? { ...meal, mealName } : meal)),
-    }))
-    syncApi(api.updateMeal(mealId, mealName), 'Meal updated')
+    if (!guardPermission('manage_meals')) {
+      return
+    }
+    mutateWithRollback(
+      (current) => ({
+        ...current,
+        meals: current.meals.map((meal) => (meal.id === mealId ? { ...meal, mealName } : meal)),
+      }),
+      api.updateMeal(mealId, mealName),
+      'Meal updated',
+    )
   }
 
   const applyWeeklyTemplate = () => {
-    setState((current) => ({
-      ...current,
-      notifications: [
-        createNotification(
-          current.notifications,
-          'Weekly template applied',
-          'The full breakfast, lunch, snacks, and dinner plan is active for this week.',
-          'meal',
-        ),
-        ...current.notifications,
-      ],
-    }))
-    syncApi(api.applyMealTemplate(), 'Meal template applied')
+    if (!guardPermission('manage_meals')) {
+      return
+    }
+    mutateWithRollback(
+      (current) => ({
+        ...current,
+        notifications: [
+          createNotification(
+            current.notifications,
+            'Weekly template applied',
+            'The full breakfast, lunch, snacks, and dinner plan is active for this week.',
+            'meal',
+          ),
+          ...current.notifications,
+        ],
+      }),
+      api.applyMealTemplate(),
+      'Meal template applied',
+    )
   }
 
   const markNotificationRead = (notificationId: number) => {
-    setState((current) => ({
-      ...current,
-      notifications: current.notifications.map((notification) =>
-        notification.id === notificationId ? { ...notification, isRead: true } : notification,
-      ),
-    }))
-    syncApi(api.markNotificationRead(notificationId), 'Notification marked read')
+    if (!guardPermission('mark_notifications')) {
+      return
+    }
+    mutateWithRollback(
+      (current) => ({
+        ...current,
+        notifications: current.notifications.map((notification) =>
+          notification.id === notificationId ? { ...notification, isRead: true } : notification,
+        ),
+      }),
+      api.markNotificationRead(notificationId),
+      'Notification marked read',
+    )
   }
 
   const addAnnouncement = (title: string, message: string) => {
-    setState((current) => ({
-      ...current,
-      announcements: [
-        {
-          id: nextId(current.announcements),
-          title,
-          message,
-          ownerId: 1,
-          createdAt: new Date().toISOString(),
-          tag: 'family',
-        },
-        ...current.announcements,
-      ],
-    }))
-    syncApi(api.createAnnouncement(title, message), 'Announcement published')
+    if (!guardPermission('manage_announcements')) {
+      return
+    }
+    mutateWithRollback(
+      (current) => ({
+        ...current,
+        announcements: [
+          {
+            id: nextId(current.announcements),
+            title,
+            message,
+            ownerId: currentUserId || 0,
+            createdAt: new Date().toISOString(),
+            tag: 'family',
+          },
+          ...current.announcements,
+        ],
+      }),
+      api.createAnnouncement(title, message),
+      'Announcement published',
+    )
   }
 
   const askAssistant = (query: string) => {
+    if (!guardPermission('use_assistant')) {
+      return
+    }
     const trimmed = query.trim()
 
     if (!trimmed) {
@@ -369,7 +646,6 @@ export const useFamilyHub = (isAuthenticated = true) => {
 
     setState((current) => {
       const userMessageId = nextId(current.assistantMessages)
-      const answer = answerAssistantQuery(trimmed, current)
 
       return {
         ...current,
@@ -381,12 +657,6 @@ export const useFamilyHub = (isAuthenticated = true) => {
             content: trimmed,
             createdAt: new Date().toISOString(),
           },
-          {
-            id: userMessageId + 1,
-            sender: 'assistant',
-            content: answer,
-            createdAt: new Date().toISOString(),
-          },
         ],
       }
     })
@@ -395,6 +665,7 @@ export const useFamilyHub = (isAuthenticated = true) => {
       .then((response) => {
         setState((current) => ({
           ...current,
+          assistantInsights: response.insights,
           assistantMessages: current.assistantMessages.some(
             (message) => message.sender === 'assistant' && message.content === response.answer,
           )
@@ -410,13 +681,14 @@ export const useFamilyHub = (isAuthenticated = true) => {
               ],
         }))
       })
-      .catch(() => undefined)
+      .catch((error: unknown) => {
+        setFeedback({ type: 'error', message: error instanceof Error ? error.message : 'Assistant request failed' })
+      })
   }
 
   const resetDemoData = () => {
     const freshState = createInitialFamilyHubState()
     setState(freshState)
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(freshState))
   }
 
   const mealsByDay = useMemo(() => {
@@ -431,8 +703,26 @@ export const useFamilyHub = (isAuthenticated = true) => {
     stats,
     mealsByDay,
     isLoading,
+    isBackendUnavailable,
+    isBrowserOffline,
+    isOffline: isBackendUnavailable || isBrowserOffline,
     feedback,
+    currentUserId,
+    can,
+    pagination,
+    paged: {
+      groceryItems: groceryPageItems,
+      tasks: taskPageItems,
+      recipes: recipePageItems,
+      notifications: notificationPageItems,
+    },
+    auditLogs,
     clearFeedback: () => setFeedback(null),
+    loadGroceryPage,
+    loadTaskPage,
+    loadRecipePage,
+    loadNotificationPage,
+    loadAuditLogs,
     toggleTaskStatus,
     toggleGroceryPurchased,
     toggleCurrentStock,

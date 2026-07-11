@@ -1,6 +1,7 @@
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
+from app.core.permissions import normalize_permission
 from app.core.security import hash_password
 from app.models import EmergencyContact, FamilyMember, User
 from app.schemas.familyhub import (
@@ -18,8 +19,29 @@ from app.services.family_service import (
 from app.utils.sanitize import sanitize_text
 
 
+def _clean_permissions(values: list[str] | None) -> list[str] | None:
+    if values is None:
+        return None
+    cleaned = []
+    for value in values:
+        permission = normalize_permission(str(value))
+        if permission and permission not in cleaned:
+            cleaned.append(permission)
+    return cleaned
+
+
 def list_members(db: Session, family_id: int) -> list[dict]:
-    rows = db.query(FamilyMember).filter_by(family_id=family_id).order_by(FamilyMember.id).all()
+    rows = (
+        db.query(FamilyMember)
+        .join(User, FamilyMember.user_id == User.id)
+        .filter(
+            FamilyMember.family_id == family_id,
+            FamilyMember.is_active.is_(True),
+            User.is_active.is_(True),
+        )
+        .order_by(FamilyMember.id)
+        .all()
+    )
     return [serialize_member(row) for row in rows]
 
 
@@ -43,6 +65,7 @@ def create_member(db: Session, payload: FamilyMemberCreate, family_id: int, user
         color_class=sanitize_text(payload.colorClass),
         status=sanitize_text(payload.status),
         dietary_notes=[sanitize_text(note) for note in payload.dietaryNotes] if payload.dietaryNotes else None,
+        permissions=_clean_permissions(payload.permissions),
     )
     db.add(member)
     db.flush()
@@ -53,16 +76,17 @@ def create_member(db: Session, payload: FamilyMemberCreate, family_id: int, user
         action="create",
         entity_type="family_member",
         entity_id=member.user_id,
-        changes={"username": user.username, "role": member.role},
+        changes={"username": user.username, "role": member.role, "permissions": member.permissions or []},
     )
     db.commit()
     db.refresh(member)
     invalidate_entity("members", family_id)
+    invalidate_entity("family", family_id)
     return serialize_member(member)
 
 
 def update_member(db: Session, member_user_id: int, payload: FamilyMemberUpdate, family_id: int, user_id: int) -> dict:
-    member = db.query(FamilyMember).filter_by(family_id=family_id, user_id=member_user_id).first()
+    member = db.query(FamilyMember).filter_by(family_id=family_id, user_id=member_user_id, is_active=True).first()
     if not member:
         raise HTTPException(status_code=404, detail="Family member not found")
     updates = payload.model_dump(exclude_unset=True)
@@ -72,6 +96,8 @@ def update_member(db: Session, member_user_id: int, payload: FamilyMemberUpdate,
     if "role" in updates and updates["role"]:
         member.role = sanitize_text(updates["role"])
         member.user.family_role = member.role
+    if "permissions" in updates:
+        member.permissions = _clean_permissions(updates["permissions"])
     if "status" in updates and updates["status"]:
         member.status = sanitize_text(updates["status"])
     if "colorClass" in updates and updates["colorClass"]:
@@ -92,15 +118,25 @@ def update_member(db: Session, member_user_id: int, payload: FamilyMemberUpdate,
     db.commit()
     db.refresh(member)
     invalidate_entity("members", family_id)
+    invalidate_entity("family", family_id)
     return serialize_member(member)
 
 
 def delete_member(db: Session, member_user_id: int, family_id: int, user_id: int) -> None:
-    member = db.query(FamilyMember).filter_by(family_id=family_id, user_id=member_user_id).first()
+    if member_user_id == user_id:
+        raise HTTPException(status_code=409, detail="You cannot remove your own active membership")
+    member = db.query(FamilyMember).filter_by(family_id=family_id, user_id=member_user_id, is_active=True).first()
     if not member:
         raise HTTPException(status_code=404, detail="Family member not found")
-    # Soft-delete: deactivate user account instead of hard delete
-    member.user.is_active = False
+    member.is_active = False
+    member.status = "Inactive"
+    remaining_memberships = (
+        db.query(FamilyMember)
+        .filter(FamilyMember.user_id == member_user_id, FamilyMember.id != member.id, FamilyMember.is_active.is_(True))
+        .count()
+    )
+    if remaining_memberships == 0:
+        member.user.is_active = False
     write_audit_log(
         db,
         user_id=user_id,
@@ -111,6 +147,7 @@ def delete_member(db: Session, member_user_id: int, family_id: int, user_id: int
     )
     db.commit()
     invalidate_entity("members", family_id)
+    invalidate_entity("family", family_id)
 
 
 def list_emergency_contacts(db: Session, family_id: int) -> list[dict]:

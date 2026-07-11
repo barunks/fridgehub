@@ -1,5 +1,8 @@
 from collections.abc import Generator
+from pathlib import Path
 
+from alembic import command
+from alembic.config import Config
 from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
@@ -34,6 +37,8 @@ def get_db() -> Generator[Session, None, None]:
 
 
 def init_db() -> None:
-    import app.models  # noqa: F401
-
-    Base.metadata.create_all(bind=engine)
+    alembic_ini = Path(__file__).resolve().parents[2] / "alembic.ini"
+    config = Config(str(alembic_ini))
+    config.set_main_option("script_location", str(alembic_ini.parent / "alembic"))
+    config.set_main_option("sqlalchemy.url", settings.database_url)
+    command.upgrade(config, "head")

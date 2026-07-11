@@ -65,10 +65,35 @@ def update_meal(db: Session, meal_id: int, payload: MealUpdate, family_id: int, 
     return serialize_meal(meal)
 
 
-def apply_template(db: Session, family_id: int, user_id: int, template_name: str = "Default Weekly Meal Plan") -> list[dict]:
+def apply_template(db: Session, family_id: int, user_id: int, template_name: str | None = None) -> list[dict]:
+    selected_template_name = template_name
+    if not selected_template_name:
+        selected_template_name = (
+            db.query(MealPlanTemplate.template_name)
+            .filter(MealPlanTemplate.family_id == family_id, MealPlanTemplate.is_active.is_(True))
+            .order_by(MealPlanTemplate.id)
+            .limit(1)
+            .scalar()
+        )
+    if not selected_template_name:
+        selected_template_name = (
+            db.query(MealPlanTemplate.template_name)
+            .filter(MealPlanTemplate.is_global.is_(True), MealPlanTemplate.is_active.is_(True))
+            .order_by(MealPlanTemplate.id)
+            .limit(1)
+            .scalar()
+        )
+
+    if not selected_template_name:
+        raise HTTPException(status_code=404, detail="Meal template not found")
+
     templates = (
         db.query(MealPlanTemplate)
-        .filter_by(family_id=family_id, template_name=template_name, is_active=True)
+        .filter(
+            MealPlanTemplate.template_name == selected_template_name,
+            MealPlanTemplate.is_active.is_(True),
+            (MealPlanTemplate.family_id == family_id) | (MealPlanTemplate.is_global.is_(True)),
+        )
         .order_by(MealPlanTemplate.id)
         .all()
     )
@@ -121,7 +146,7 @@ def apply_template(db: Session, family_id: int, user_id: int, template_name: str
         family_id=family_id,
         action="apply_template",
         entity_type="meal_plan",
-        entity_id=template_name,
+        entity_id=selected_template_name,
     )
     db.commit()
     invalidate_entity("meals", family_id)

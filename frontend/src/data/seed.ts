@@ -1,5 +1,6 @@
 import type {
   Announcement,
+  AssistantInsight,
   AssistantMessage,
   EmergencyContact,
   Family,
@@ -11,6 +12,7 @@ import type {
   MealPlanItem,
   MealType,
   Notification,
+  Permission,
   Recipe,
   Task,
 } from '@/types/familyHub'
@@ -24,11 +26,45 @@ const family: Family = {
   planStatus: 'api-ready',
 }
 
+const parentCapabilities: Permission[] = [
+  'view_dashboard',
+  'view_tasks',
+  'view_groceries',
+  'view_meals',
+  'view_family',
+  'view_analytics',
+  'use_assistant',
+  'view_implementation',
+  'view_audit',
+  'view_cache_stats',
+  'manage_tasks',
+  'manage_groceries',
+  'manage_grocery_types',
+  'manage_meals',
+  'manage_recipes',
+  'manage_family',
+  'manage_announcements',
+  'manage_contacts',
+  'mark_notifications',
+]
+
+const childCapabilities: Permission[] = [
+  'view_dashboard',
+  'view_tasks',
+  'view_groceries',
+  'view_meals',
+  'view_family',
+  'view_analytics',
+  'use_assistant',
+  'mark_notifications',
+]
+
 const members: FamilyMember[] = [
   {
     id: 1,
     name: 'Meera',
     role: 'Mom',
+    permissions: parentCapabilities,
     colorClass: 'bg-pink-500',
     initial: 'M',
     status: 'Coordinating meals',
@@ -39,6 +75,7 @@ const members: FamilyMember[] = [
     id: 2,
     name: 'Dad',
     role: 'Parent',
+    permissions: parentCapabilities,
     colorClass: 'bg-blue-500',
     initial: 'D',
     status: 'Medication reminder due',
@@ -48,6 +85,7 @@ const members: FamilyMember[] = [
     id: 3,
     name: 'Ava',
     role: 'Child',
+    permissions: childCapabilities,
     colorClass: 'bg-emerald-500',
     initial: 'A',
     status: 'School event today',
@@ -58,6 +96,7 @@ const members: FamilyMember[] = [
     id: 4,
     name: 'Noah',
     role: 'Child',
+    permissions: childCapabilities,
     colorClass: 'bg-amber-400',
     initial: 'N',
     status: 'Soccer practice at 5 PM',
@@ -111,6 +150,7 @@ const groceryItems: GroceryItem[] = [
     notes: 'Buy lactose-free if available',
     familyId: 1,
     purchased: false,
+    needsPurchase: true,
   },
   {
     id: 2,
@@ -126,6 +166,7 @@ const groceryItems: GroceryItem[] = [
     notes: 'Use in veggie pasta',
     familyId: 1,
     purchased: false,
+    needsPurchase: true,
   },
   {
     id: 3,
@@ -140,6 +181,7 @@ const groceryItems: GroceryItem[] = [
     notes: 'Pantry low',
     familyId: 1,
     purchased: false,
+    needsPurchase: true,
   },
   {
     id: 4,
@@ -155,6 +197,7 @@ const groceryItems: GroceryItem[] = [
     notes: 'For cottage cheese lunch',
     familyId: 1,
     purchased: true,
+    needsPurchase: false,
   },
   {
     id: 5,
@@ -169,6 +212,7 @@ const groceryItems: GroceryItem[] = [
     notes: 'Eco refill pouch',
     familyId: 1,
     purchased: false,
+    needsPurchase: false,
   },
   {
     id: 6,
@@ -184,6 +228,7 @@ const groceryItems: GroceryItem[] = [
     notes: 'Breakfast and Friday dinner',
     familyId: 1,
     purchased: false,
+    needsPurchase: false,
   },
 ]
 
@@ -474,7 +519,33 @@ const assistantMessages: AssistantMessage[] = [
   },
 ]
 
+const assistantInsights: AssistantInsight[] = [
+  {
+    id: 'leave-window',
+    title: 'Leave window',
+    body: "Leave buffer is active for today's school event.",
+    type: 'schedule',
+    confidence: 91,
+    action: 'Open tasks',
+  },
+  {
+    id: 'expiry-watch',
+    title: 'Expiry watch',
+    body: 'Milk and spinach need attention before the next grocery cycle closes.',
+    type: 'grocery',
+    confidence: 88,
+    action: 'Review groceries',
+  },
+]
+
 export const createInitialFamilyHubState = (): FamilyHubState => ({
+  currentUser: {
+    userId: 1,
+    familyId: family.id,
+    role: 'Mom',
+    capabilities: parentCapabilities,
+  },
+  capabilities: parentCapabilities,
   family,
   members,
   listTypes,
@@ -487,4 +558,5 @@ export const createInitialFamilyHubState = (): FamilyHubState => ({
   announcements,
   emergencyContacts,
   assistantMessages,
+  assistantInsights,
 })

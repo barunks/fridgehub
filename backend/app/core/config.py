@@ -22,14 +22,25 @@ class Settings(BaseSettings):
 
     secret_key: str = Field(default_factory=lambda: secrets.token_urlsafe(48))
     algorithm: str = "HS256"
+    jwt_issuer: str = "familyhub-api"
+    jwt_audience: str = "familyhub-web"
     access_token_expire_minutes: int = 30
     refresh_token_expire_days: int = 7
     token_revocation_ttl_days: int = 30
+    auth_refresh_cookie_name: str = "familyhub_refresh"
+    auth_cookie_secure: bool = False
+    auth_cookie_samesite: Literal["lax", "strict", "none"] = "lax"
+    auth_cookie_domain: str | None = None
+    auth_expose_refresh_token_in_body: bool = False
 
-    cors_origins: str = "http://localhost:5173,http://localhost:3000,http://localhost:8080"
-    cors_allow_credentials: bool = False
+    cors_origins: str = (
+        "http://localhost:5173,http://localhost:3000,http://localhost:8080,"
+        "http://127.0.0.1:5173,http://127.0.0.1:3000,http://127.0.0.1:8080"
+    )
+    cors_allow_credentials: bool = True
     seed_on_startup: bool = True
     login_rate_limit_per_minute: int = 10
+    allow_memory_cache_in_production: bool = False
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
@@ -37,6 +48,10 @@ class Settings(BaseSettings):
     def validate_production_security(self) -> "Settings":
         if self.environment == "production" and len(self.secret_key) < 32:
             raise ValueError("SECRET_KEY must be set to at least 32 characters in production")
+        if self.environment == "production" and not self.auth_cookie_secure:
+            raise ValueError("AUTH_COOKIE_SECURE must be enabled in production")
+        if self.auth_cookie_samesite == "none" and not self.auth_cookie_secure:
+            raise ValueError("AUTH_COOKIE_SAMESITE=none requires AUTH_COOKIE_SECURE=true")
         return self
 
     @property

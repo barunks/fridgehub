@@ -9,7 +9,10 @@ os.environ["LOGIN_RATE_LIMIT_PER_MINUTE"] = "100"
 
 from fastapi.testclient import TestClient  # noqa: E402
 
+from app.core.database import SessionLocal  # noqa: E402
+from app.core.security import hash_password  # noqa: E402
 from app.main import app  # noqa: E402
+from app.models import User  # noqa: E402
 
 
 def auth_headers(client: TestClient, username: str = "meera") -> dict[str, str]:
@@ -20,6 +23,17 @@ def auth_headers(client: TestClient, username: str = "meera") -> dict[str, str]:
 
 def teardown_module() -> None:
     Path("test_familyhub.db").unlink(missing_ok=True)
+
+
+def restore_demo_password(username: str = "meera", password: str = "familyhub") -> None:
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter_by(username=username).one()
+        user.password_hash = hash_password(password)
+        user.token_version += 1
+        db.commit()
+    finally:
+        db.close()
 
 
 # --- Health & Bootstrap ---
@@ -61,7 +75,8 @@ def test_login_success_and_failure() -> None:
         r = client.post("/api/v1/auth/login", json={"username": "meera", "password": "familyhub"})
         assert r.status_code == 200
         assert "accessToken" in r.json()
-        assert "refreshToken" in r.json()
+        assert "refreshToken" not in r.json()
+        assert "familyhub_refresh" in r.headers["set-cookie"]
 
         r = client.post("/api/v1/auth/login", json={"username": "meera", "password": "wrong"})
         assert r.status_code == 401
@@ -72,7 +87,7 @@ def test_refresh_and_logout() -> None:
         login = client.post("/api/v1/auth/login", json={"username": "meera", "password": "familyhub"})
         tokens = login.json()
 
-        refreshed = client.post("/api/v1/auth/refresh", json={"refreshToken": tokens["refreshToken"]})
+        refreshed = client.post("/api/v1/auth/refresh", json={})
         assert refreshed.status_code == 200
         new_token = refreshed.json()["accessToken"]
 
@@ -92,15 +107,13 @@ def test_change_password() -> None:
         r = client.post("/api/v1/auth/login", json={"username": "meera", "password": "newpass123"})
         assert r.status_code == 200
 
-        # Restore
-        restore_headers = {"Authorization": f"Bearer {r.json()['accessToken']}"}
-        client.post("/api/v1/auth/change-password", json={"currentPassword": "newpass123", "newPassword": "familyhub"}, headers=restore_headers)
+        restore_demo_password()
 
 
 def test_change_password_wrong_current() -> None:
     with TestClient(app) as client:
         headers = auth_headers(client)
-        r = client.post("/api/v1/auth/change-password", json={"currentPassword": "wrong", "newPassword": "x" * 8}, headers=headers)
+        r = client.post("/api/v1/auth/change-password", json={"currentPassword": "wrong", "newPassword": "newpass123"}, headers=headers)
         assert r.status_code == 400
 
 
@@ -233,7 +246,7 @@ def test_recipe_crud() -> None:
 def test_member_crud() -> None:
     with TestClient(app) as client:
         headers = auth_headers(client)
-        payload = {"name": "TestUser", "email": "test@familyhub.local", "username": "testuser", "password": "familyhub", "role": "Child", "status": "Active", "colorClass": "bg-pink-500"}
+        payload = {"name": "TestUser", "email": "test@familyhub.local", "username": "testuser", "password": "familyhub1", "role": "Child", "status": "Active", "colorClass": "bg-pink-500"}
         created = client.post("/api/v1/family/members", json=payload, headers=headers)
         assert created.status_code == 200
         member_id = created.json()["id"]

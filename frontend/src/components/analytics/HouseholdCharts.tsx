@@ -26,13 +26,14 @@ const taskStatusLabels: Record<TaskStatus, string> = {
 }
 
 const dayOrder = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
-const chartPalette = ['#2563eb', '#10b981', '#f59e0b', '#e11d48', '#7c3aed', '#0891b2']
-const axisColor = '#64748b'
-const gridColor = '#dbe3ee'
+const chartPalette = ['#6366f1', '#10b981', '#f59e0b', '#e11d48', '#7c3aed', '#0891b2']
+const axisColor = '#94a3b8'
+const gridColor = '#e2e8f0'
 const tooltipStyle = {
-  border: '1px solid #dbe3ee',
-  borderRadius: 8,
-  boxShadow: '0 12px 30px rgba(15, 23, 42, 0.12)',
+  border: '1px solid #e2e8f0',
+  borderRadius: 12,
+  boxShadow: '0 12px 40px rgba(15, 23, 42, 0.1)',
+  fontSize: 12,
 }
 
 export const HouseholdCharts = ({ store }: { store: FamilyHubStore }) => {
@@ -79,14 +80,14 @@ export const HouseholdCharts = ({ store }: { store: FamilyHubStore }) => {
       <CardHeader className="flex flex-row items-center justify-between gap-3">
         <div>
           <CardTitle>Household Analytics</CardTitle>
-          <p className="mt-1 text-sm text-slate-500">Task flow, pantry coverage, calories, and reward activity</p>
+          <p className="mt-1 text-xs text-slate-400">Task flow, pantry coverage, calories, and rewards</p>
         </div>
         <Badge tone="violet">Live charts</Badge>
       </CardHeader>
-      <CardContent className="grid gap-5 xl:grid-cols-2">
-        <section className="rounded-lg border border-slate-100 bg-slate-50 p-4" aria-label="Task status chart">
-          <div className="mb-3 flex items-center justify-between gap-2">
-            <h3 className="text-sm font-semibold text-slate-950">Task Status</h3>
+      <CardContent className="grid gap-6 xl:grid-cols-2">
+        <section className="rounded-2xl border border-slate-100/80 bg-slate-50/50 p-5" aria-label="Task status chart">
+          <div className="mb-4 flex items-center justify-between gap-2">
+            <h3 className="text-sm font-semibold text-slate-900">Task Status</h3>
             <Badge tone="slate">{state.tasks.length} total</Badge>
           </div>
           <div className="h-64">
@@ -101,9 +102,9 @@ export const HouseholdCharts = ({ store }: { store: FamilyHubStore }) => {
               </PieChart>
             </ResponsiveContainer>
           </div>
-          <div className="mt-2 flex flex-wrap gap-2">
+          <div className="mt-3 flex flex-wrap gap-3">
             {taskStatusData.map((item, index) => (
-              <span className="inline-flex items-center gap-2 text-xs text-slate-600" key={item.name}>
+              <span className="inline-flex items-center gap-2 text-[11px] text-slate-500" key={item.name}>
                 <span className="size-2.5 rounded-full" style={{ backgroundColor: chartPalette[index % chartPalette.length] }} />
                 {item.name}: {item.value}
               </span>
@@ -111,42 +112,42 @@ export const HouseholdCharts = ({ store }: { store: FamilyHubStore }) => {
           </div>
         </section>
 
-        <section className="rounded-lg border border-slate-100 bg-slate-50 p-4" aria-label="Grocery stock chart">
-          <div className="mb-3 flex items-center justify-between gap-2">
-            <h3 className="text-sm font-semibold text-slate-950">Grocery Coverage</h3>
+        <section className="rounded-2xl border border-slate-100/80 bg-slate-50/50 p-5" aria-label="Grocery stock chart">
+          <div className="mb-4 flex items-center justify-between gap-2">
+            <h3 className="text-sm font-semibold text-slate-900">Grocery Coverage</h3>
             <Badge tone="amber">Low vs stocked</Badge>
           </div>
           <div className="h-64">
             <ResponsiveContainer height="100%" width="100%">
               <BarChart data={groceryData}>
                 <CartesianGrid stroke={gridColor} strokeDasharray="3 3" vertical={false} />
-                <XAxis dataKey="name" stroke={axisColor} tickLine={false} />
-                <YAxis allowDecimals={false} stroke={axisColor} tickLine={false} />
+                <XAxis dataKey="name" stroke={axisColor} tickLine={false} fontSize={11} />
+                <YAxis allowDecimals={false} stroke={axisColor} tickLine={false} fontSize={11} />
                 <Tooltip contentStyle={tooltipStyle} />
-                <Bar dataKey="low" fill="#f59e0b" name="Low stock" radius={[6, 6, 0, 0]} />
-                <Bar dataKey="stocked" fill="#10b981" name="In stock" radius={[6, 6, 0, 0]} />
+                <Bar dataKey="low" fill="#f59e0b" name="Low stock" radius={[8, 8, 0, 0]} />
+                <Bar dataKey="stocked" fill="#10b981" name="In stock" radius={[8, 8, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
         </section>
 
-        <section className="rounded-lg border border-slate-100 bg-slate-50 p-4" aria-label="Meal calories chart">
-          <div className="mb-3 flex items-center justify-between gap-2">
-            <h3 className="text-sm font-semibold text-slate-950">Weekly Calories</h3>
+        <section className="rounded-2xl border border-slate-100/80 bg-slate-50/50 p-5" aria-label="Meal calories chart">
+          <div className="mb-4 flex items-center justify-between gap-2">
+            <h3 className="text-sm font-semibold text-slate-900">Weekly Calories</h3>
             <Badge tone="green">Meal plan</Badge>
           </div>
           <div className="h-64">
             <ResponsiveContainer height="100%" width="100%">
               <LineChart data={caloriesData}>
                 <CartesianGrid stroke={gridColor} strokeDasharray="3 3" vertical={false} />
-                <XAxis dataKey="day" stroke={axisColor} tickLine={false} />
-                <YAxis stroke={axisColor} tickLine={false} />
+                <XAxis dataKey="day" stroke={axisColor} tickLine={false} fontSize={11} />
+                <YAxis stroke={axisColor} tickLine={false} fontSize={11} />
                 <Tooltip contentStyle={tooltipStyle} />
                 <Line
                   dataKey="calories"
-                  dot={{ r: 4, strokeWidth: 2 }}
+                  dot={{ r: 5, strokeWidth: 2, fill: '#fff' }}
                   name="Calories"
-                  stroke="#2563eb"
+                  stroke="#6366f1"
                   strokeWidth={3}
                   type="monotone"
                 />
@@ -155,19 +156,19 @@ export const HouseholdCharts = ({ store }: { store: FamilyHubStore }) => {
           </div>
         </section>
 
-        <section className="rounded-lg border border-slate-100 bg-slate-50 p-4" aria-label="Reward points chart">
-          <div className="mb-3 flex items-center justify-between gap-2">
-            <h3 className="text-sm font-semibold text-slate-950">Reward Points</h3>
-            <Badge tone="blue">Family</Badge>
+        <section className="rounded-2xl border border-slate-100/80 bg-slate-50/50 p-5" aria-label="Reward points chart">
+          <div className="mb-4 flex items-center justify-between gap-2">
+            <h3 className="text-sm font-semibold text-slate-900">Reward Points</h3>
+            <Badge tone="indigo">Family</Badge>
           </div>
           <div className="h-64">
             <ResponsiveContainer height="100%" width="100%">
               <BarChart data={memberPointsData} layout="vertical">
                 <CartesianGrid stroke={gridColor} strokeDasharray="3 3" horizontal={false} />
-                <XAxis allowDecimals={false} stroke={axisColor} tickLine={false} type="number" />
-                <YAxis dataKey="name" stroke={axisColor} tickLine={false} type="category" width={74} />
+                <XAxis allowDecimals={false} stroke={axisColor} tickLine={false} type="number" fontSize={11} />
+                <YAxis dataKey="name" stroke={axisColor} tickLine={false} type="category" width={74} fontSize={11} />
                 <Tooltip contentStyle={tooltipStyle} />
-                <Bar dataKey="points" fill="#7c3aed" name="Points" radius={[0, 6, 6, 0]} />
+                <Bar dataKey="points" fill="#6366f1" name="Points" radius={[0, 8, 8, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>

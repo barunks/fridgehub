@@ -34,7 +34,6 @@ export const CommandPalette = ({ store }: CommandPaletteProps) => {
   const inputRef = useRef<HTMLInputElement>(null)
   const navigate = useNavigate()
 
-  // Cmd+K / Ctrl+K to open
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
@@ -106,10 +105,10 @@ export const CommandPalette = ({ store }: CommandPaletteProps) => {
     <div className="fixed inset-0 z-[100] flex items-start justify-center pt-[15vh]" onClick={() => setOpen(false)}>
       <div className="fixed inset-0 bg-black/40 backdrop-blur-sm" />
       <div
-        className="relative z-10 w-full max-w-lg rounded-xl border border-slate-200 bg-white shadow-2xl"
+        className="relative z-10 w-full max-w-lg animate-scale-in rounded-2xl border border-slate-200/60 bg-white/95 shadow-2xl backdrop-blur-xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center gap-3 border-b border-slate-100 px-4 py-3">
+        <div className="flex items-center gap-3 border-b border-slate-100/80 px-5 py-4">
           <Search className="size-5 text-slate-400" aria-hidden="true" />
           <input
             ref={inputRef}
@@ -120,26 +119,26 @@ export const CommandPalette = ({ store }: CommandPaletteProps) => {
             type="text"
             value={query}
           />
-          <kbd className="hidden rounded border border-slate-200 px-1.5 py-0.5 text-[10px] font-medium text-slate-400 sm:inline">
+          <kbd className="hidden rounded-lg border border-slate-200 px-2 py-1 text-[10px] font-medium text-slate-400 sm:inline">
             ESC
           </kbd>
-          <button className="rounded p-1 text-slate-400 hover:text-slate-600" onClick={() => setOpen(false)} type="button">
+          <button className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600" onClick={() => setOpen(false)} type="button">
             <X className="size-4" />
           </button>
         </div>
 
         {query.trim() && (
-          <div className="max-h-72 overflow-auto p-2">
+          <div className="max-h-72 overflow-auto p-2.5">
             {results.length === 0 ? (
-              <p className="px-3 py-6 text-center text-sm text-slate-400">No results found</p>
+              <p className="px-3 py-8 text-center text-sm text-slate-400">No results found</p>
             ) : (
               results.map((result, index) => {
                 const Icon = result.icon
                 return (
                   <button
                     className={cn(
-                      'flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm transition',
-                      index === selectedIndex ? 'bg-blue-50 text-blue-700' : 'text-slate-700 hover:bg-slate-50',
+                      'flex w-full items-center gap-3 rounded-xl px-3.5 py-3 text-left text-sm transition-all duration-150',
+                      index === selectedIndex ? 'bg-indigo-50 text-indigo-700' : 'text-slate-700 hover:bg-slate-50',
                     )}
                     key={result.id}
                     onClick={() => selectResult(result)}
@@ -149,7 +148,7 @@ export const CommandPalette = ({ store }: CommandPaletteProps) => {
                     <Icon className="size-4 shrink-0 opacity-60" aria-hidden="true" />
                     <div className="min-w-0 flex-1">
                       <p className="truncate font-medium">{result.label}</p>
-                      <p className="truncate text-xs opacity-60">{result.sublabel}</p>
+                      <p className="truncate text-[11px] opacity-60">{result.sublabel}</p>
                     </div>
                   </button>
                 )
@@ -159,7 +158,7 @@ export const CommandPalette = ({ store }: CommandPaletteProps) => {
         )}
 
         {!query.trim() && (
-          <div className="px-4 py-6 text-center text-sm text-slate-400">
+          <div className="px-5 py-8 text-center text-sm text-slate-400">
             Start typing to search across tasks, groceries, meals, and family members
           </div>
         )}

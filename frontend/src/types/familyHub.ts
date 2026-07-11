@@ -15,12 +15,40 @@ export type TaskStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled'
 export type RecurrenceType = 'none' | 'daily' | 'weekly' | 'monthly' | 'yearly'
 export type Frequency = 'daily' | 'weekly' | 'monthly' | 'quarterly'
 export type MealType = 'breakfast' | 'lunch' | 'snacks' | 'dinner'
+export type Permission =
+  | 'view_dashboard'
+  | 'view_tasks'
+  | 'view_groceries'
+  | 'view_meals'
+  | 'view_family'
+  | 'view_analytics'
+  | 'use_assistant'
+  | 'view_implementation'
+  | 'view_audit'
+  | 'view_cache_stats'
+  | 'manage_tasks'
+  | 'manage_groceries'
+  | 'manage_grocery_types'
+  | 'manage_meals'
+  | 'manage_recipes'
+  | 'manage_family'
+  | 'manage_announcements'
+  | 'manage_contacts'
+  | 'mark_notifications'
 
 export interface NavItem {
   key: ViewKey
   label: string
   icon: LucideIcon
   path: string
+  requiredPermission?: Permission
+}
+
+export interface CurrentSession {
+  userId: number
+  familyId: number
+  role: string
+  capabilities: Permission[]
 }
 
 export interface Family {
@@ -35,6 +63,7 @@ export interface FamilyMember {
   id: number
   name: string
   role: string
+  permissions: Permission[]
   colorClass: string
   initial: string
   status: string
@@ -64,6 +93,7 @@ export interface GroceryItem {
   notes: string
   familyId: number
   purchased: boolean
+  needsPurchase: boolean
 }
 
 export interface GroceryCycle {
@@ -159,6 +189,8 @@ export interface AssistantMessage {
 }
 
 export interface FamilyHubState {
+  currentUser: CurrentSession
+  capabilities: Permission[]
   family: Family
   members: FamilyMember[]
   listTypes: GroceryListType[]
@@ -171,6 +203,19 @@ export interface FamilyHubState {
   announcements: Announcement[]
   emergencyContacts: EmergencyContact[]
   assistantMessages: AssistantMessage[]
+  assistantInsights: AssistantInsight[]
+}
+
+export interface AuditLogEntry {
+  id: number
+  userId?: number | null
+  action?: string | null
+  entityType?: string | null
+  entityId?: string | null
+  changes?: Record<string, unknown> | null
+  ipAddress?: string | null
+  userAgent?: string | null
+  createdAt: string
 }
 
 export interface NewGroceryItemInput {
@@ -188,6 +233,7 @@ export interface NewTaskInput {
   category: string
   priority: Priority
   dueAt: string
+  reminderAt?: string
   assignedTo: number
   recurrenceType?: RecurrenceType
 }
