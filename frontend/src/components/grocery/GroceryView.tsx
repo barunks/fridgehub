@@ -248,9 +248,9 @@ export const GroceryView = ({ store }: { store: FamilyHubStore }) => {
                         </div>
                         <Badge tone="slate">{items.length} items</Badge>
                       </div>
-                      <div className="stagger-children grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                      <div className="stagger-children grid gap-3 sm:grid-cols-2">
                         {items.map((item) => (
-                          <article className={cn('hover-card rounded-2xl border border-slate-100 bg-white p-4 shadow-sm', item.expiryDate && !item.currentStock && 'expiry-ring')} key={item.id}>
+                          <article className={cn('hover-card flex flex-col rounded-2xl border border-slate-100 bg-white p-4 shadow-sm', item.expiryDate && !item.currentStock && 'expiry-ring')} key={item.id}>
                             <div className="flex items-start justify-between gap-3">
                               <div className="min-w-0">
                                 <p className="text-[11px] font-semibold uppercase text-slate-400">{item.itemNumber}</p>
@@ -278,7 +278,7 @@ export const GroceryView = ({ store }: { store: FamilyHubStore }) => {
                               {item.expiryDate && <Badge tone="rose">Expires {formatCompactDate(item.expiryDate)}</Badge>}
                             </div>
                             {item.notes && <p className="mt-3 line-clamp-2 text-xs leading-5 text-slate-500">{item.notes}</p>}
-                            <div className="mt-4 flex items-center justify-between gap-2 border-t border-slate-100 pt-3">
+                            <div className="mt-auto flex items-center justify-between gap-2 border-t border-slate-100 pt-3">
                               <p className="text-[11px] text-slate-400">Started {formatCompactDate(item.startDate)}</p>
                               <button
                                 className={cn(
