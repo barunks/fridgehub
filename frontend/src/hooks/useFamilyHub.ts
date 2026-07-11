@@ -677,6 +677,32 @@ export const useFamilyHub = (
     )
   }
 
+  const addMember = (input: { name: string; email: string; username: string; password: string; role: string; colorClass: string }) => {
+    if (!guardPermission('manage_family')) {
+      return
+    }
+    mutateWithRollback(
+      (current) => ({
+        ...current,
+        members: [
+          ...current.members,
+          {
+            id: nextId(current.members),
+            name: input.name,
+            role: input.role,
+            permissions: [],
+            colorClass: input.colorClass,
+            initial: input.name.charAt(0).toUpperCase(),
+            status: 'Active',
+            points: 0,
+          },
+        ],
+      }),
+      api.createMember(input),
+      'Member added',
+    )
+  }
+
   const askAssistant = (query: string) => {
     if (!guardPermission('use_assistant')) {
       return
@@ -779,6 +805,7 @@ export const useFamilyHub = (
     markNotificationRead,
     markAllNotificationsRead,
     addAnnouncement,
+    addMember,
     askAssistant,
     resetDemoData,
   }

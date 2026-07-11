@@ -251,7 +251,7 @@ export const GroceryView = ({ store }: { store: FamilyHubStore }) => {
                     {filteredItems.map((item) => {
                       const listType = state.listTypes.find((lt) => lt.id === item.listTypeId)
                       return (
-                        <article className={cn('hover-card flex flex-col rounded-2xl border border-slate-100 bg-white p-4 shadow-sm', item.expiryDate && !item.currentStock && 'expiry-ring')} key={item.id}>
+                        <article className={cn('hover-card flex flex-col rounded-2xl border-2 border-slate-100 bg-gradient-to-br from-white to-slate-50/50 p-5 shadow-[0_4px_16px_rgb(15_23_42/0.05)]', item.expiryDate && !item.currentStock && 'expiry-ring border-amber-200/60')} key={item.id}>
                           <div className="flex items-start justify-between gap-3">
                             <div className="min-w-0">
                               <div className="flex items-center gap-2">

@@ -150,9 +150,9 @@ export const MealPlanView = ({ store }: { store: FamilyHubStore }) => {
                         return (
                           <button
                             className={cn(
-                              'grid min-h-[6rem] content-between rounded-2xl px-3 py-3 text-left text-white shadow-sm transition-all duration-300 hover:scale-[1.04] hover:shadow-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-indigo-500',
+                              'grid min-h-[6.5rem] content-between rounded-2xl px-3.5 py-3.5 text-left text-white shadow-md transition-all duration-300 hover:scale-[1.05] hover:shadow-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-indigo-500',
                               meal.colorClass,
-                              active && 'ring-[3px] ring-white/50 shadow-xl scale-[1.06] z-10 relative',
+                              active && 'ring-[3px] ring-white/60 shadow-xl scale-[1.06] z-10 relative',
                             )}
                             key={`${day}-${column.key}`}
                             onClick={() => selectMeal(meal)}

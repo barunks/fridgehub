@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
-import { Bell, HeartPulse, Megaphone, Phone, ShieldCheck, Users } from 'lucide-react'
+import { Bell, HeartPulse, Megaphone, Phone, Plus, ShieldCheck, UserPlus, Users } from 'lucide-react'
 import { Avatar } from '@/components/ui/Avatar'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
@@ -9,8 +9,20 @@ import { FormField, inputClass } from '@/components/ui/FormField'
 import type { FamilyHubStore } from '@/hooks/useFamilyHub'
 import { formatCompactDate } from '@/utils/date'
 
+const colorOptions = [
+  { value: 'bg-indigo-500', label: 'Indigo' },
+  { value: 'bg-rose-500', label: 'Rose' },
+  { value: 'bg-emerald-500', label: 'Green' },
+  { value: 'bg-amber-500', label: 'Amber' },
+  { value: 'bg-teal-500', label: 'Teal' },
+  { value: 'bg-violet-500', label: 'Violet' },
+  { value: 'bg-sky-500', label: 'Sky' },
+  { value: 'bg-pink-500', label: 'Pink' },
+]
+
 export const FamilyView = ({ store }: { store: FamilyHubStore }) => {
-  const { state, addAnnouncement, markNotificationRead, loadNotificationPage, loadAuditLogs } = store
+  const { state, addAnnouncement, addMember, markNotificationRead, loadNotificationPage, loadAuditLogs } = store
+  const canManageFamily = store.can('manage_family')
   const canManageAnnouncements = store.can('manage_announcements')
   const canViewAudit = store.can('view_audit')
   const notifications = store.paged.notifications ?? state.notifications
@@ -18,16 +30,19 @@ export const FamilyView = ({ store }: { store: FamilyHubStore }) => {
   const auditPage = store.pagination.auditLogs
   const [title, setTitle] = useState('')
   const [message, setMessage] = useState('')
+  const [showAddMember, setShowAddMember] = useState(false)
+  const [showAudit, setShowAudit] = useState(false)
+  const [memberDraft, setMemberDraft] = useState({ name: '', email: '', username: '', password: '', role: 'member', colorClass: 'bg-indigo-500' })
 
   useEffect(() => {
     loadNotificationPage(0)
   }, [loadNotificationPage])
 
   useEffect(() => {
-    if (canViewAudit) {
+    if (showAudit && canViewAudit) {
       loadAuditLogs(0)
     }
-  }, [loadAuditLogs, canViewAudit])
+  }, [loadAuditLogs, canViewAudit, showAudit])
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -55,11 +70,63 @@ export const FamilyView = ({ store }: { store: FamilyHubStore }) => {
                 <CardTitle>Family At A Glance</CardTitle>
                 <p className="mt-1 text-xs text-slate-400">{state.family.homeBase} household</p>
               </div>
-              <div className="flex size-9 items-center justify-center rounded-xl bg-indigo-50">
-                <Users className="size-4 text-indigo-600" aria-hidden="true" />
+              <div className="flex items-center gap-2">
+                {canManageFamily && (
+                  <Button variant="outline" onClick={() => setShowAddMember(!showAddMember)}>
+                    <UserPlus className="size-4" aria-hidden="true" />
+                    Add member
+                  </Button>
+                )}
+                <div className="flex size-9 items-center justify-center rounded-xl bg-indigo-50">
+                  <Users className="size-4 text-indigo-600" aria-hidden="true" />
+                </div>
               </div>
             </CardHeader>
             <CardContent>
+              {canManageFamily && showAddMember && (
+                <form
+                  className="mb-5 grid gap-3 rounded-2xl border-2 border-indigo-100 bg-indigo-50/30 p-5"
+                  onSubmit={(e) => {
+                    e.preventDefault()
+                    if (!memberDraft.name.trim() || !memberDraft.username.trim() || !memberDraft.email.trim() || !memberDraft.password.trim()) return
+                    addMember(memberDraft)
+                    setMemberDraft({ name: '', email: '', username: '', password: '', role: 'member', colorClass: 'bg-indigo-500' })
+                    setShowAddMember(false)
+                  }}
+                >
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <FormField label="Full name">
+                      <input className={inputClass} onChange={(e) => setMemberDraft((d) => ({ ...d, name: e.target.value }))} placeholder="e.g. Ava Sharma" value={memberDraft.name} />
+                    </FormField>
+                    <FormField label="Username">
+                      <input className={inputClass} onChange={(e) => setMemberDraft((d) => ({ ...d, username: e.target.value }))} placeholder="e.g. ava" value={memberDraft.username} />
+                    </FormField>
+                    <FormField label="Email">
+                      <input className={inputClass} onChange={(e) => setMemberDraft((d) => ({ ...d, email: e.target.value }))} placeholder="e.g. ava@family.com" type="email" value={memberDraft.email} />
+                    </FormField>
+                    <FormField label="Password">
+                      <input className={inputClass} onChange={(e) => setMemberDraft((d) => ({ ...d, password: e.target.value }))} placeholder="Min 8 characters" type="password" value={memberDraft.password} />
+                    </FormField>
+                    <FormField label="Role">
+                      <select className={inputClass} onChange={(e) => setMemberDraft((d) => ({ ...d, role: e.target.value }))} value={memberDraft.role}>
+                        <option value="member">Member</option>
+                        <option value="Dad">Dad</option>
+                        <option value="Mom">Mom</option>
+                        <option value="Child">Child</option>
+                      </select>
+                    </FormField>
+                    <FormField label="Color">
+                      <select className={inputClass} onChange={(e) => setMemberDraft((d) => ({ ...d, colorClass: e.target.value }))} value={memberDraft.colorClass}>
+                        {colorOptions.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+                      </select>
+                    </FormField>
+                  </div>
+                  <Button type="submit">
+                    <Plus className="size-4" aria-hidden="true" />
+                    Add to family
+                  </Button>
+                </form>
+              )}
               <div className="stagger-children grid gap-4 md:grid-cols-2">
                 {state.members.map((member) => (
                   <article className="group rounded-2xl border border-slate-100/80 bg-slate-50/50 p-5 transition-all duration-200 hover:bg-white hover:shadow-md hover:border-slate-200" key={member.id}>
@@ -226,10 +293,16 @@ export const FamilyView = ({ store }: { store: FamilyHubStore }) => {
 
           {canViewAudit && (
             <Card>
-              <CardHeader>
-                <CardTitle>Audit History</CardTitle>
-                <p className="mt-1 text-xs text-slate-400">Security and household changes recorded by the backend</p>
+              <CardHeader className="flex flex-row items-center justify-between gap-3">
+                <div>
+                  <CardTitle>Audit History</CardTitle>
+                  <p className="mt-1 text-xs text-slate-400">Security and household changes</p>
+                </div>
+                <Button variant="secondary" onClick={() => setShowAudit(!showAudit)}>
+                  {showAudit ? 'Hide' : 'Show'}
+                </Button>
               </CardHeader>
+              {showAudit && (
               <CardContent className="grid gap-2.5">
                 {store.auditLogs.length === 0 ? (
                   <p className="rounded-xl border border-slate-100 bg-slate-50 p-4 text-sm text-slate-500">No audit entries loaded.</p>
@@ -274,6 +347,7 @@ export const FamilyView = ({ store }: { store: FamilyHubStore }) => {
                   </div>
                 </div>
               </CardContent>
+              )}
             </Card>
           )}
         </aside>

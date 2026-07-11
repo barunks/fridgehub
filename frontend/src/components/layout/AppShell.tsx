@@ -1,15 +1,20 @@
-import { useEffect, useState, type PropsWithChildren } from 'react'
+import { useEffect, useMemo, useState, type PropsWithChildren } from 'react'
 import { NavLink } from 'react-router-dom'
 import {
   Bell,
   Bot,
   CheckCheck,
+  Flame,
   LayoutDashboard,
   LogOut,
   Moon,
+  Phone,
   Search,
   Settings2,
+  Shield,
   Sun,
+  Sunrise,
+  Sunset,
   X,
 } from 'lucide-react'
 import { Avatar } from '@/components/ui/Avatar'
@@ -39,8 +44,41 @@ export const AppShell = ({ activeView, onLogout, onNavigate, onToggleTheme, stor
   const themeLabel = theme === 'dark' ? 'Use light mode' : 'Use dark mode'
   const currentMember = state.members.find((member) => member.id === store.currentUserId)
   const displayName = currentMember?.name || username || 'Family'
-  const hour = Number(new Intl.DateTimeFormat(undefined, { hour: 'numeric', hour12: false }).format(new Date()))
-  const greetingText = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening'
+  const timeContext = useMemo(() => {
+    const now = new Date()
+    const hour = now.getHours()
+    const homeBase = state.family.homeBase || 'Singapore'
+    let greeting: string
+    let timeIcon: typeof Sun
+    let iconClass: string
+    let bgAccent: string
+
+    if (hour >= 5 && hour < 12) {
+      greeting = 'Good morning'
+      timeIcon = Sunrise
+      iconClass = 'time-icon-morning text-amber-400'
+      bgAccent = 'from-amber-100/60 via-orange-50/40 to-transparent'
+    } else if (hour >= 12 && hour < 17) {
+      greeting = 'Good afternoon'
+      timeIcon = Sun
+      iconClass = 'time-icon-morning text-yellow-500'
+      bgAccent = 'from-yellow-100/50 via-amber-50/30 to-transparent'
+    } else if (hour >= 17 && hour < 20) {
+      greeting = 'Good evening'
+      timeIcon = Sunset
+      iconClass = 'time-icon-morning text-orange-500'
+      bgAccent = 'from-orange-100/50 via-rose-50/30 to-transparent'
+    } else {
+      greeting = 'Good night'
+      timeIcon = Moon
+      iconClass = 'time-icon-night text-indigo-300'
+      bgAccent = 'from-indigo-100/50 via-violet-50/30 to-transparent'
+    }
+
+    return { greeting, timeIcon, iconClass, bgAccent, homeBase, hour }
+  }, [state.family.homeBase])
+  const greetingText = timeContext.greeting
+  const TimeIcon = timeContext.timeIcon
   const visibleNavItems = navItems.filter((item) => !item.requiredPermission || store.can(item.requiredPermission))
 
   useEffect(() => {
@@ -95,14 +133,40 @@ export const AppShell = ({ activeView, onLogout, onNavigate, onToggleTheme, stor
 
         <div className="mt-auto pt-8">
           <div className="rounded-2xl border border-slate-700/50 bg-slate-800/50 p-4 backdrop-blur-sm">
-            <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Emergency</p>
-            <div className="mt-3 grid gap-2.5 text-[13px] text-slate-300">
-              {state.emergencyContacts.map((contact) => (
-                <div className="flex items-center justify-between" key={contact.id}>
-                  <span className="text-slate-400">{contact.label}</span>
-                  <span className="font-semibold text-white">{contact.value}</span>
-                </div>
-              ))}
+            <div className="flex items-center gap-2">
+              <Phone className="size-3.5 text-rose-400" aria-hidden="true" />
+              <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Emergency</p>
+            </div>
+            <div className="mt-3 grid gap-2">
+              {state.emergencyContacts.map((contact) => {
+                const colorMap: Record<string, { bg: string; border: string; icon: typeof Shield; pulseColor: string }> = {
+                  Ambulance: { bg: 'bg-rose-500/15', border: 'border-rose-500/30', icon: Phone, pulseColor: '244 63 94' },
+                  Police: { bg: 'bg-blue-500/15', border: 'border-blue-500/30', icon: Shield, pulseColor: '59 130 246' },
+                  Fire: { bg: 'bg-orange-500/15', border: 'border-orange-500/30', icon: Flame, pulseColor: '249 115 22' },
+                }
+                const style = colorMap[contact.label] || colorMap.Ambulance
+                const ContactIcon = style.icon
+
+                return (
+                  <div
+                    className={cn(
+                      'emergency-card group flex items-center gap-3 rounded-xl border px-3 py-2.5 cursor-pointer',
+                      style.bg,
+                      style.border,
+                    )}
+                    key={contact.id}
+                    style={{ '--pulse-color': style.pulseColor } as React.CSSProperties}
+                  >
+                    <div className="flex size-8 items-center justify-center rounded-lg bg-white/10 transition-transform duration-200 group-hover:scale-110">
+                      <ContactIcon className="size-4 text-white" aria-hidden="true" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <span className="emergency-label block text-[11px] font-medium text-slate-400 transition-colors group-hover:text-white">{contact.label}</span>
+                      <span className="emergency-number block text-lg font-bold text-white tracking-wide">{contact.value}</span>
+                    </div>
+                  </div>
+                )
+              })}
             </div>
           </div>
         </div>
@@ -113,8 +177,11 @@ export const AppShell = ({ activeView, onLogout, onNavigate, onToggleTheme, stor
         <header className="glass-panel sticky top-0 z-20 border-x-0 border-t-0 px-4 py-4 lg:px-8">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="min-w-0">
-              <p className="text-xs font-medium tracking-wide text-slate-400">{formatFullDate()}</p>
-              <h1 className="truncate text-xl font-bold tracking-tight text-slate-900 sm:text-2xl">
+              <div className="flex items-center gap-2">
+                <TimeIcon className={cn('size-5', timeContext.iconClass)} aria-hidden="true" />
+                <p className="text-xs font-medium tracking-wide text-slate-400">{formatFullDate()} · {timeContext.homeBase}</p>
+              </div>
+              <h1 className="greeting-animated truncate text-xl font-bold tracking-tight text-slate-900 sm:text-2xl">
                 {greetingText}, {displayName}
               </h1>
             </div>

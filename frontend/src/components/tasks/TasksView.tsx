@@ -93,12 +93,12 @@ const TaskCard = ({ canManageTasks, member, members, reassignTask, task, toggleT
   return (
     <article
       className={cn(
-        'group relative overflow-hidden rounded-2xl border bg-white p-4 transition-all duration-300',
+        'group relative overflow-hidden rounded-2xl border-2 p-5 transition-all duration-300',
         isDragging
           ? 'opacity-40 ring-2 ring-indigo-400 shadow-xl border-indigo-200'
           : isCompleted
-            ? 'border-emerald-100 shadow-sm hover:shadow-md'
-            : 'border-slate-100/80 shadow-sm hover:shadow-lg hover:-translate-y-0.5',
+            ? 'border-emerald-200 bg-gradient-to-br from-emerald-50/50 to-white shadow-sm hover:shadow-md'
+            : 'border-slate-100 bg-gradient-to-br from-white to-slate-50/30 shadow-[0_4px_16px_rgb(15_23_42/0.05)] hover:shadow-[0_12px_40px_rgb(15_23_42/0.10)] hover:-translate-y-1 hover:border-indigo-200/60',
       )}
       data-testid={`task-card-${task.id}`}
       ref={setNodeRef}

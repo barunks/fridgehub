@@ -16,3 +16,4 @@ backend/.env
 backend/alembic_test.db
 backend/test_familyhub.db
 backend/familyhub.db
+frontend/test-results/

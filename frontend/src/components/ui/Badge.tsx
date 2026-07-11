@@ -5,19 +5,30 @@ type BadgeTone = 'blue' | 'green' | 'amber' | 'rose' | 'slate' | 'violet' | 'tea
 type BadgeMode = 'default' | 'pill'
 
 const toneClass: Record<BadgeTone, string> = {
-  blue: 'border-blue-200/70 bg-blue-50 text-blue-700',
-  green: 'border-emerald-200/70 bg-emerald-50 text-emerald-700',
-  amber: 'border-amber-200/70 bg-amber-50 text-amber-700',
-  rose: 'border-rose-200/70 bg-rose-50 text-rose-700',
-  slate: 'border-slate-200/60 bg-slate-50/80 text-slate-600',
-  violet: 'border-violet-200/70 bg-violet-50 text-violet-700',
-  teal: 'border-teal-200/70 bg-teal-50 text-teal-700',
-  indigo: 'border-indigo-200/70 bg-indigo-50 text-indigo-700',
+  blue: 'border-blue-200/80 bg-blue-100/70 text-blue-800',
+  green: 'border-emerald-200/80 bg-emerald-100/70 text-emerald-800',
+  amber: 'border-amber-200/80 bg-amber-100/70 text-amber-800',
+  rose: 'border-rose-200/80 bg-rose-100/70 text-rose-800',
+  slate: 'border-slate-200/70 bg-slate-100/60 text-slate-700',
+  violet: 'border-violet-200/80 bg-violet-100/70 text-violet-800',
+  teal: 'border-teal-200/80 bg-teal-100/70 text-teal-800',
+  indigo: 'border-indigo-200/80 bg-indigo-100/70 text-indigo-800',
+}
+
+const pillToneClass: Record<BadgeTone, string> = {
+  blue: 'border-blue-300/60 bg-gradient-to-r from-blue-50 to-blue-100/80 text-blue-800 shadow-blue-100/50',
+  green: 'border-emerald-300/60 bg-gradient-to-r from-emerald-50 to-emerald-100/80 text-emerald-800 shadow-emerald-100/50',
+  amber: 'border-amber-300/60 bg-gradient-to-r from-amber-50 to-amber-100/80 text-amber-800 shadow-amber-100/50',
+  rose: 'border-rose-300/60 bg-gradient-to-r from-rose-50 to-rose-100/80 text-rose-800 shadow-rose-100/50',
+  slate: 'border-slate-300/60 bg-gradient-to-r from-slate-50 to-slate-100/80 text-slate-700 shadow-slate-100/50',
+  violet: 'border-violet-300/60 bg-gradient-to-r from-violet-50 to-violet-100/80 text-violet-800 shadow-violet-100/50',
+  teal: 'border-teal-300/60 bg-gradient-to-r from-teal-50 to-teal-100/80 text-teal-800 shadow-teal-100/50',
+  indigo: 'border-indigo-300/60 bg-gradient-to-r from-indigo-50 to-indigo-100/80 text-indigo-800 shadow-indigo-100/50',
 }
 
 const modeClass: Record<BadgeMode, string> = {
   default: 'min-h-6 rounded-full px-2.5 py-0.5 text-[11px]',
-  pill: 'min-h-8 rounded-full px-3.5 py-1 text-xs shadow-sm',
+  pill: 'min-h-8 rounded-full px-4 py-1.5 text-xs shadow-sm',
 }
 
 interface BadgeProps extends PropsWithChildren {
@@ -30,9 +41,9 @@ interface BadgeProps extends PropsWithChildren {
 export const Badge = ({ children, className, icon, mode = 'default', tone = 'slate' }: BadgeProps) => (
   <span
     className={cn(
-      'inline-flex items-center gap-1.5 border font-semibold leading-none tracking-wide',
+      'inline-flex items-center gap-1.5 border font-semibold leading-none',
       modeClass[mode],
-      toneClass[tone],
+      mode === 'pill' ? pillToneClass[tone] : toneClass[tone],
       className,
     )}
   >

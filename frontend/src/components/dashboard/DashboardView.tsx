@@ -44,19 +44,19 @@ const StatCard = ({
   return (
     <Wrapper
       className={cn(
-        'group rounded-2xl border border-slate-200/60 bg-white/90 shadow-sm text-left w-full backdrop-blur-sm transition-all duration-200',
-        onClick && 'cursor-pointer hover:shadow-lg hover:scale-[1.02] hover:border-slate-300/80',
+        'group rounded-2xl border-2 border-slate-200/70 bg-white text-left w-full shadow-[0_4px_20px_rgb(15_23_42/0.06)] transition-all duration-300',
+        onClick && 'cursor-pointer hover:shadow-[0_12px_40px_rgb(15_23_42/0.12)] hover:-translate-y-1 hover:border-indigo-200/60',
       )}
       onClick={onClick}
       type={onClick ? 'button' : undefined}
     >
       <div className="flex items-center gap-4 px-5 py-5">
-        <div className={cn('flex size-12 items-center justify-center rounded-2xl transition-transform duration-200 group-hover:scale-110', iconBg)}>
-          <Icon className={cn('size-5', toneClass)} aria-hidden="true" />
+        <div className={cn('flex size-13 items-center justify-center rounded-2xl shadow-sm transition-transform duration-300 group-hover:scale-110 group-hover:shadow-md', iconBg)}>
+          <Icon className={cn('size-6', toneClass)} aria-hidden="true" />
         </div>
         <div>
-          <p className="text-xs font-medium tracking-wide text-slate-400">{label}</p>
-          <p className="text-2xl font-bold tracking-tight text-slate-900">{value}</p>
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">{label}</p>
+          <p className="text-3xl font-bold tracking-tight text-slate-900">{value}</p>
         </div>
       </div>
     </Wrapper>
@@ -164,7 +164,7 @@ export const DashboardView = ({ store, onNavigate }: DashboardViewProps) => {
 
                 return (
                   <div
-                    className="group grid gap-3 rounded-xl border border-slate-100/80 bg-slate-50/50 p-4 transition-all duration-200 hover:bg-white hover:shadow-sm hover:border-slate-200 sm:grid-cols-[1fr_auto]"
+                    className="group grid gap-3 rounded-2xl border-2 border-slate-100 bg-gradient-to-r from-slate-50/80 to-white p-4 transition-all duration-300 hover:bg-white hover:shadow-[0_6px_24px_rgb(15_23_42/0.08)] hover:border-indigo-100 hover:-translate-y-0.5 sm:grid-cols-[1fr_auto]"
                     key={task.id}
                   >
                     <div className="flex min-w-0 items-center gap-3">

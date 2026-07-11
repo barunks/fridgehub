@@ -276,6 +276,11 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ title, message, ownerId: 1, tag: 'family' }),
     }),
+  createMember: (payload: { name: string; email: string; username: string; password: string; role: string; colorClass: string }) =>
+    request('/api/v1/family/members', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
   askAssistant: (query: string) =>
     request<{ answer: string; insights: AssistantInsight[] }>('/api/v1/assistant/recommendations', {
       method: 'POST',
