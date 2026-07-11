@@ -50,7 +50,7 @@ export const LoginPage = ({ onLogin, error }: LoginPageProps) => {
             </label>
             <input
               autoComplete="username"
-              className="rounded-xl border border-slate-200/80 bg-white/80 px-4 py-3 text-sm shadow-sm outline-none transition-all duration-200 placeholder:text-slate-400 focus:border-indigo-400 focus:ring-3 focus:ring-indigo-100 focus:shadow-md hover:border-slate-300"
+              className="rounded-xl border border-slate-200/80 bg-white/80 px-4 py-3 text-sm shadow-sm outline-none transition-all duration-200 placeholder:text-slate-400 focus:border-indigo-400 focus:ring-[3px] focus:ring-indigo-100 focus:shadow-md hover:border-slate-300"
               id="username"
               onChange={(e) => setUsername(e.target.value)}
               placeholder="Enter username"
@@ -66,7 +66,7 @@ export const LoginPage = ({ onLogin, error }: LoginPageProps) => {
             </label>
             <input
               autoComplete="current-password"
-              className="rounded-xl border border-slate-200/80 bg-white/80 px-4 py-3 text-sm shadow-sm outline-none transition-all duration-200 placeholder:text-slate-400 focus:border-indigo-400 focus:ring-3 focus:ring-indigo-100 focus:shadow-md hover:border-slate-300"
+              className="rounded-xl border border-slate-200/80 bg-white/80 px-4 py-3 text-sm shadow-sm outline-none transition-all duration-200 placeholder:text-slate-400 focus:border-indigo-400 focus:ring-[3px] focus:ring-indigo-100 focus:shadow-md hover:border-slate-300"
               id="password"
               onChange={(e) => setPassword(e.target.value)}
               placeholder="Enter password"
@@ -81,7 +81,7 @@ export const LoginPage = ({ onLogin, error }: LoginPageProps) => {
             disabled={loading || !username || !password}
             type="submit"
           >
-            {loading ? 'Signing in…' : 'Sign in'}
+            {loading ? 'Signing in...' : 'Sign in'}
           </button>
         </form>
 

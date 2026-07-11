@@ -13,14 +13,27 @@ import {
   type DragStartEvent,
 } from '@dnd-kit/core'
 import { CSS } from '@dnd-kit/utilities'
-import { CalendarPlus, CheckCircle2, Circle, Clock3, GripVertical, Plus, RotateCcw, Sparkles } from 'lucide-react'
+import {
+  AlertTriangle,
+  CalendarPlus,
+  CheckCircle2,
+  Circle,
+  Clock3,
+  GripVertical,
+  ListFilter,
+  Plus,
+  RotateCcw,
+  Sparkles,
+  Target,
+  UserRound,
+} from 'lucide-react'
 import { Avatar } from '@/components/ui/Avatar'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { FormField, inputClass } from '@/components/ui/FormField'
 import type { FamilyHubStore } from '@/hooks/useFamilyHub'
-import type { FamilyMember, NewTaskInput, Priority, Task, TaskStatus } from '@/types/familyHub'
+import type { FamilyMember, NewTaskInput, Priority, RecurrenceType, Task, TaskStatus } from '@/types/familyHub'
 import { dateTimeOffsetIso, formatDueLabel } from '@/utils/date'
 import { cn } from '@/utils/style'
 
@@ -43,14 +56,32 @@ const statusLabel: Record<TaskStatus, string> = {
   cancelled: 'Cancelled',
 }
 
+const recurrenceOptions: RecurrenceType[] = ['none', 'daily', 'weekly', 'monthly', 'yearly']
+
+const priorityWeight: Record<Priority, number> = {
+  high: 0,
+  medium: 1,
+  low: 2,
+}
+
+const chipClass = (active: boolean) =>
+  cn(
+    'soft-pill min-h-10 px-3.5 text-sm font-semibold transition-all',
+    active
+      ? 'border-indigo-200 bg-indigo-50 text-indigo-700 shadow-sm'
+      : 'border-slate-200 bg-white/80 text-slate-500 hover:border-slate-300 hover:text-slate-700',
+  )
+
 interface TaskCardProps {
   canManageTasks: boolean
   member?: FamilyMember
+  members: FamilyMember[]
+  reassignTask: (taskId: number, memberId: number) => void
   task: Task
   toggleTaskStatus: (taskId: number) => void
 }
 
-const TaskCard = ({ canManageTasks, member, task, toggleTaskStatus }: TaskCardProps) => {
+const TaskCard = ({ canManageTasks, member, members, reassignTask, task, toggleTaskStatus }: TaskCardProps) => {
   const { attributes, isDragging, listeners, setNodeRef, transform } = useDraggable({
     id: `task-${task.id}`,
     data: { taskId: task.id },
@@ -117,8 +148,19 @@ const TaskCard = ({ canManageTasks, member, task, toggleTaskStatus }: TaskCardPr
           </div>
         </div>
 
-        {/* Complete/Reopen button */}
-        <div className="flex items-start">
+        {/* Reassign and complete controls */}
+        <div className="flex flex-col items-stretch gap-2 sm:items-end">
+          <select
+            aria-label={`Reassign ${task.title}`}
+            className="min-h-9 rounded-xl border border-slate-200 bg-white/90 px-3 py-1.5 text-xs font-semibold text-slate-600 shadow-sm outline-none transition focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100"
+            disabled={!canManageTasks}
+            onChange={(event) => reassignTask(task.id, Number(event.target.value))}
+            value={task.assignedTo}
+          >
+            {members.map((item) => (
+              <option key={item.id} value={item.id}>{item.name}</option>
+            ))}
+          </select>
           <button
             className={cn(
               'group/btn flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-semibold transition-all duration-200 active:scale-95',
@@ -153,7 +195,7 @@ interface TaskLaneProps extends TaskCardProps {
   tasks: Task[]
 }
 
-const TaskLane = ({ canManageTasks, member, tasks, toggleTaskStatus }: Omit<TaskLaneProps, 'task'>) => {
+const TaskLane = ({ canManageTasks, member, members, reassignTask, tasks, toggleTaskStatus }: Omit<TaskLaneProps, 'task'>) => {
   const { isOver, setNodeRef } = useDroppable({
     id: `member-${member.id}`,
     data: { memberId: member.id },
@@ -201,12 +243,14 @@ const TaskLane = ({ canManageTasks, member, tasks, toggleTaskStatus }: Omit<Task
       )}
 
       {tasks.length > 0 ? (
-        <div className="grid gap-3">
+        <div className="stagger-children grid gap-3">
           {tasks.map((task) => (
             <TaskCard
               canManageTasks={canManageTasks}
               key={task.id}
               member={member}
+              members={members}
+              reassignTask={reassignTask}
               task={task}
               toggleTaskStatus={toggleTaskStatus}
             />
@@ -257,6 +301,25 @@ export const TasksView = ({ store }: { store: FamilyHubStore }) => {
       return matchesCategory && matchesAssignee && matchesStatus
     })
   }, [assignee, category, pageTasks, status])
+
+  const statusOptions = useMemo(
+    () => [
+      { value: 'all' as const, label: 'All statuses' },
+      ...Object.entries(statusLabel).map(([value, label]) => ({ value: value as TaskStatus, label })),
+    ],
+    [],
+  )
+
+  const focusedTasks = useMemo(() => {
+    return [...filteredTasks]
+      .filter((task) => task.status !== 'completed' && task.status !== 'cancelled')
+      .sort((a, b) => {
+        const priorityDifference = priorityWeight[a.priority] - priorityWeight[b.priority]
+        if (priorityDifference !== 0) return priorityDifference
+        return new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime()
+      })
+      .slice(0, 5)
+  }, [filteredTasks])
 
   const tasksByMember = useMemo(() => {
     return state.members.reduce<Record<number, Task[]>>((accumulator, member) => {
@@ -324,44 +387,73 @@ export const TasksView = ({ store }: { store: FamilyHubStore }) => {
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
         <div className="grid gap-5">
           {/* Filters */}
-          <Card>
-            <CardContent className="grid gap-3 lg:grid-cols-4">
-              <FormField label="Category">
-                <select className={inputClass} onChange={(event) => setCategory(event.target.value)} value={category}>
-                  <option value="all">All categories</option>
-                  {categories.map((item) => (
-                    <option key={item} value={item}>{item}</option>
-                  ))}
-                </select>
-              </FormField>
-              <FormField label="Assignee">
-                <select
-                  className={inputClass}
-                  onChange={(event) => setAssignee(event.target.value === 'all' ? 'all' : Number(event.target.value))}
-                  value={assignee}
-                >
-                  <option value="all">Everyone</option>
-                  {state.members.map((member) => (
-                    <option key={member.id} value={member.id}>{member.name}</option>
-                  ))}
-                </select>
-              </FormField>
-              <FormField label="Status">
-                <select
-                  className={inputClass}
-                  onChange={(event) => setStatus(event.target.value as TaskStatus | 'all')}
-                  value={status}
-                >
-                  <option value="all">All statuses</option>
-                  {Object.entries(statusLabel).map(([key, label]) => (
-                    <option key={key} value={key}>{label}</option>
-                  ))}
-                </select>
-              </FormField>
-              <div className="flex items-end">
-                <div className="flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200/80 bg-slate-50/80 px-3.5 py-2.5 text-sm font-semibold text-slate-600">
-                  <Sparkles className="size-4 text-indigo-400" aria-hidden="true" />
+          <Card variant="subtle">
+            <CardContent className="grid gap-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <span className="flex size-9 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600">
+                    <ListFilter className="size-4" aria-hidden="true" />
+                  </span>
+                  <div>
+                    <p className="text-sm font-bold text-slate-900">Board filters</p>
+                    <p className="text-xs text-slate-400">Narrow by status, category, or assignee</p>
+                  </div>
+                </div>
+                <Badge icon={<Sparkles className="size-3.5" aria-hidden="true" />} mode="pill" tone="indigo">
                   {filteredTasks.length} results
+                </Badge>
+              </div>
+
+              <div className="grid gap-4">
+                <div className="grid gap-2">
+                  <p className="text-[11px] font-bold uppercase text-slate-400">Status</p>
+                  <div className="flex flex-wrap gap-2">
+                    {statusOptions.map((option) => (
+                      <button
+                        className={chipClass(status === option.value)}
+                        key={option.value}
+                        onClick={() => setStatus(option.value)}
+                        type="button"
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="grid gap-2">
+                  <p className="text-[11px] font-bold uppercase text-slate-400">Category</p>
+                  <div className="flex flex-wrap gap-2">
+                    <button className={chipClass(category === 'all')} onClick={() => setCategory('all')} type="button">
+                      All categories
+                    </button>
+                    {categories.map((item) => (
+                      <button className={chipClass(category === item)} key={item} onClick={() => setCategory(item)} type="button">
+                        {item}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="grid gap-2">
+                  <p className="text-[11px] font-bold uppercase text-slate-400">Assignee</p>
+                  <div className="flex flex-wrap gap-2">
+                    <button className={chipClass(assignee === 'all')} onClick={() => setAssignee('all')} type="button">
+                      <UserRound className="size-4" aria-hidden="true" />
+                      Everyone
+                    </button>
+                    {state.members.map((member) => (
+                      <button
+                        className={chipClass(assignee === member.id)}
+                        key={member.id}
+                        onClick={() => setAssignee(member.id)}
+                        type="button"
+                      >
+                        <Avatar className="size-5 text-[10px]" colorClass={member.colorClass} initial={member.initial} label={member.name} />
+                        {member.name}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
             </CardContent>
@@ -384,6 +476,8 @@ export const TasksView = ({ store }: { store: FamilyHubStore }) => {
                       canManageTasks={canManageTasks}
                       key={member.id}
                       member={member}
+                      members={state.members}
+                      reassignTask={reassignTask}
                       tasks={tasksByMember[member.id] ?? []}
                       toggleTaskStatus={toggleTaskStatus}
                     />
@@ -446,7 +540,7 @@ export const TasksView = ({ store }: { store: FamilyHubStore }) => {
                     <input
                       className={inputClass}
                       onChange={(event) => setDraft((current) => ({ ...current, title: event.target.value }))}
-                      placeholder="Water plants, pick up groceries…"
+                      placeholder="Water plants, pick up groceries..."
                       value={draft.title}
                     />
                   </FormField>
@@ -492,14 +586,16 @@ export const TasksView = ({ store }: { store: FamilyHubStore }) => {
                   <FormField label="Recurrence">
                     <select
                       className={inputClass}
-                      onChange={(event) => setDraft((current) => ({ ...current, recurrenceType: event.target.value as any }))}
+                      onChange={(event) =>
+                        setDraft((current) => ({ ...current, recurrenceType: event.target.value as RecurrenceType }))
+                      }
                       value={draft.recurrenceType ?? 'none'}
                     >
-                      <option value="none">None (one-time)</option>
-                      <option value="daily">Daily</option>
-                      <option value="weekly">Weekly</option>
-                      <option value="monthly">Monthly</option>
-                      <option value="yearly">Yearly</option>
+                      {recurrenceOptions.map((option) => (
+                        <option key={option} value={option}>
+                          {option === 'none' ? 'None (one-time)' : option}
+                        </option>
+                      ))}
                     </select>
                   </FormField>
                   <Button type="submit" className="mt-1">
@@ -508,6 +604,49 @@ export const TasksView = ({ store }: { store: FamilyHubStore }) => {
                   </Button>
                 </fieldset>
               </form>
+            </CardContent>
+          </Card>
+
+          <Card variant="elevated">
+            <CardHeader className="flex flex-row items-center justify-between gap-3">
+              <div>
+                <CardTitle>Focus Mode</CardTitle>
+                <p className="mt-1 text-xs text-slate-400">Highest priority active reminders</p>
+              </div>
+              <Target className="size-5 text-indigo-500" aria-hidden="true" />
+            </CardHeader>
+            <CardContent className="grid gap-3">
+              {focusedTasks.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 p-5 text-center">
+                  <CheckCircle2 className="mx-auto size-7 text-emerald-500" aria-hidden="true" />
+                  <p className="mt-2 text-sm font-semibold text-slate-700">No active reminders in this view</p>
+                </div>
+              ) : (
+                focusedTasks.map((task) => {
+                  const member = state.members.find((item) => item.id === task.assignedTo)
+                  return (
+                    <button
+                      className="hover-card grid gap-2 rounded-2xl border border-slate-100 bg-white p-4 text-left"
+                      disabled={!canManageTasks}
+                      key={task.id}
+                      onClick={() => toggleTaskStatus(task.id)}
+                      type="button"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-bold text-slate-900">{task.title}</p>
+                          <p className="mt-1 text-xs text-slate-400">{member?.name ?? 'Unassigned'} - {formatDueLabel(task.dueAt)}</p>
+                        </div>
+                        <Badge tone={priorityTone[task.priority]}>{task.priority}</Badge>
+                      </div>
+                      <div className="flex items-center gap-2 text-[11px] font-medium text-slate-400">
+                        <AlertTriangle className="size-3.5 text-amber-500" aria-hidden="true" />
+                        Tap to complete this reminder
+                      </div>
+                    </button>
+                  )
+                })
+              )}
             </CardContent>
           </Card>
 

@@ -8,6 +8,7 @@ export type ViewKey =
   | 'family'
   | 'analytics'
   | 'assistant'
+  | 'history'
   | 'implementation'
 
 export type Priority = 'low' | 'medium' | 'high'

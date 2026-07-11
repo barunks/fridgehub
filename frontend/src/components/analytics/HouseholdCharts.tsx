@@ -84,7 +84,7 @@ export const HouseholdCharts = ({ store }: { store: FamilyHubStore }) => {
         </div>
         <Badge tone="violet">Live charts</Badge>
       </CardHeader>
-      <CardContent className="grid gap-6 xl:grid-cols-2">
+      <CardContent className="stagger-children grid gap-6 xl:grid-cols-2">
         <section className="rounded-2xl border border-slate-100/80 bg-slate-50/50 p-5" aria-label="Task status chart">
           <div className="mb-4 flex items-center justify-between gap-2">
             <h3 className="text-sm font-semibold text-slate-900">Task Status</h3>

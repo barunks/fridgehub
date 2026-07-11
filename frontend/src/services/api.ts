@@ -267,6 +267,10 @@ export const api = {
     request(`/api/v1/notifications/${notificationId}/read`, {
       method: 'PATCH',
     }),
+  markAllNotificationsRead: () =>
+    request<{ marked: number }>('/api/v1/notifications/mark-all-read', {
+      method: 'POST',
+    }),
   createAnnouncement: (title: string, message: string) =>
     request('/api/v1/family/announcements', {
       method: 'POST',

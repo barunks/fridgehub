@@ -61,22 +61,22 @@ export const CommandPalette = ({ store }: CommandPaletteProps) => {
 
     for (const task of store.state.tasks) {
       if (fuzzyMatch(q, task.title) || fuzzyMatch(q, task.category)) {
-        items.push({ id: `task-${task.id}`, label: task.title, sublabel: `Task · ${task.category} · ${task.status}`, icon: ClipboardList, path: '/tasks' })
+        items.push({ id: `task-${task.id}`, label: task.title, sublabel: `Task - ${task.category} - ${task.status}`, icon: ClipboardList, path: '/tasks' })
       }
     }
     for (const item of store.state.groceryItems) {
       if (fuzzyMatch(q, item.itemName)) {
-        items.push({ id: `grocery-${item.id}`, label: item.itemName, sublabel: `Grocery · ${item.purchaseFrequency}`, icon: ShoppingBasket, path: '/groceries' })
+        items.push({ id: `grocery-${item.id}`, label: item.itemName, sublabel: `Grocery - ${item.purchaseFrequency}`, icon: ShoppingBasket, path: '/groceries' })
       }
     }
     for (const meal of store.state.meals) {
       if (fuzzyMatch(q, meal.mealName)) {
-        items.push({ id: `meal-${meal.id}`, label: meal.mealName, sublabel: `Meal · ${meal.dayOfWeek} ${meal.mealType}`, icon: CalendarDays, path: '/meals' })
+        items.push({ id: `meal-${meal.id}`, label: meal.mealName, sublabel: `Meal - ${meal.dayOfWeek} ${meal.mealType}`, icon: CalendarDays, path: '/meals' })
       }
     }
     for (const member of store.state.members) {
       if (fuzzyMatch(q, member.name)) {
-        items.push({ id: `member-${member.id}`, label: member.name, sublabel: `Family · ${member.role}`, icon: Users, path: '/family' })
+        items.push({ id: `member-${member.id}`, label: member.name, sublabel: `Family - ${member.role}`, icon: Users, path: '/family' })
       }
     }
     return items.slice(0, 12)
@@ -115,7 +115,7 @@ export const CommandPalette = ({ store }: CommandPaletteProps) => {
             className="flex-1 bg-transparent text-sm text-slate-900 outline-none placeholder:text-slate-400"
             onChange={(e) => { setQuery(e.target.value); setSelectedIndex(0) }}
             onKeyDown={handleKeyDown}
-            placeholder="Search tasks, groceries, meals, members…"
+            placeholder="Search tasks, groceries, meals, members..."
             type="text"
             value={query}
           />

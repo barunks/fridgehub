@@ -3,6 +3,7 @@ import {
   Bot,
   CalendarDays,
   ClipboardList,
+  History,
   Home,
   Settings2,
   ShoppingBasket,
@@ -18,6 +19,7 @@ export const viewPaths: Record<ViewKey, string> = {
   family: '/family',
   analytics: '/analytics',
   assistant: '/assistant',
+  history: '/history',
   implementation: '/implementation',
 }
 
@@ -29,6 +31,7 @@ export const navItems: NavItem[] = [
   { key: 'family', label: 'Family', icon: Users, path: viewPaths.family, requiredPermission: 'view_family' },
   { key: 'analytics', label: 'Analytics', icon: BarChart3, path: viewPaths.analytics, requiredPermission: 'view_analytics' },
   { key: 'assistant', label: 'Ask AI', icon: Bot, path: viewPaths.assistant, requiredPermission: 'use_assistant' },
+  { key: 'history', label: 'History', icon: History, path: viewPaths.history, requiredPermission: 'view_audit' },
   { key: 'implementation', label: 'Build', icon: Settings2, path: viewPaths.implementation, requiredPermission: 'view_implementation' },
 ]
 

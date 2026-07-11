@@ -3,6 +3,7 @@ import { NavLink } from 'react-router-dom'
 import {
   Bell,
   Bot,
+  CheckCheck,
   LayoutDashboard,
   LogOut,
   Moon,
@@ -32,7 +33,7 @@ interface AppShellProps extends PropsWithChildren {
 }
 
 export const AppShell = ({ activeView, onLogout, onNavigate, onToggleTheme, store, theme, username, children }: AppShellProps) => {
-  const { state, stats, markNotificationRead } = store
+  const { state, stats, markAllNotificationsRead, markNotificationRead } = store
   const [notificationsOpen, setNotificationsOpen] = useState(false)
   const ThemeIcon = theme === 'dark' ? Sun : Moon
   const themeLabel = theme === 'dark' ? 'Use light mode' : 'Use dark mode'
@@ -54,7 +55,8 @@ export const AppShell = ({ activeView, onLogout, onNavigate, onToggleTheme, stor
   }, [store])
 
   return (
-    <div className="min-h-screen lg:grid lg:grid-cols-[272px_minmax(0,1fr)]">
+    <div className="relative min-h-screen overflow-hidden lg:grid lg:grid-cols-[272px_minmax(0,1fr)]">
+      <div className="pointer-events-none fixed inset-0 -z-10 animated-gradient-bg bg-[linear-gradient(135deg,rgba(79,70,229,0.06),transparent_32%),linear-gradient(225deg,rgba(20,184,166,0.08),transparent_36%),linear-gradient(315deg,rgba(139,92,246,0.04),transparent_28%),linear-gradient(180deg,rgba(255,255,255,0.72),rgba(241,245,249,0.48))]" style={{ backgroundSize: '200% 200%' }} />
       {/* Sidebar */}
       <aside className="hidden border-r border-slate-800/50 bg-gradient-to-b from-slate-900 via-slate-900 to-slate-950 px-5 py-7 text-white lg:flex lg:flex-col">
         <div className="flex items-center gap-3.5">
@@ -108,38 +110,40 @@ export const AppShell = ({ activeView, onLogout, onNavigate, onToggleTheme, stor
 
       {/* Main content */}
       <div className="min-w-0 pb-24 lg:pb-0">
-        <header className="sticky top-0 z-20 border-b border-slate-200/60 bg-white/90 px-4 py-4 backdrop-blur-xl lg:px-8">
+        <header className="glass-panel sticky top-0 z-20 border-x-0 border-t-0 px-4 py-4 lg:px-8">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="min-w-0">
               <p className="text-xs font-medium tracking-wide text-slate-400">{formatFullDate()}</p>
               <h1 className="truncate text-xl font-bold tracking-tight text-slate-900 sm:text-2xl">
-                {greetingText}, {displayName} 👋
+                {greetingText}, {displayName}
               </h1>
             </div>
 
-            <div className="flex items-center gap-2">
-              <Badge tone="indigo">{stats.todayTasks.length} reminders</Badge>
-              <Badge tone="amber">{stats.pendingPurchases.length} purchases</Badge>
-              {store.isLoading && <Badge tone="slate">Syncing…</Badge>}
+            <div className="surface-secondary flex flex-wrap items-center gap-2 rounded-2xl px-3 py-2">
+              <Badge mode="pill" tone="indigo">{stats.todayTasks.length} reminders</Badge>
+              <Badge mode="pill" tone="amber">{stats.pendingPurchases.length} purchases</Badge>
+              <Badge mode="pill" tone="green">{state.members.length} members</Badge>
+              {store.isLoading && <Badge mode="pill" tone="slate">Syncing</Badge>}
               {store.isOffline && <Badge tone="rose">{store.isBrowserOffline ? 'Offline' : 'API unavailable'}</Badge>}
               <Button
                 className="hidden gap-2 px-3 sm:inline-flex"
-                onClick={() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true }))}
-                title="Search (⌘K)"
+                onClick={() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true }))}
+                title="Search (Ctrl K)"
                 variant="secondary"
               >
                 <Search className="size-4" aria-hidden="true" />
-                <kbd className="rounded-md border border-slate-200 px-1.5 py-0.5 text-[10px] font-medium text-slate-400">⌘K</kbd>
+                <kbd className="rounded-md border border-slate-200 px-1.5 py-0.5 text-[10px] font-medium text-slate-400">Ctrl K</kbd>
               </Button>
-              <Button className="px-3" onClick={onToggleTheme} title={themeLabel} variant="ghost">
+              <Button iconOnly onClick={onToggleTheme} title={themeLabel} variant="icon">
                 <ThemeIcon className="size-4" aria-hidden="true" />
                 <span className="sr-only">{themeLabel}</span>
               </Button>
               <Button
-                className="relative px-3"
+                className="relative"
+                iconOnly
                 onClick={() => setNotificationsOpen((open) => !open)}
                 title="Notifications"
-                variant="ghost"
+                variant="icon"
               >
                 <Bell className="size-4" aria-hidden="true" />
                 {stats.unreadNotifications.length > 0 && (
@@ -156,7 +160,7 @@ export const AppShell = ({ activeView, onLogout, onNavigate, onToggleTheme, stor
                 </Button>
               )}
               {store.can('view_implementation') && (
-                <Button className="hidden sm:inline-flex" variant="ghost" onClick={() => onNavigate('implementation')} title="Build">
+                <Button className="hidden sm:inline-flex" iconOnly variant="icon" onClick={() => onNavigate('implementation')} title="Build">
                   <Settings2 className="size-4" aria-hidden="true" />
                 </Button>
               )}
@@ -218,6 +222,14 @@ export const AppShell = ({ activeView, onLogout, onNavigate, onToggleTheme, stor
                 <h2 className="text-sm font-bold tracking-tight text-slate-900">Notifications</h2>
               </div>
               <div className="flex items-center gap-3">
+                <Button
+                  disabled={stats.unreadNotifications.length === 0}
+                  onClick={markAllNotificationsRead}
+                  variant="outline"
+                >
+                  <CheckCheck className="size-4" aria-hidden="true" />
+                  Mark all read
+                </Button>
                 <Badge tone="rose">{stats.unreadNotifications.length} unread</Badge>
                 <button
                   className="rounded-xl p-2 text-slate-400 transition-all hover:bg-slate-100 hover:text-slate-600"
@@ -233,7 +245,7 @@ export const AppShell = ({ activeView, onLogout, onNavigate, onToggleTheme, stor
               {state.notifications.length === 0 ? (
                 <p className="py-16 text-center text-sm text-slate-400">No notifications yet</p>
               ) : (
-                <div className="grid gap-2.5">
+                <div className="stagger-children grid gap-2.5">
                   {state.notifications.map((notification) => (
                     <button
                       className={cn(

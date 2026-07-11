@@ -60,7 +60,7 @@ export const FamilyView = ({ store }: { store: FamilyHubStore }) => {
               </div>
             </CardHeader>
             <CardContent>
-              <div className="grid gap-4 md:grid-cols-2">
+              <div className="stagger-children grid gap-4 md:grid-cols-2">
                 {state.members.map((member) => (
                   <article className="group rounded-2xl border border-slate-100/80 bg-slate-50/50 p-5 transition-all duration-200 hover:bg-white hover:shadow-md hover:border-slate-200" key={member.id}>
                     <div className="flex items-start gap-3.5">
@@ -108,7 +108,7 @@ export const FamilyView = ({ store }: { store: FamilyHubStore }) => {
                         </div>
                         <p className="mt-1 text-xs text-slate-400">{announcement.message}</p>
                         <p className="mt-2 text-[11px] text-slate-400">
-                          {owner?.name ?? 'Family'} · {formatCompactDate(announcement.createdAt.slice(0, 10))}
+                          {owner?.name ?? 'Family'} - {formatCompactDate(announcement.createdAt.slice(0, 10))}
                         </p>
                       </div>
                     </div>

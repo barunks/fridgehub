@@ -5,6 +5,7 @@ import { AssistantView } from '@/components/assistant/AssistantView'
 import { DashboardView } from '@/components/dashboard/DashboardView'
 import { FamilyView } from '@/components/family/FamilyView'
 import { GroceryView } from '@/components/grocery/GroceryView'
+import { HistoryView } from '@/components/history/HistoryView'
 import { ImplementationView } from '@/components/implementation/ImplementationView'
 import { AppShell } from '@/components/layout/AppShell'
 import { MealPlanView } from '@/components/mealplan/MealPlanView'
@@ -58,6 +59,16 @@ const App = () => {
           <Route element={<FamilyView store={store} />} path={viewPaths.family} />
           <Route element={<AnalyticsView store={store} />} path={viewPaths.analytics} />
           <Route element={<AssistantView store={store} />} path={viewPaths.assistant} />
+          <Route
+            element={
+              store.can('view_audit') ? (
+                <HistoryView store={store} />
+              ) : (
+                <Navigate replace to={viewPaths.dashboard} />
+              )
+            }
+            path={viewPaths.history}
+          />
           <Route
             element={
               store.can('view_implementation') ? (

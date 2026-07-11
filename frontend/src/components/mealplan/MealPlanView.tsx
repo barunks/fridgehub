@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
-import { BookOpen, ChefHat, ClipboardCheck, Save } from 'lucide-react'
+import { BookOpen, CalendarCheck2, ChefHat, ClipboardCheck, Clock3, Flame, Gauge, Save, Timer } from 'lucide-react'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
@@ -36,8 +36,14 @@ export const MealPlanView = ({ store }: { store: FamilyHubStore }) => {
       state.meals.reduce((total, meal) => total + meal.prepTime, 0) / Math.max(1, state.meals.length),
     )
     const weeklyCalories = state.meals.reduce((total, meal) => total + meal.calories, 0)
-    return { averagePrep, weeklyCalories }
+    const plannedSlots = state.meals.length
+    const coverage = Math.min(100, Math.round((plannedSlots / (dayOrder.length * mealColumns.length)) * 100))
+    return { averagePrep, coverage, plannedSlots, weeklyCalories }
   }, [state.meals])
+
+  const selectedRecipe = selectedMeal?.recipeId
+    ? state.recipes.find((recipe) => recipe.id === selectedMeal.recipeId)
+    : undefined
 
   const selectMeal = (meal: MealPlanItem) => {
     setSelectedMealId(meal.id)
@@ -71,6 +77,36 @@ export const MealPlanView = ({ store }: { store: FamilyHubStore }) => {
         </Button>
       </div>
 
+      <Card variant="accent" className="overflow-hidden">
+        <CardContent className="grid gap-5 p-6 lg:grid-cols-[1fr_auto]">
+          <div className="grid gap-4">
+            <Badge className="border-white/20 bg-white/15 text-white" icon={<CalendarCheck2 className="size-3.5" aria-hidden="true" />} mode="pill">
+              Weekly coverage
+            </Badge>
+            <div>
+              <h3 className="text-2xl font-bold text-white">Meals, prep time, and nutrition are visible before the week starts.</h3>
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-white/75">
+                The grid keeps every day scannable while the side panel exposes the selected meal and matching recipe.
+              </p>
+            </div>
+          </div>
+          <div className="grid min-w-72 gap-3 sm:grid-cols-3 lg:grid-cols-1">
+            <div className="rounded-2xl border border-white/15 bg-white/10 p-4 text-white">
+              <p className="text-xs text-white/70">Planned slots</p>
+              <p className="text-2xl font-bold">{mealStats.plannedSlots}</p>
+            </div>
+            <div className="rounded-2xl border border-white/15 bg-white/10 p-4 text-white">
+              <p className="text-xs text-white/70">Coverage</p>
+              <p className="text-2xl font-bold">{mealStats.coverage}%</p>
+            </div>
+            <div className="rounded-2xl border border-white/15 bg-white/10 p-4 text-white">
+              <p className="text-xs text-white/70">Average prep</p>
+              <p className="text-2xl font-bold">{mealStats.averagePrep}m</p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
         <Card className="overflow-hidden">
           <CardHeader className="flex flex-row items-center justify-between gap-3">
@@ -100,18 +136,33 @@ export const MealPlanView = ({ store }: { store: FamilyHubStore }) => {
                         const meal = mealsByDay[day]?.find((item) => item.mealType === column.key)
                         const active = meal?.id === selectedMealId
 
+                        if (!meal) {
+                          return (
+                            <div
+                              className="grid min-h-[6rem] place-items-center rounded-2xl border border-dashed border-slate-200 bg-slate-50 text-center text-xs font-semibold text-slate-300"
+                              key={`${day}-${column.key}`}
+                            >
+                              No plan
+                            </div>
+                          )
+                        }
+
                         return (
                           <button
                             className={cn(
-                              'flex min-h-[5.5rem] items-center justify-center rounded-2xl px-3 py-3 text-center text-[13px] font-semibold leading-5 text-white shadow-sm transition-all duration-200 hover:scale-[1.03] hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-indigo-500',
-                              meal?.colorClass,
-                              active && 'ring-3 ring-white/40 shadow-lg scale-[1.02]',
+                              'grid min-h-[6rem] content-between rounded-2xl px-3 py-3 text-left text-white shadow-sm transition-all duration-300 hover:scale-[1.04] hover:shadow-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-indigo-500',
+                              meal.colorClass,
+                              active && 'ring-[3px] ring-white/50 shadow-xl scale-[1.06] z-10 relative',
                             )}
                             key={`${day}-${column.key}`}
-                            onClick={() => meal && selectMeal(meal)}
+                            onClick={() => selectMeal(meal)}
                             type="button"
                           >
-                            {meal?.mealName}
+                            <span className="line-clamp-2 text-[13px] font-bold leading-5">{meal.mealName}</span>
+                            <span className="mt-3 flex flex-wrap gap-1.5 text-[10px] font-semibold text-white/80">
+                              <span className="rounded-full bg-white/20 px-2 py-1">{meal.calories} cal</span>
+                              <span className="rounded-full bg-white/20 px-2 py-1">{meal.prepTime}m</span>
+                            </span>
                           </button>
                         )
                       })}
@@ -133,30 +184,54 @@ export const MealPlanView = ({ store }: { store: FamilyHubStore }) => {
               {selectedMeal ? (
                 <form className="grid gap-3.5" onSubmit={handleSave}>
                   <fieldset className="m-0 grid gap-3.5 border-0 p-0" disabled={!canManageMeals}>
-                  <Badge tone="indigo">
-                    {selectedMeal.dayOfWeek} · {selectedMeal.mealType}
-                  </Badge>
-                  <FormField label="Meal name">
-                    <textarea
-                      className={cn(inputClass, 'min-h-24 resize-none')}
-                      onChange={(event) => setDraftName(event.target.value)}
-                      value={draftName}
-                    />
-                  </FormField>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="rounded-xl bg-slate-50/80 p-3.5">
-                      <p className="text-[11px] text-slate-400">Calories</p>
-                      <p className="text-lg font-bold text-slate-900">{selectedMeal.calories}</p>
+                    <Badge tone="indigo">
+                      {selectedMeal.dayOfWeek} - {selectedMeal.mealType}
+                    </Badge>
+                    <FormField label="Meal name">
+                      <textarea
+                        className={cn(inputClass, 'min-h-24 resize-none')}
+                        onChange={(event) => setDraftName(event.target.value)}
+                        value={draftName}
+                      />
+                    </FormField>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="rounded-xl bg-slate-50/80 p-3.5">
+                        <p className="flex items-center gap-1.5 text-[11px] text-slate-400">
+                          <Flame className="size-3.5 text-amber-500" aria-hidden="true" />
+                          Calories
+                        </p>
+                        <p className="text-lg font-bold text-slate-900">{selectedMeal.calories}</p>
+                      </div>
+                      <div className="rounded-xl bg-slate-50/80 p-3.5">
+                        <p className="flex items-center gap-1.5 text-[11px] text-slate-400">
+                          <Timer className="size-3.5 text-indigo-500" aria-hidden="true" />
+                          Prep time
+                        </p>
+                        <p className="text-lg font-bold text-slate-900">{selectedMeal.prepTime}m</p>
+                      </div>
                     </div>
-                    <div className="rounded-xl bg-slate-50/80 p-3.5">
-                      <p className="text-[11px] text-slate-400">Prep time</p>
-                      <p className="text-lg font-bold text-slate-900">{selectedMeal.prepTime}m</p>
-                    </div>
-                  </div>
-                  <Button type="submit">
-                    <Save className="size-4" aria-hidden="true" />
-                    Save meal
-                  </Button>
+                    {selectedMeal.dietaryFlags && selectedMeal.dietaryFlags.length > 0 && (
+                      <div className="flex flex-wrap gap-2">
+                        {selectedMeal.dietaryFlags.map((flag) => (
+                          <Badge key={flag} tone="teal">{flag}</Badge>
+                        ))}
+                      </div>
+                    )}
+                    {selectedRecipe && (
+                      <div className="rounded-2xl border border-emerald-100 bg-emerald-50/50 p-4">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-bold text-slate-900">{selectedRecipe.recipeName}</p>
+                            <p className="mt-1 text-xs leading-5 text-slate-500">{selectedRecipe.description}</p>
+                          </div>
+                          <ChefHat className="size-5 text-emerald-600" aria-hidden="true" />
+                        </div>
+                      </div>
+                    )}
+                    <Button type="submit">
+                      <Save className="size-4" aria-hidden="true" />
+                      Save meal
+                    </Button>
                   </fieldset>
                 </form>
               ) : (
@@ -172,7 +247,13 @@ export const MealPlanView = ({ store }: { store: FamilyHubStore }) => {
             </CardHeader>
             <CardContent className="grid gap-3">
               {recipes.map((recipe) => (
-                <div className="rounded-xl border border-slate-100/80 bg-slate-50/50 p-4 transition-all duration-200 hover:bg-white hover:shadow-sm" key={recipe.id}>
+                <div
+                  className={cn(
+                    'hover-card rounded-xl border bg-slate-50/50 p-4',
+                    selectedRecipe?.id === recipe.id ? 'border-emerald-200 bg-emerald-50/50' : 'border-slate-100/80',
+                  )}
+                  key={recipe.id}
+                >
                   <div className="flex items-start justify-between gap-2">
                     <div>
                       <p className="text-sm font-semibold text-slate-900">{recipe.recipeName}</p>
@@ -184,6 +265,20 @@ export const MealPlanView = ({ store }: { store: FamilyHubStore }) => {
                     {recipe.dietaryTags.map((tag) => (
                       <Badge key={tag} tone="teal">{tag}</Badge>
                     ))}
+                  </div>
+                  <div className="mt-3 grid grid-cols-3 gap-2 text-[11px] font-semibold text-slate-500">
+                    <span className="flex items-center gap-1 rounded-lg bg-white/80 px-2 py-1.5">
+                      <Clock3 className="size-3.5 text-indigo-500" aria-hidden="true" />
+                      {recipe.prepTime + recipe.cookTime}m
+                    </span>
+                    <span className="flex items-center gap-1 rounded-lg bg-white/80 px-2 py-1.5">
+                      <Gauge className="size-3.5 text-amber-500" aria-hidden="true" />
+                      {recipe.difficulty}
+                    </span>
+                    <span className="flex items-center gap-1 rounded-lg bg-white/80 px-2 py-1.5">
+                      <ChefHat className="size-3.5 text-emerald-500" aria-hidden="true" />
+                      {recipe.servings}
+                    </span>
                   </div>
                 </div>
               ))}

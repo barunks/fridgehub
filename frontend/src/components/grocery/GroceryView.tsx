@@ -1,6 +1,17 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
-import { CheckCircle2, List, Plus, RefreshCw, Search, ShoppingBasket, ShoppingCart } from 'lucide-react'
+import {
+  AlertTriangle,
+  CheckCircle2,
+  List,
+  PackageCheck,
+  Plus,
+  RefreshCw,
+  Search,
+  ShoppingBasket,
+  ShoppingCart,
+  Store,
+} from 'lucide-react'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
@@ -68,6 +79,19 @@ export const GroceryView = ({ store }: { store: FamilyHubStore }) => {
     })
   }, [state.groceryCycles, state.groceryItems, state.listTypes])
 
+  const groupedItems = useMemo(() => {
+    return state.listTypes
+      .map((listType) => ({
+        listType,
+        items: filteredItems.filter((item) => item.listTypeId === listType.id),
+      }))
+      .filter((group) => group.items.length > 0)
+  }, [filteredItems, state.listTypes])
+
+  const neededItems = state.groceryItems.filter((item) => item.needsPurchase || !item.currentStock)
+  const purchasedItems = state.groceryItems.filter((item) => item.purchased)
+  const activeCycleCount = state.groceryCycles.filter((cycle) => !cycle.isCompleted).length
+
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     if (!draft.itemName.trim()) return
@@ -100,6 +124,26 @@ export const GroceryView = ({ store }: { store: FamilyHubStore }) => {
           Regenerate cycles
         </Button>
       </div>
+
+      <Card variant="accent" className="overflow-hidden">
+        <CardContent className="grid gap-4 p-6 md:grid-cols-3">
+          <div className="rounded-2xl border border-white/15 bg-white/10 p-4 text-white">
+            <AlertTriangle className="mb-3 size-5 text-white/75" aria-hidden="true" />
+            <p className="text-xs text-white/70">Needs purchase</p>
+            <p className="text-3xl font-bold">{neededItems.length}</p>
+          </div>
+          <div className="rounded-2xl border border-white/15 bg-white/10 p-4 text-white">
+            <PackageCheck className="mb-3 size-5 text-white/75" aria-hidden="true" />
+            <p className="text-xs text-white/70">Purchased items</p>
+            <p className="text-3xl font-bold">{purchasedItems.length}</p>
+          </div>
+          <div className="rounded-2xl border border-white/15 bg-white/10 p-4 text-white">
+            <Store className="mb-3 size-5 text-white/75" aria-hidden="true" />
+            <p className="text-xs text-white/70">Active cycles</p>
+            <p className="text-3xl font-bold">{activeCycleCount}</p>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Tab switcher */}
       <div className="flex gap-1 rounded-2xl border border-slate-200/60 bg-slate-50/80 p-1.5 backdrop-blur-sm">
@@ -181,71 +225,82 @@ export const GroceryView = ({ store }: { store: FamilyHubStore }) => {
                 <div>
                   <CardTitle>Grocery Master List</CardTitle>
                   <p className="mt-1 text-xs text-slate-400">
-                    {filteredItems.length} items — sub-lists auto-generate per cycle
+                    {filteredItems.length} items - sub-lists auto-generate per cycle
                   </p>
                 </div>
                 <Badge tone="indigo">Master list</Badge>
               </CardHeader>
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[820px] text-left text-sm">
-                  <thead className="border-b border-slate-100/80 bg-slate-50/50 text-[11px] uppercase tracking-wider text-slate-400">
-                    <tr>
-                      <th className="px-6 py-3.5">#</th>
-                      <th className="px-6 py-3.5">Item</th>
-                      <th className="px-6 py-3.5">List</th>
-                      <th className="px-6 py-3.5">Qty</th>
-                      <th className="px-6 py-3.5">Frequency</th>
-                      <th className="px-6 py-3.5">Stock</th>
-                      <th className="px-6 py-3.5">Start date</th>
-                      <th className="px-6 py-3.5">Notes</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-50">
-                    {filteredItems.map((item) => {
-                      const listType = state.listTypes.find((list) => list.id === item.listTypeId)
-                      return (
-                        <tr className="bg-white transition-colors hover:bg-slate-50/50" key={item.id}>
-                          <td className="px-6 py-4 text-xs text-slate-400">{item.itemNumber}</td>
-                          <td className="px-6 py-4">
-                            <p className="font-semibold text-slate-900">{item.itemName}</p>
-                          </td>
-                          <td className="px-6 py-4">
-                            <span className="inline-flex items-center gap-2">
-                              <span className={cn('size-2.5 rounded-full', listType?.colorClass)} />
-                              <span className="text-xs">{listType?.listName}</span>
-                            </span>
-                          </td>
-                          <td className="px-6 py-4 text-xs">
-                            {item.quantity} {item.unit}
-                          </td>
-                          <td className="px-6 py-4">
-                            <Badge tone={item.purchaseFrequency === 'weekly' ? 'green' : 'amber'}>
-                              {item.purchaseFrequency}
-                            </Badge>
-                          </td>
-                          <td className="px-6 py-4">
-                            <button
-                              className={cn(
-                                'rounded-lg border px-3 py-1.5 text-[11px] font-semibold transition-all duration-200',
-                                item.currentStock
-                                  ? 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
-                                  : 'border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100',
-                              )}
-                              disabled={!canManageGroceries}
-                              onClick={() => toggleCurrentStock(item.id)}
-                              type="button"
-                            >
-                              {item.currentStock ? 'YES' : 'NO'}
-                            </button>
-                          </td>
-                          <td className="px-6 py-4 text-xs text-slate-400">{formatCompactDate(item.startDate)}</td>
-                          <td className="px-6 py-4 text-xs text-slate-400">{item.notes}</td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
+              <CardContent className="grid gap-5">
+                {groupedItems.length === 0 ? (
+                  <div className="grid min-h-40 place-items-center rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 text-center">
+                    <div>
+                      <ShoppingBasket className="mx-auto size-8 text-slate-300" aria-hidden="true" />
+                      <p className="mt-3 text-sm font-semibold text-slate-600">No grocery items match this view</p>
+                    </div>
+                  </div>
+                ) : (
+                  groupedItems.map(({ listType, items }) => (
+                    <section className="grid gap-3" key={listType.id}>
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-2">
+                          <span className={cn('size-3 rounded-full shadow-sm', listType.colorClass)} />
+                          <h3 className="text-sm font-bold text-slate-900">{listType.listName}</h3>
+                        </div>
+                        <Badge tone="slate">{items.length} items</Badge>
+                      </div>
+                      <div className="stagger-children grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                        {items.map((item) => (
+                          <article className={cn('hover-card rounded-2xl border border-slate-100 bg-white p-4 shadow-sm', item.expiryDate && !item.currentStock && 'expiry-ring')} key={item.id}>
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <p className="text-[11px] font-semibold uppercase text-slate-400">{item.itemNumber}</p>
+                                <h4 className="mt-1 truncate text-base font-bold text-slate-900">{item.itemName}</h4>
+                              </div>
+                              <button
+                                className={cn(
+                                  'soft-pill px-3 py-1 text-[11px] font-bold transition-all',
+                                  item.currentStock
+                                    ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                                    : 'border-rose-200 bg-rose-50 text-rose-700 pulse-urgent',
+                                )}
+                                disabled={!canManageGroceries}
+                                onClick={() => toggleCurrentStock(item.id)}
+                                type="button"
+                              >
+                                {item.currentStock ? 'In stock' : 'Needed'}
+                              </button>
+                            </div>
+                            <div className="mt-4 flex flex-wrap gap-2">
+                              <Badge tone={item.purchaseFrequency === 'weekly' ? 'green' : 'amber'}>{item.purchaseFrequency}</Badge>
+                              <Badge tone="slate">
+                                {item.quantity} {item.unit}
+                              </Badge>
+                              {item.expiryDate && <Badge tone="rose">Expires {formatCompactDate(item.expiryDate)}</Badge>}
+                            </div>
+                            {item.notes && <p className="mt-3 line-clamp-2 text-xs leading-5 text-slate-500">{item.notes}</p>}
+                            <div className="mt-4 flex items-center justify-between gap-2 border-t border-slate-100 pt-3">
+                              <p className="text-[11px] text-slate-400">Started {formatCompactDate(item.startDate)}</p>
+                              <button
+                                className={cn(
+                                  'soft-pill px-3 py-1.5 text-[11px] font-bold transition',
+                                  item.purchased
+                                    ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                                    : 'border-slate-200 bg-slate-50 text-slate-500 hover:border-indigo-200 hover:text-indigo-700',
+                                )}
+                                disabled={!canManageGroceries}
+                                onClick={() => toggleGroceryPurchased(item.id)}
+                                type="button"
+                              >
+                                {item.purchased ? 'Purchased' : 'Mark purchased'}
+                              </button>
+                            </div>
+                          </article>
+                        ))}
+                      </div>
+                    </section>
+                  ))
+                )}
+              </CardContent>
               <CardContent className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100">
                 <p className="text-xs font-medium text-slate-500">
                   Page {Math.floor(page.offset / page.limit) + 1} - {filteredItems.length} loaded
@@ -279,86 +334,88 @@ export const GroceryView = ({ store }: { store: FamilyHubStore }) => {
               <CardContent>
                 <form className="grid gap-3.5" onSubmit={handleSubmit}>
                   <fieldset className="m-0 grid gap-3.5 border-0 p-0" disabled={!canManageGroceries}>
-                  <FormField label="Item name">
-                    <input
-                      className={inputClass}
-                      onChange={(event) => setDraft((current) => ({ ...current, itemName: event.target.value }))}
-                      placeholder="e.g. Paneer, Milk, Rice"
-                      value={draft.itemName}
-                    />
-                  </FormField>
-                  <div className="grid grid-cols-2 gap-3">
-                    <FormField label="Quantity">
+                    <FormField label="Item name">
                       <input
                         className={inputClass}
-                        min="0"
                         onChange={(event) =>
-                          setDraft((current) => ({ ...current, quantity: Number(event.target.value) }))
+                          setDraft((current) => ({ ...current, itemName: event.target.value }))
                         }
-                        step="0.5"
-                        type="number"
-                        value={draft.quantity}
+                        placeholder="e.g. Paneer, Milk, Rice"
+                        value={draft.itemName}
                       />
                     </FormField>
-                    <FormField label="Unit">
+                    <div className="grid grid-cols-2 gap-3">
+                      <FormField label="Quantity">
+                        <input
+                          className={inputClass}
+                          min="0"
+                          onChange={(event) =>
+                            setDraft((current) => ({ ...current, quantity: Number(event.target.value) }))
+                          }
+                          step="0.5"
+                          type="number"
+                          value={draft.quantity}
+                        />
+                      </FormField>
+                      <FormField label="Unit">
+                        <select
+                          className={inputClass}
+                          onChange={(event) => setDraft((current) => ({ ...current, unit: event.target.value }))}
+                          value={draft.unit}
+                        >
+                          {unitOptions.map((u) => (
+                            <option key={u} value={u}>{u}</option>
+                          ))}
+                        </select>
+                      </FormField>
+                    </div>
+                    <FormField label="List type">
                       <select
                         className={inputClass}
-                        onChange={(event) => setDraft((current) => ({ ...current, unit: event.target.value }))}
-                        value={draft.unit}
+                        onChange={(event) => setDraft((current) => ({ ...current, listTypeId: Number(event.target.value) }))}
+                        value={draft.listTypeId}
                       >
-                        {unitOptions.map((u) => (
-                          <option key={u} value={u}>{u}</option>
+                        {state.listTypes.map((listType) => (
+                          <option key={listType.id} value={listType.id}>{listType.listName}</option>
                         ))}
                       </select>
                     </FormField>
-                  </div>
-                  <FormField label="List type">
-                    <select
-                      className={inputClass}
-                      onChange={(event) => setDraft((current) => ({ ...current, listTypeId: Number(event.target.value) }))}
-                      value={draft.listTypeId}
-                    >
-                      {state.listTypes.map((listType) => (
-                        <option key={listType.id} value={listType.id}>{listType.listName}</option>
-                      ))}
-                    </select>
-                  </FormField>
-                  <FormField label="Purchase frequency">
-                    <select
-                      className={inputClass}
-                      onChange={(event) =>
-                        setDraft((current) => ({ ...current, purchaseFrequency: event.target.value as Frequency }))
-                      }
-                      value={draft.purchaseFrequency}
-                    >
-                      {frequencyOptions.map((option) => (
-                        <option key={option} value={option}>{option}</option>
-                      ))}
-                    </select>
-                  </FormField>
-                  <FormField label="Notes">
-                    <textarea
-                      className={cn(inputClass, 'min-h-20 resize-none')}
-                      onChange={(event) => setDraft((current) => ({ ...current, notes: event.target.value }))}
-                      placeholder="Brand preference, size, etc."
-                      value={draft.notes}
-                    />
-                  </FormField>
-                  <label className="flex items-center gap-2.5 text-sm font-medium text-slate-600">
-                    <input
-                      checked={draft.currentStock}
-                      className="size-4 rounded-md border-slate-300 text-indigo-600"
-                      onChange={(event) =>
-                        setDraft((current) => ({ ...current, currentStock: event.target.checked }))
-                      }
-                      type="checkbox"
-                    />
-                    Current stock available
-                  </label>
-                  <Button type="submit">
-                    <Plus className="size-4" aria-hidden="true" />
-                    Add to master list
-                  </Button>
+                    <FormField label="Purchase frequency">
+                      <select
+                        className={inputClass}
+                        onChange={(event) =>
+                          setDraft((current) => ({ ...current, purchaseFrequency: event.target.value as Frequency }))
+                        }
+                        value={draft.purchaseFrequency}
+                      >
+                        {frequencyOptions.map((option) => (
+                          <option key={option} value={option}>{option}</option>
+                        ))}
+                      </select>
+                    </FormField>
+                    <FormField label="Notes">
+                      <textarea
+                        className={cn(inputClass, 'min-h-20 resize-none')}
+                        onChange={(event) => setDraft((current) => ({ ...current, notes: event.target.value }))}
+                        placeholder="Brand preference, size, etc."
+                        value={draft.notes}
+                      />
+                    </FormField>
+                    <label className="flex items-center gap-2.5 text-sm font-medium text-slate-600">
+                      <input
+                        checked={draft.currentStock}
+                        className="size-4 rounded-md border-slate-300 text-indigo-600"
+                        onChange={(event) =>
+                          setDraft((current) => ({ ...current, currentStock: event.target.checked }))
+                        }
+                        type="checkbox"
+                      />
+                      Current stock available
+                    </label>
+                    <Button type="submit">
+                      <Plus className="size-4" aria-hidden="true" />
+                      Add to master list
+                    </Button>
                   </fieldset>
                 </form>
               </CardContent>
@@ -388,7 +445,7 @@ export const GroceryView = ({ store }: { store: FamilyHubStore }) => {
                         <Badge tone="teal">{cycle.frequency}</Badge>
                       </div>
                       <p className="mt-1.5 text-[11px] text-slate-400">
-                        {formatCompactDate(cycle.cycleStartDate)} → {formatCompactDate(cycle.cycleEndDate)}
+                        {formatCompactDate(cycle.cycleStartDate)} - {formatCompactDate(cycle.cycleEndDate)}
                       </p>
                       <div className="mt-3 h-2 overflow-hidden rounded-full bg-white">
                         <div className="h-2 rounded-full bg-gradient-to-r from-indigo-500 to-blue-500 transition-all duration-500" style={{ width: `${progress}%` }} />
@@ -497,11 +554,11 @@ export const GroceryView = ({ store }: { store: FamilyHubStore }) => {
                     <div>
                       <CardTitle className="flex items-center gap-2">
                         <span className={cn('size-3 rounded-full', listType?.colorClass)} />
-                        {listType?.listName} — {cycle.frequency}
+                        {listType?.listName} - {cycle.frequency}
                       </CardTitle>
                       <p className="mt-1 text-xs text-slate-400">
-                        {formatCompactDate(cycle.cycleStartDate)} → {formatCompactDate(cycle.cycleEndDate)}
-                        {' · '}{purchased} of {items.length} purchased
+                        {formatCompactDate(cycle.cycleStartDate)} - {formatCompactDate(cycle.cycleEndDate)}
+                        {' - '}{purchased} of {items.length} purchased
                       </p>
                     </div>
                     <div className="flex items-center gap-2">

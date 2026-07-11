@@ -171,14 +171,26 @@ export const useFamilyHub = (
     update: (current: FamilyHubState) => FamilyHubState,
     operation: Promise<unknown>,
     successMessage: string,
+    updatePageCaches?: () => void,
   ) => {
     let snapshot: FamilyHubState | null = null
+    const groceryPageSnapshot = groceryPageItems
+    const taskPageSnapshot = taskPageItems
+    const recipePageSnapshot = recipePageItems
+    const notificationPageSnapshot = notificationPageItems
+    const auditLogSnapshot = auditLogs
     setState((current) => {
       snapshot = current
       return update(current)
     })
+    updatePageCaches?.()
     syncApi(operation, successMessage, () => {
       if (snapshot) setState(snapshot)
+      setGroceryPageItems(groceryPageSnapshot)
+      setTaskPageItems(taskPageSnapshot)
+      setRecipePageItems(recipePageSnapshot)
+      setNotificationPageItems(notificationPageSnapshot)
+      setAuditLogs(auditLogSnapshot)
     })
   }
 
@@ -328,22 +340,25 @@ export const useFamilyHub = (
       return
     }
     const task = state.tasks.find((item) => item.id === taskId)
-    const nextStatus = task?.status === 'completed' ? 'pending' : 'completed'
+    const nextStatus: Task['status'] = task?.status === 'completed' ? 'pending' : 'completed'
+    const updateTaskStatus = (tasks: Task[]): Task[] =>
+      tasks.map((task) =>
+        task.id === taskId
+          ? {
+              ...task,
+              status: task.status === 'completed' ? 'pending' : 'completed',
+            }
+          : task,
+      )
 
     mutateWithRollback(
       (current) => ({
         ...current,
-        tasks: current.tasks.map((task) =>
-          task.id === taskId
-            ? {
-                ...task,
-                status: task.status === 'completed' ? 'pending' : 'completed',
-              }
-            : task,
-        ),
+        tasks: updateTaskStatus(current.tasks),
       }),
       api.updateTask(taskId, { status: nextStatus }),
       'Task updated',
+      () => setTaskPageItems((current) => (current ? updateTaskStatus(current) : current)),
     )
   }
 
@@ -353,23 +368,26 @@ export const useFamilyHub = (
     }
     const item = state.groceryItems.find((current) => current.id === itemId)
     const purchased = !item?.purchased
+    const updateGroceryPurchased = (items: GroceryItem[]) =>
+      items.map((item) =>
+        item.id === itemId
+          ? {
+              ...item,
+              purchased: !item.purchased,
+              currentStock: !item.purchased,
+              needsPurchase: item.purchased,
+            }
+          : item,
+      )
 
     mutateWithRollback(
       (current) => ({
         ...current,
-        groceryItems: current.groceryItems.map((item) =>
-          item.id === itemId
-            ? {
-                ...item,
-                purchased: !item.purchased,
-                currentStock: !item.purchased,
-                needsPurchase: item.purchased,
-              }
-            : item,
-        ),
+        groceryItems: updateGroceryPurchased(current.groceryItems),
       }),
       api.updateGroceryItem(itemId, { purchased }),
       'Grocery item updated',
+      () => setGroceryPageItems((current) => (current ? updateGroceryPurchased(current) : current)),
     )
   }
 
@@ -379,23 +397,26 @@ export const useFamilyHub = (
     }
     const item = state.groceryItems.find((current) => current.id === itemId)
     const currentStock = !item?.currentStock
+    const updateGroceryStock = (items: GroceryItem[]) =>
+      items.map((item) =>
+        item.id === itemId
+          ? {
+              ...item,
+              currentStock: !item.currentStock,
+              purchased: !item.currentStock,
+              needsPurchase: item.currentStock,
+            }
+          : item,
+      )
 
     mutateWithRollback(
       (current) => ({
         ...current,
-        groceryItems: current.groceryItems.map((item) =>
-          item.id === itemId
-            ? {
-                ...item,
-                currentStock: !item.currentStock,
-                purchased: !item.currentStock,
-                needsPurchase: item.currentStock,
-              }
-            : item,
-        ),
+        groceryItems: updateGroceryStock(current.groceryItems),
       }),
       api.updateGroceryItem(itemId, { currentStock }),
       'Stock updated',
+      () => setGroceryPageItems((current) => (current ? updateGroceryStock(current) : current)),
     )
   }
 
@@ -552,13 +573,17 @@ export const useFamilyHub = (
     if (!guardPermission('manage_tasks')) {
       return
     }
+    const updateTaskAssignment = (tasks: Task[]) =>
+      tasks.map((task) => (task.id === taskId ? { ...task, assignedTo } : task))
+
     mutateWithRollback(
       (current) => ({
         ...current,
-        tasks: current.tasks.map((task) => (task.id === taskId ? { ...task, assignedTo } : task)),
+        tasks: updateTaskAssignment(current.tasks),
       }),
       api.updateTask(taskId, { assignedTo }),
       'Task reassigned',
+      () => setTaskPageItems((current) => (current ? updateTaskAssignment(current) : current)),
     )
   }
 
@@ -611,6 +636,20 @@ export const useFamilyHub = (
       }),
       api.markNotificationRead(notificationId),
       'Notification marked read',
+    )
+  }
+
+  const markAllNotificationsRead = () => {
+    if (!guardPermission('mark_notifications')) {
+      return
+    }
+    mutateWithRollback(
+      (current) => ({
+        ...current,
+        notifications: current.notifications.map((notification) => ({ ...notification, isRead: true })),
+      }),
+      api.markAllNotificationsRead(),
+      'Notifications marked read',
     )
   }
 
@@ -738,6 +777,7 @@ export const useFamilyHub = (
     updateMeal,
     applyWeeklyTemplate,
     markNotificationRead,
+    markAllNotificationsRead,
     addAnnouncement,
     askAssistant,
     resetDemoData,

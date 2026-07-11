@@ -1,10 +1,12 @@
 import {
   AlertTriangle,
+  Activity,
   CalendarClock,
   CheckCircle2,
   ChefHat,
   Clock,
   MessageSquareText,
+  History,
   ShoppingBag,
   Sparkles,
   Users,
@@ -69,46 +71,85 @@ export const DashboardView = ({ store, onNavigate }: DashboardViewProps) => {
   const completionRate =
     state.tasks.length === 0 ? 0 : Math.round((stats.completedTasks.length / state.tasks.length) * 100)
   const rewardStars = state.members.reduce((total, member) => total + member.points, 0)
+  const groceryHealth = state.groceryItems.length === 0
+    ? 100
+    : Math.max(0, 100 - Math.round((stats.pendingPurchases.length / state.groceryItems.length) * 100))
+  const mealHealth = stats.todayMeals.length > 0 ? 100 : 62
+  const familyHealth = Math.round(completionRate * 0.45 + groceryHealth * 0.35 + mealHealth * 0.2)
 
   return (
     <div className="grid gap-6">
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <StatCard
-          icon={CalendarClock}
-          iconBg="bg-indigo-50"
-          label="Tasks today"
-          onClick={() => onNavigate('tasks')}
-          toneClass="text-indigo-600"
-          value={stats.todayTasks.length}
-        />
-        <StatCard
-          icon={ShoppingBag}
-          iconBg="bg-amber-50"
-          label="Pending purchases"
-          onClick={() => onNavigate('groceries')}
-          toneClass="text-amber-600"
-          value={stats.pendingPurchases.length}
-        />
-        <StatCard
-          icon={AlertTriangle}
-          iconBg="bg-rose-50"
-          label="Expiring items"
-          onClick={() => onNavigate('groceries')}
-          toneClass="text-rose-500"
-          value={stats.expiringItems.length}
-        />
-        <StatCard
-          icon={ChefHat}
-          iconBg="bg-emerald-50"
-          label="Meals today"
-          onClick={() => onNavigate('meals')}
-          toneClass="text-emerald-600"
-          value={stats.todayMeals.length}
-        />
-      </div>
+      <section className="stagger-children grid gap-5 xl:grid-cols-[minmax(0,1.25fr)_minmax(320px,0.75fr)]">
+        <Card variant="accent" className="animated-gradient-bg overflow-hidden">
+          <CardContent className="grid gap-6 p-7 lg:grid-cols-[1fr_auto]">
+            <div className="grid content-between gap-8">
+              <div>
+                <Badge className="border-white/20 bg-white/15 text-white" mode="pill" tone="indigo">
+                  Weekly family health
+                </Badge>
+                <h2 className="mt-4 max-w-xl text-3xl font-bold leading-tight text-white">
+                  Command center is tracking the household schedule, meals, groceries, and changes.
+                </h2>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <button className="rounded-2xl bg-white/10 p-4 text-left text-white transition hover:bg-white/20" onClick={() => onNavigate('tasks')} type="button">
+                  <CalendarClock className="mb-3 size-5 text-white/75" aria-hidden="true" />
+                  <p className="text-2xl font-bold">{stats.todayTasks.length}</p>
+                  <p className="text-xs text-white/70">Today reminders</p>
+                </button>
+                <button className="rounded-2xl bg-white/10 p-4 text-left text-white transition hover:bg-white/20" onClick={() => onNavigate('groceries')} type="button">
+                  <ShoppingBag className="mb-3 size-5 text-white/75" aria-hidden="true" />
+                  <p className="text-2xl font-bold">{stats.pendingPurchases.length}</p>
+                  <p className="text-xs text-white/70">Pending purchases</p>
+                </button>
+                <button className="rounded-2xl bg-white/10 p-4 text-left text-white transition hover:bg-white/20" onClick={() => onNavigate('meals')} type="button">
+                  <ChefHat className="mb-3 size-5 text-white/75" aria-hidden="true" />
+                  <p className="text-2xl font-bold">{stats.todayMeals.length}</p>
+                  <p className="text-xs text-white/70">Meals today</p>
+                </button>
+              </div>
+            </div>
+            <div className="grid place-items-center gap-4">
+              <div
+                className="grid size-44 place-items-center rounded-full bg-white/15"
+                style={{ background: `conic-gradient(rgb(255 255 255) ${familyHealth * 3.6}deg, rgb(255 255 255 / 0.16) 0deg)` }}
+              >
+                <div className="grid size-32 place-items-center rounded-full bg-indigo-700/80 text-center text-white shadow-xl">
+                  <Activity className="mx-auto size-5 text-white/75" aria-hidden="true" />
+                  <p className="mt-1 text-4xl font-bold">{familyHealth}</p>
+                  <p className="text-[11px] font-semibold uppercase text-white/60">Score</p>
+                </div>
+              </div>
+              <Button className="border-white/20 bg-white/15 text-white hover:bg-white/20" onClick={() => onNavigate('history')} variant="secondary">
+                <History className="size-4" aria-hidden="true" />
+                Open history
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        <div className="grid gap-4">
+          <StatCard
+            icon={AlertTriangle}
+            iconBg="bg-rose-50"
+            label="Expiring items"
+            onClick={() => onNavigate('groceries')}
+            toneClass="text-rose-500"
+            value={stats.expiringItems.length}
+          />
+          <StatCard
+            icon={Users}
+            iconBg="bg-teal-50"
+            label="Family members"
+            onClick={() => onNavigate('family')}
+            toneClass="text-teal-600"
+            value={state.members.length}
+          />
+        </div>
+      </section>
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1.45fr)_minmax(360px,0.8fr)]">
-        <div className="grid gap-6">
+        <div className="stagger-children grid gap-6">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between gap-3">
               <div>
@@ -138,7 +179,7 @@ export const DashboardView = ({ store, onNavigate }: DashboardViewProps) => {
                       <div className="min-w-0">
                         <p className="truncate text-sm font-semibold text-slate-900">{task.title}</p>
                         <p className="text-xs text-slate-400">
-                          {member?.name ?? 'Unassigned'} · {formatDueLabel(task.dueAt)}
+                          {member?.name ?? 'Unassigned'} - {formatDueLabel(task.dueAt)}
                         </p>
                       </div>
                     </div>
@@ -162,6 +203,39 @@ export const DashboardView = ({ store, onNavigate }: DashboardViewProps) => {
                   </div>
                 )
               })}
+            </CardContent>
+          </Card>
+
+          {/* Action Center */}
+          <Card variant="secondary">
+            <CardContent className="grid gap-3 sm:grid-cols-3">
+              <button className="group flex items-center gap-3 rounded-2xl border border-slate-100/80 bg-white p-4 text-left transition-all duration-200 hover:border-indigo-200 hover:shadow-md hover:-translate-y-0.5" onClick={() => onNavigate('tasks')} type="button">
+                <div className="flex size-10 items-center justify-center rounded-xl bg-indigo-50 transition-transform duration-200 group-hover:scale-110">
+                  <CalendarClock className="size-5 text-indigo-600" aria-hidden="true" />
+                </div>
+                <div>
+                  <p className="text-sm font-bold text-slate-900">Manage tasks</p>
+                  <p className="text-[11px] text-slate-400">{stats.todayTasks.length} due today</p>
+                </div>
+              </button>
+              <button className="group flex items-center gap-3 rounded-2xl border border-slate-100/80 bg-white p-4 text-left transition-all duration-200 hover:border-emerald-200 hover:shadow-md hover:-translate-y-0.5" onClick={() => onNavigate('groceries')} type="button">
+                <div className="flex size-10 items-center justify-center rounded-xl bg-emerald-50 transition-transform duration-200 group-hover:scale-110">
+                  <ShoppingBag className="size-5 text-emerald-600" aria-hidden="true" />
+                </div>
+                <div>
+                  <p className="text-sm font-bold text-slate-900">Shop now</p>
+                  <p className="text-[11px] text-slate-400">{stats.pendingPurchases.length} pending</p>
+                </div>
+              </button>
+              <button className="group flex items-center gap-3 rounded-2xl border border-slate-100/80 bg-white p-4 text-left transition-all duration-200 hover:border-amber-200 hover:shadow-md hover:-translate-y-0.5" onClick={() => onNavigate('meals')} type="button">
+                <div className="flex size-10 items-center justify-center rounded-xl bg-amber-50 transition-transform duration-200 group-hover:scale-110">
+                  <ChefHat className="size-5 text-amber-600" aria-hidden="true" />
+                </div>
+                <div>
+                  <p className="text-sm font-bold text-slate-900">Plan meals</p>
+                  <p className="text-[11px] text-slate-400">{stats.todayMeals.length} today</p>
+                </div>
+              </button>
             </CardContent>
           </Card>
 
@@ -197,7 +271,7 @@ export const DashboardView = ({ store, onNavigate }: DashboardViewProps) => {
                       </div>
                     )
                   })}
-                <p className="text-xs font-medium text-slate-400">⭐ {rewardStars} reward stars</p>
+                <p className="text-xs font-medium text-slate-400">{rewardStars} reward points</p>
               </CardContent>
             </Card>
 
@@ -247,7 +321,7 @@ export const DashboardView = ({ store, onNavigate }: DashboardViewProps) => {
           </div>
         </div>
 
-        <div className="grid gap-5">
+        <div className="stagger-children grid gap-5">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between gap-3">
               <div>

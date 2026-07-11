@@ -19,7 +19,7 @@ export const AnalyticsView = ({ store }: { store: FamilyHubStore }) => {
         <Suspense
           fallback={
             <Card>
-              <CardContent className="py-16 text-center text-sm text-slate-400">Loading analytics charts…</CardContent>
+              <CardContent className="py-16 text-center text-sm text-slate-400">Loading analytics charts...</CardContent>
             </Card>
           }
         >
