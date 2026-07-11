@@ -53,6 +53,8 @@ class LoginRequest(CamelModel):
     username: str
     password: str
     familyId: int | None = None
+    deviceId: str | None = None
+    deviceName: str | None = None
 
 
 def validate_password_strength(value: str) -> str:
@@ -372,6 +374,25 @@ class EmergencyContactCreate(CamelModel):
 class EmergencyContactUpdate(CamelModel):
     label: str | None = None
     value: str | None = None
+
+
+class DeviceOut(CamelModel):
+    id: int
+    deviceId: str
+    deviceName: str
+    deviceType: str
+    platform: str | None = None
+    ipAddress: str | None = None
+    isActive: bool
+    isRevoked: bool
+    isTrusted: bool
+    registeredAt: datetime
+    lastUsedAt: datetime
+
+
+class DeviceUpdate(CamelModel):
+    deviceName: str | None = None
+    isTrusted: bool | None = None
 
 
 class AssistantInsightOut(CamelModel):

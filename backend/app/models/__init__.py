@@ -1,6 +1,8 @@
 from app.models.domain import (
     Announcement,
     AuditLog,
+    Device,
+    DeviceSession,
     EmergencyContact,
     Family,
     FamilyMember,
@@ -21,6 +23,8 @@ from app.models.domain import (
 __all__ = [
     "Announcement",
     "AuditLog",
+    "Device",
+    "DeviceSession",
     "EmergencyContact",
     "Family",
     "FamilyMember",

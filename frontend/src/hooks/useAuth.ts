@@ -6,6 +6,7 @@ export const useAuth = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(() => !!api.getAccessToken())
   const [isCheckingAuth, setIsCheckingAuth] = useState(true)
   const [authError, setAuthError] = useState<string | null>(null)
+  const [isDeviceBlocked, setIsDeviceBlocked] = useState(false)
   const [username, setUsername] = useState<string | null>(() => parseAccessToken()?.username ?? null)
   const [userId, setUserId] = useState<number | null>(() => Number(parseAccessToken()?.sub) || null)
   const [role, setRole] = useState<string | null>(() => parseAccessToken()?.role ?? null)
@@ -32,11 +33,15 @@ export const useAuth = () => {
 
   const login = useCallback(async (user: string, password: string) => {
     setAuthError(null)
+    setIsDeviceBlocked(false)
     try {
       const tokens = await api.loginUser(user, password)
       applyToken(tokens.accessToken)
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Login failed'
+      if (message.toLowerCase().includes('revoked')) {
+        setIsDeviceBlocked(true)
+      }
       setAuthError(message)
       throw error
     }
@@ -87,10 +92,16 @@ export const useAuth = () => {
     return () => window.clearTimeout(timer)
   }, [applyToken, clearSession, isAuthenticated])
 
+  const retryFromBlocked = useCallback(() => {
+    setIsDeviceBlocked(false)
+    setAuthError(null)
+  }, [])
+
   return {
     isAuthenticated,
     isCheckingAuth,
     authError,
+    isDeviceBlocked,
     username,
     userId,
     role,
@@ -98,5 +109,6 @@ export const useAuth = () => {
     isParent: capabilities.includes('manage_family'),
     login,
     logout,
+    retryFromBlocked,
   }
 }

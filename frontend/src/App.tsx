@@ -1,4 +1,5 @@
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
+import { DeviceBlocked } from '@/components/auth/DeviceBlocked'
 import { LoginPage } from '@/components/auth/LoginPage'
 import { AnalyticsView } from '@/components/analytics/AnalyticsView'
 import { AssistantView } from '@/components/assistant/AssistantView'
@@ -34,6 +35,9 @@ const App = () => {
   if (!auth.isAuthenticated) {
     if (auth.isCheckingAuth) {
       return <DashboardSkeleton />
+    }
+    if (auth.isDeviceBlocked) {
+      return <DeviceBlocked onRetry={auth.retryFromBlocked} />
     }
     return <LoginPage error={auth.authError} onLogin={auth.login} />
   }

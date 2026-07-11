@@ -200,6 +200,23 @@ CREATE TABLE IF NOT EXISTS recipes (
   INDEX idx_recipe_name (recipe_name)
 );
 
+CREATE TABLE IF NOT EXISTS devices (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  uuid CHAR(36) NOT NULL UNIQUE,
+  user_id INT NOT NULL,
+  device_id VARCHAR(100) NOT NULL,
+  device_name VARCHAR(255),
+  user_agent VARCHAR(512),
+  ip_address VARCHAR(45),
+  last_used_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  is_active BOOLEAN DEFAULT TRUE,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  UNIQUE KEY idx_devices_user_device (user_id, device_id),
+  INDEX idx_devices_user_id (user_id)
+);
+
 CREATE TABLE IF NOT EXISTS meal_plans (
   id INT AUTO_INCREMENT PRIMARY KEY,
   uuid CHAR(36) NOT NULL UNIQUE,

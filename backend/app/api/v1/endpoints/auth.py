@@ -73,7 +73,16 @@ def login_endpoint(
     db: Session = Depends(get_db),
 ) -> dict[str, str | None]:
     try:
-        tokens = login(db, payload.username, payload.password, payload.familyId)
+        tokens = login(
+            db,
+            payload.username,
+            payload.password,
+            payload.familyId,
+            payload.deviceId,
+            payload.deviceName,
+            request.headers.get("user-agent"),
+            request.client.host if request.client else None,
+        )
     except HTTPException as exc:
         write_security_audit_log(
             db,

@@ -1,6 +1,7 @@
 import type {
   AssistantInsight,
   AuditLogEntry,
+  DeviceInfo,
   FamilyHubState,
   FrequencyType,
   GroceryItem,
@@ -33,7 +34,38 @@ export interface AccessTokenPayload {
   role?: string
   permissions?: Permission[]
   family_id?: number
+  device_id?: string
   exp?: number
+}
+
+const DEVICE_ID_KEY = 'familyhub-device-id'
+const DEVICE_NAME_KEY = 'familyhub-device-name'
+
+const createDeviceId = () => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+}
+
+const getDeviceId = () => {
+  if (typeof window === 'undefined') return 'browser'
+  let deviceId = window.localStorage.getItem(DEVICE_ID_KEY)
+  if (!deviceId) {
+    deviceId = createDeviceId()
+    window.localStorage.setItem(DEVICE_ID_KEY, deviceId)
+  }
+  return deviceId
+}
+
+const getDeviceName = () => {
+  if (typeof window === 'undefined') return 'browser'
+  let deviceName = window.localStorage.getItem(DEVICE_NAME_KEY)
+  if (!deviceName) {
+    deviceName = `Browser: ${navigator.userAgent}`
+    window.localStorage.setItem(DEVICE_NAME_KEY, deviceName)
+  }
+  return deviceName
 }
 
 export const parseAccessToken = (token: string | null = accessToken): AccessTokenPayload | null => {
@@ -78,7 +110,7 @@ export const loginUser = async (username: string, password: string) => {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'include',
-    body: JSON.stringify({ username, password }),
+    body: JSON.stringify({ username, password, deviceId: getDeviceId(), deviceName: getDeviceName() }),
   })
   if (!response.ok) {
     throw new Error(await readError(response))
@@ -331,6 +363,17 @@ export const api = {
   deleteGroceryType: (typeId: number) =>
     request(`/api/v1/grocery/types/${typeId}`, { method: 'DELETE' }),
   listFrequencyTypes: () => request<FrequencyType[]>('/api/v1/grocery/frequency-types'),
+  // Device management
+  listDevices: () => request<DeviceInfo[]>('/api/v1/auth/devices'),
+  updateDevice: (deviceId: number, payload: { deviceName?: string; isTrusted?: boolean }) =>
+    request<DeviceInfo>(`/api/v1/auth/devices/${deviceId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    }),
+  revokeDevice: (deviceId: number) =>
+    request(`/api/v1/auth/devices/${deviceId}`, { method: 'DELETE' }),
+  revokeDeviceSessions: (deviceId: number) =>
+    request<{ revoked: number }>(`/api/v1/auth/devices/${deviceId}/revoke-sessions`, { method: 'POST' }),
   createRecipe: (payload: Record<string, unknown>) =>
     request('/api/v1/meal-plan/recipes', {
       method: 'POST',

@@ -25,7 +25,7 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { FormField, inputClass } from '@/components/ui/FormField'
 import type { FamilyHubStore } from '@/hooks/useFamilyHub'
 import { api } from '@/services/api'
-import type { AssistantInsight, MealPlanItem, MealType } from '@/types/familyHub'
+import type { AssistantInsight, DeviceInfo, MealPlanItem, MealType } from '@/types/familyHub'
 import { cn } from '@/utils/style'
 
 type Tab = 'members' | 'contacts' | 'grocery-types' | 'meal-plans' | 'recipes' | 'tasks' | 'insights' | 'security'
@@ -93,7 +93,7 @@ export const CommandCenterView = ({ store }: Props) => {
         {activeTab === 'recipes' && <RecipesPanel store={store} />}
         {activeTab === 'tasks' && <TasksPanel store={store} />}
         {activeTab === 'insights' && <InsightsPanel store={store} />}
-        {activeTab === 'security' && <SecurityPanel />}
+        {activeTab === 'security' && <SecurityPanel store={store} />}
       </div>
     </div>
   )
@@ -633,13 +633,22 @@ const MealPlansPanel = ({ store }: Props) => {
 }
 
 /* ─── Security Panel ─── */
-const SecurityPanel = () => {
+const SecurityPanel = ({ store: _store }: Props) => {
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [confirm, setConfirm] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [status, setStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
   const [loading, setLoading] = useState(false)
+  const [devices, setDevices] = useState<DeviceInfo[]>([])
+  const [devicesLoading, setDevicesLoading] = useState(false)
+
+  const loadDevices = useCallback(() => {
+    setDevicesLoading(true)
+    api.listDevices().then(setDevices).catch(() => {}).finally(() => setDevicesLoading(false))
+  }, [])
+
+  useEffect(() => { loadDevices() }, [loadDevices])
 
   const handleChangePassword = () => {
     if (!currentPassword || !newPassword) return
@@ -666,37 +675,85 @@ const SecurityPanel = () => {
       .finally(() => setLoading(false))
   }
 
+  const handleRevokeDevice = (deviceId: number) => {
+    api.revokeDevice(deviceId).then(loadDevices).catch(() => {})
+  }
+
+  const handleToggleTrust = (deviceId: number, isTrusted: boolean) => {
+    api.updateDevice(deviceId, { isTrusted: !isTrusted }).then(loadDevices).catch(() => {})
+  }
+
   const ToggleIcon = showPassword ? EyeOff : Eye
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Profile & Security</CardTitle>
-      </CardHeader>
-      <CardContent className="grid gap-5 max-w-md">
-        {status && (
-          <div className={cn('rounded-xl border px-4 py-3 text-sm font-medium', status.type === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-rose-200 bg-rose-50 text-rose-800')}>
-            {status.message}
-          </div>
-        )}
-        <FormField label="Current Password">
-          <div className="relative">
-            <input className={inputClass} type={showPassword ? 'text' : 'password'} value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} />
-            <button className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600" onClick={() => setShowPassword(!showPassword)} type="button">
-              <ToggleIcon className="size-4" />
-            </button>
-          </div>
-        </FormField>
-        <FormField label="New Password">
-          <input className={inputClass} type={showPassword ? 'text' : 'password'} value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />
-        </FormField>
-        <FormField label="Confirm New Password">
-          <input className={inputClass} type={showPassword ? 'text' : 'password'} value={confirm} onChange={(e) => setConfirm(e.target.value)} />
-        </FormField>
-        <Button onClick={handleChangePassword} disabled={loading}>
-          {loading ? 'Changing...' : 'Change Password'}
-        </Button>
-      </CardContent>
-    </Card>
+    <div className="grid gap-5">
+      {/* Change Password */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Change Password</CardTitle>
+        </CardHeader>
+        <CardContent className="grid gap-5 max-w-md">
+          {status && (
+            <div className={cn('rounded-xl border px-4 py-3 text-sm font-medium', status.type === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-rose-200 bg-rose-50 text-rose-800')}>
+              {status.message}
+            </div>
+          )}
+          <FormField label="Current Password">
+            <div className="relative">
+              <input className={inputClass} type={showPassword ? 'text' : 'password'} value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} />
+              <button className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600" onClick={() => setShowPassword(!showPassword)} type="button">
+                <ToggleIcon className="size-4" />
+              </button>
+            </div>
+          </FormField>
+          <FormField label="New Password">
+            <input className={inputClass} type={showPassword ? 'text' : 'password'} value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />
+          </FormField>
+          <FormField label="Confirm New Password">
+            <input className={inputClass} type={showPassword ? 'text' : 'password'} value={confirm} onChange={(e) => setConfirm(e.target.value)} />
+          </FormField>
+          <Button onClick={handleChangePassword} disabled={loading}>
+            {loading ? 'Changing...' : 'Change Password'}
+          </Button>
+        </CardContent>
+      </Card>
+
+      {/* Registered Devices */}
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle>Registered Devices</CardTitle>
+          <Button variant="outline" onClick={loadDevices} disabled={devicesLoading}>
+            <RefreshCw className={cn('size-4', devicesLoading && 'animate-spin')} /> Refresh
+          </Button>
+        </CardHeader>
+        <CardContent className="grid gap-3">
+          {devices.length === 0 && !devicesLoading && <p className="py-6 text-center text-sm text-slate-400">No devices registered</p>}
+          {devices.map((d) => (
+            <div className={cn('flex items-center justify-between rounded-xl border px-4 py-3 shadow-sm', d.isRevoked ? 'border-rose-200 bg-rose-50/30' : 'border-slate-100 bg-white')} key={d.id}>
+              <div>
+                <div className="flex items-center gap-2">
+                  <p className="text-sm font-semibold text-slate-900">{d.deviceName}</p>
+                  {d.isTrusted && <Badge tone="green">Trusted</Badge>}
+                  {d.isRevoked && <Badge tone="rose">Revoked</Badge>}
+                </div>
+                <p className="mt-0.5 text-xs text-slate-500">{d.deviceType} · {d.ipAddress || 'Unknown IP'} · Last used {new Date(d.lastUsedAt).toLocaleDateString()}</p>
+              </div>
+              <div className="flex gap-1">
+                {!d.isRevoked && (
+                  <>
+                    <Button variant="icon" iconOnly onClick={() => handleToggleTrust(d.id, d.isTrusted)} title={d.isTrusted ? 'Remove trust' : 'Mark trusted'}>
+                      <Key className={cn('size-3.5', d.isTrusted ? 'text-emerald-500' : 'text-slate-400')} />
+                    </Button>
+                    <Button variant="icon" iconOnly onClick={() => handleRevokeDevice(d.id)} title="Revoke device">
+                      <Trash2 className="size-3.5 text-rose-500" />
+                    </Button>
+                  </>
+                )}
+              </div>
+            </div>
+          ))}
+        </CardContent>
+      </Card>
+    </div>
   )
 }

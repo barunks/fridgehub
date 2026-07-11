@@ -1351,3 +1351,144 @@ def test_meal_update_description() -> None:
             )
             assert patched.status_code == 200
             assert patched.json()["description"] == "A healthy and delicious meal"
+
+
+# --- Device Management ---
+
+
+def test_device_list() -> None:
+    """Authenticated user can list their devices."""
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+        r = client.get("/api/v1/auth/devices", headers=headers)
+        assert r.status_code == 200
+        devices = r.json()
+        assert len(devices) >= 1
+        # Should have standard fields
+        d = devices[0]
+        assert "deviceId" in d
+        assert "deviceName" in d
+        assert "isRevoked" in d
+        assert "isTrusted" in d
+        assert "lastUsedAt" in d
+
+
+def test_device_update_name() -> None:
+    """Rename a device."""
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+        r = client.get("/api/v1/auth/devices", headers=headers)
+        devices = r.json()
+        device_id = devices[0]["id"]
+
+        patched = client.patch(f"/api/v1/auth/devices/{device_id}", json={"deviceName": "My Laptop"}, headers=headers)
+        assert patched.status_code == 200
+        assert patched.json()["deviceName"] == "My Laptop"
+
+
+def test_device_toggle_trust() -> None:
+    """Toggle trusted status on a device."""
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+        r = client.get("/api/v1/auth/devices", headers=headers)
+        devices = r.json()
+        device_id = devices[0]["id"]
+
+        patched = client.patch(f"/api/v1/auth/devices/{device_id}", json={"isTrusted": True}, headers=headers)
+        assert patched.status_code == 200
+        assert patched.json()["isTrusted"] is True
+
+        patched = client.patch(f"/api/v1/auth/devices/{device_id}", json={"isTrusted": False}, headers=headers)
+        assert patched.json()["isTrusted"] is False
+
+
+def test_device_revoke_sessions() -> None:
+    """Revoke all sessions for a device."""
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+        r = client.get("/api/v1/auth/devices", headers=headers)
+        devices = r.json()
+        device_id = devices[0]["id"]
+
+        r = client.post(f"/api/v1/auth/devices/{device_id}/revoke-sessions", headers=headers)
+        assert r.status_code == 200
+        assert "revoked" in r.json()
+
+
+def test_device_not_found() -> None:
+    """Operations on non-existent device return 404."""
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+        assert client.patch("/api/v1/auth/devices/99999", json={"deviceName": "X"}, headers=headers).status_code == 404
+        assert client.delete("/api/v1/auth/devices/99999", headers=headers).status_code == 404
+        assert client.post("/api/v1/auth/devices/99999/revoke-sessions", headers=headers).status_code == 404
+
+
+def test_device_requires_auth() -> None:
+    """Device endpoints require authentication."""
+    with TestClient(app) as client:
+        assert client.get("/api/v1/auth/devices").status_code == 401
+
+
+def test_login_with_revoked_device() -> None:
+    """Login from a revoked device should return 403."""
+    with TestClient(app) as client:
+        # Login with a specific device ID
+        r = client.post("/api/v1/auth/login", json={"username": "meera", "password": "familyhub", "deviceId": "revoke-login-test-device"})
+        assert r.status_code == 200
+        headers = {"Authorization": f"Bearer {r.json()['accessToken']}"}
+
+        # Get the device and revoke it
+        r = client.get("/api/v1/auth/devices", headers=headers)
+        devices = r.json()
+        target = next((d for d in devices if d["deviceId"] == "revoke-login-test-device"), None)
+        assert target is not None
+
+        # Revoke the device
+        client.delete(f"/api/v1/auth/devices/{target['id']}", headers=headers)
+
+        # Attempt login again with the same device ID — should be rejected
+        r = client.post("/api/v1/auth/login", json={"username": "meera", "password": "familyhub", "deviceId": "revoke-login-test-device"})
+        assert r.status_code == 403
+        assert "revoked" in r.json()["error"]["detail"].lower()
+
+
+def test_refresh_with_revoked_device() -> None:
+    """Refresh from a revoked device should fail."""
+    with TestClient(app) as client:
+        # Login as ava to get a fresh device
+        login_r = client.post("/api/v1/auth/login", json={"username": "ava", "password": "familyhub", "deviceId": "revoke-refresh-test-device"})
+        assert login_r.status_code == 200
+        token = login_r.json()["accessToken"]
+        headers = {"Authorization": f"Bearer {token}"}
+
+        # Get device and revoke it
+        r = client.get("/api/v1/auth/devices", headers=headers)
+        devices = r.json()
+        # Find the device we just created
+        target = next((d for d in devices if d["deviceId"] == "revoke-refresh-test-device"), devices[0])
+        client.delete(f"/api/v1/auth/devices/{target['id']}", headers=headers)
+
+        # Attempt refresh — should fail because device is revoked
+        r = client.post("/api/v1/auth/refresh", json={})
+        assert r.status_code == 401
+
+
+def test_device_registered_audit_event() -> None:
+    """First login from a new device creates a device_registered audit log."""
+    import uuid
+    unique_device_id = f"audit-test-{uuid.uuid4().hex[:12]}"
+    with TestClient(app) as client:
+        # Login with a unique device ID to force new device registration
+        r = client.post(
+            "/api/v1/auth/login",
+            json={"username": "meera", "password": "familyhub", "deviceId": unique_device_id, "deviceName": "Audit Test Device"},
+        )
+        assert r.status_code == 200
+        headers = {"Authorization": f"Bearer {r.json()['accessToken']}"}
+
+        # Check audit logs for device_registered event
+        r = client.get("/api/v1/family/audit-logs?limit=10", headers=headers)
+        logs = r.json()
+        device_logs = [log for log in logs if log["action"] == "device_registered" and log["changes"].get("device_id") == unique_device_id]
+        assert len(device_logs) >= 1

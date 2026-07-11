@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import datetime
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
@@ -8,7 +9,7 @@ from app.core.cache import cache
 from app.core.database import get_db
 from app.core.permissions import Permission, effective_permissions
 from app.core.security import decode_token
-from app.models import FamilyMember, User
+from app.models import Device, FamilyMember, User
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
@@ -72,6 +73,18 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     token_version = payload.get("ver")
     if token_version is None or not str(token_version).isdigit() or int(token_version) != int(user.token_version or 0):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session has been revoked")
+
+    device_id = payload.get("device_id")
+    if not device_id or not isinstance(device_id, str):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Access token is missing device information")
+
+    device = (
+        db.query(Device)
+        .filter(Device.user_id == user.id, Device.device_id == device_id, Device.is_active.is_(True))
+        .one_or_none()
+    )
+    if not device or device.is_revoked:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Device session is not valid")
 
     family_id = payload.get("family_id")
     if not family_id or not str(family_id).isdigit():

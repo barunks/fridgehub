@@ -1,4 +1,5 @@
-from datetime import timedelta
+import uuid
+from datetime import datetime, timedelta
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
@@ -8,7 +9,8 @@ from app.core.config import settings
 from app.core.dependencies import CurrentUser, token_revocation_key
 from app.core.permissions import effective_permissions
 from app.core.security import create_access_token, create_refresh_token, decode_token, verify_password
-from app.models import FamilyMember, User
+from app.models import Device, DeviceSession, FamilyMember, User
+from app.services.audit_service import write_audit_log
 
 
 def _active_memberships(db: Session, user_id: int) -> list[FamilyMember]:
@@ -45,8 +47,10 @@ def _token_context(user: User, membership: FamilyMember) -> dict[str, object]:
     }
 
 
-def _issue_tokens(user: User, membership: FamilyMember) -> dict[str, str]:
+def _issue_tokens(user: User, membership: FamilyMember, extra: dict[str, object] | None = None) -> dict[str, str]:
     context = _token_context(user, membership)
+    if extra:
+        context.update(extra)
     return {
         "accessToken": create_access_token(str(user.id), extra=context),
         "refreshToken": create_refresh_token(str(user.id), extra=context),
@@ -54,13 +58,128 @@ def _issue_tokens(user: User, membership: FamilyMember) -> dict[str, str]:
     }
 
 
-def login(db: Session, username: str, password: str, family_id: int | None = None) -> dict[str, str]:
+def _device_identifier(device_id: str | None, user_agent: str | None, ip_address: str | None) -> str:
+    if device_id:
+        return device_id
+    fingerprint = f"{user_agent or 'unknown'}|{ip_address or 'unknown'}"
+    if user_agent or ip_address:
+        return str(uuid.uuid5(uuid.NAMESPACE_URL, fingerprint))
+    return str(uuid.uuid4())
+
+
+def _register_device(
+    db: Session,
+    user: User,
+    family_id: int,
+    device_id: str | None,
+    device_name: str | None,
+    user_agent: str | None,
+    ip_address: str | None,
+) -> str:
+    device_id = _device_identifier(device_id, user_agent, ip_address)
+
+    from app.models import Device
+
+    device = (
+        db.query(Device)
+        .filter(Device.user_id == user.id, Device.device_id == device_id)
+        .one_or_none()
+    )
+    if device and device.is_revoked:
+        raise HTTPException(status_code=403, detail="This device has been revoked. Contact a family admin.")
+    if not device:
+        device = Device(
+            user_id=user.id,
+            family_id=family_id,
+            device_id=device_id,
+            device_name=device_name,
+            device_type="browser",
+            user_agent=user_agent,
+            ip_address=ip_address,
+        )
+        db.add(device)
+        db.flush()
+        write_audit_log(
+            db,
+            user_id=user.id,
+            family_id=family_id,
+            action="device_registered",
+            entity_type="device",
+            entity_id=device.id,
+            changes={"device_id": device_id, "device_name": device_name, "ip_address": ip_address},
+        )
+    else:
+        device.device_name = device_name or device.device_name
+        device.last_user_agent = user_agent
+        device.last_ip = ip_address
+        device.last_used_at = datetime.utcnow()
+        device.family_id = family_id
+    db.flush()
+    return device_id
+
+
+def _record_session(
+    db: Session,
+    user: User,
+    family_id: int,
+    device_id_str: str,
+    tokens: dict[str, str],
+    user_agent: str | None,
+    ip_address: str | None,
+) -> None:
+    """Record token sessions for the device."""
+    device = (
+        db.query(Device)
+        .filter(Device.user_id == user.id, Device.device_id == device_id_str)
+        .one_or_none()
+    )
+    if not device:
+        return
+    for token_key, token_type in [("accessToken", "access"), ("refreshToken", "refresh")]:
+        try:
+            payload = decode_token(tokens[token_key], verify_exp=False)
+        except ValueError:
+            continue
+        jti = payload.get("jti")
+        exp = payload.get("exp")
+        if not jti or not exp:
+            continue
+        session = DeviceSession(
+            device_id=device.id,
+            user_id=user.id,
+            family_id=family_id,
+            jti=str(jti),
+            token_type=token_type,
+            expires_at=datetime.utcfromtimestamp(exp),
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
+        db.add(session)
+
+
+def login(
+    db: Session,
+    username: str,
+    password: str,
+    family_id: int | None = None,
+    device_id: str | None = None,
+    device_name: str | None = None,
+    user_agent: str | None = None,
+    ip_address: str | None = None,
+) -> dict[str, str]:
     user = db.query(User).filter((User.username == username) | (User.email == username)).first()
     if not user or not user.is_active or not verify_password(password, user.password_hash):
         raise HTTPException(status_code=401, detail="Invalid username or password")
 
     membership = _select_membership(db, user, family_id)
-    return _issue_tokens(user, membership)
+    registered_device_id = _register_device(db, user, membership.family_id, device_id, device_name, user_agent, ip_address)
+    extra_context: dict[str, object] = {}
+    if registered_device_id:
+        extra_context["device_id"] = registered_device_id
+    tokens = _issue_tokens(user, membership, extra_context)
+    _record_session(db, user, membership.family_id, registered_device_id, tokens, user_agent, ip_address)
+    db.commit()
+    return tokens
 
 
 def refresh(db: Session, refresh_token: str, family_id: int | None = None) -> dict[str, str]:
@@ -85,6 +204,23 @@ def refresh(db: Session, refresh_token: str, family_id: int | None = None) -> di
     if token_version is None or not str(token_version).isdigit() or int(token_version) != int(user.token_version or 0):
         raise HTTPException(status_code=401, detail="Refresh token has been revoked")
 
+    device_id = payload.get("device_id")
+    if not device_id or not isinstance(device_id, str):
+        raise HTTPException(status_code=401, detail="Refresh token is missing device information")
+
+    device = (
+        db.query(Device)
+        .filter(Device.user_id == user.id, Device.device_id == device_id, Device.is_active.is_(True))
+        .one_or_none()
+    )
+    if not device:
+        raise HTTPException(status_code=401, detail="Device session is no longer valid")
+    if device.is_revoked:
+        raise HTTPException(status_code=403, detail="This device has been revoked")
+
+    device.last_used_at = datetime.utcnow()
+    db.commit()
+
     selected_family_id = family_id
     if selected_family_id is None and payload.get("family_id") and str(payload.get("family_id")).isdigit():
         selected_family_id = int(payload["family_id"])
@@ -97,7 +233,7 @@ def refresh(db: Session, refresh_token: str, family_id: int | None = None) -> di
             ttl_seconds=settings.refresh_token_expire_days * 24 * 60 * 60,
         )
 
-    return _issue_tokens(user, membership)
+    return _issue_tokens(user, membership, {"device_id": device_id})
 
 
 def logout_subject(db: Session, user_id: int | None, token_jti: str | None = None) -> dict[str, str]:

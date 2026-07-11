@@ -123,7 +123,50 @@ The `/command-center` route (parent-only) provides a unified admin workspace wit
 | Recipes | Full list with real-time filter, create, delete |
 | Tasks | Status filter, checkbox toggle, delete |
 | Insights | Live AI assistant insights from `/api/v1/assistant/insights` |
-| Security | Change password with validation |
+| Security | Change password with validation, device management (list, rename, trust, revoke) |
+
+## Device Registration & Access Control
+
+Each login is bound to a device. Devices are automatically registered on first login and tracked for security.
+
+### How It Works
+
+1. The frontend generates a stable `deviceId` (stored in localStorage) and sends it with login requests.
+2. The backend creates a `Device` record on first login from a new device and logs a `device_registered` audit event.
+3. Each token (access + refresh) is recorded as a `DeviceSession` row linked to the device.
+4. On every authenticated request, the backend verifies the device is not revoked.
+5. If a device is revoked, all its sessions are invalidated and the user sees a "Device Blocked" screen.
+
+### Device Management
+
+Parents can manage devices from the Command Center → Security tab:
+
+- View all registered devices with last-used timestamps
+- Rename devices for easy identification
+- Mark devices as trusted
+- Revoke sessions (force re-login without blocking the device)
+- Revoke a device entirely (blocks all future access from that device)
+
+### API Endpoints
+
+```text
+GET    /api/v1/auth/devices                         # List user's devices
+PATCH  /api/v1/auth/devices/{device_id}             # Rename or toggle trust
+DELETE /api/v1/auth/devices/{device_id}             # Revoke device + all sessions
+POST   /api/v1/auth/devices/{device_id}/revoke-sessions  # Revoke sessions only
+```
+
+### Frontend Components
+
+- `DeviceBlocked` — Full-screen error shown when a revoked device attempts access
+- `DeviceRegistration` — Prompt shown on first login from a new device (name + type selection)
+- `DeviceManagement` — Standalone device list with trust/revoke controls (also embedded in Command Center)
+
+### Database
+
+Migration `0005_device_sessions` adds:
+- Extended `devices` table with `family_id`, `device_type`, `platform`, `last_ip`, `last_user_agent`, `is_revoked`, `is_trusted`, `registered_at`
+- New `device_sessions` table tracking every issued token per device
 
 ## Per-Member Meal Plans
 
@@ -173,6 +216,10 @@ POST   /api/v1/auth/login
 POST   /api/v1/auth/refresh
 POST   /api/v1/auth/logout
 POST   /api/v1/auth/change-password
+GET    /api/v1/auth/devices
+PATCH  /api/v1/auth/devices/{device_id}
+DELETE /api/v1/auth/devices/{device_id}
+POST   /api/v1/auth/devices/{device_id}/revoke-sessions
 GET    /api/v1/family/bootstrap
 GET    /api/v1/family/members
 POST   /api/v1/family/members
@@ -257,6 +304,7 @@ Migrations:
 0002_auth_membership_cache_fixes — Auth and membership hardening
 0003_membership_permissions      — Permission grants on family_members
 0004_per_member_meal_plans       — Unique constraint change for per-member meals
+0005_device_sessions             — Device management and session tracking
 ```
 
 Local SQLite is used only for fast development and tests. Docker uses MySQL:
@@ -293,7 +341,7 @@ It evaluates current tasks, grocery expiry, pending purchases, today's meal plan
 
 ## Verification
 
-Backend (78 tests):
+Backend (87 tests):
 
 ```bash
 . .venv/bin/activate
@@ -328,7 +376,10 @@ Test coverage includes:
 - Soft-delete behavior
 - API versioning headers
 - Error response format consistency
-- E2E tests for Command Center navigation, tabs, and per-member meal plan UI
+- Device registration, revocation, and session management
+- Login/refresh rejection for revoked devices
+- Device lifecycle audit events
+- E2E tests for Command Center navigation, tabs, per-member meal plan UI, and device management
 
 ## Audit Remediation Notes
 
@@ -363,4 +414,5 @@ Addressed from the audit report:
 - Cmd+K command palette for global fuzzy search across tasks, groceries, meals, and family members.
 - Service worker for offline PWA support with cache-first static assets and network-first API responses.
 - Household Command Center with unified tabbed admin for all family CRUD workflows.
+- Device registration and access control with per-device session tracking, revocation, and audit trail.
 - Per-member meal plans with template-based generation and individual customization.

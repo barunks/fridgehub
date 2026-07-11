@@ -254,3 +254,17 @@ export interface FrequencyType {
   name: string
   days: number
 }
+
+export interface DeviceInfo {
+  id: number
+  deviceId: string
+  deviceName: string
+  deviceType: string
+  platform: string | null
+  ipAddress: string | null
+  isActive: boolean
+  isRevoked: boolean
+  isTrusted: boolean
+  registeredAt: string
+  lastUsedAt: string
+}

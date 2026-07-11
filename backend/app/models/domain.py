@@ -35,6 +35,59 @@ class User(Base, TimestampMixin, ActiveMixin):
     token_version: Mapped[int] = mapped_column(default=0, nullable=False)
 
     family_memberships: Mapped[list["FamilyMember"]] = relationship(back_populates="user")
+    devices: Mapped[list["Device"]] = relationship(back_populates="user")
+
+
+class Device(Base, TimestampMixin, ActiveMixin):
+    __tablename__ = "devices"
+    __table_args__ = (
+        Index("idx_devices_user_device", "user_id", "device_id", unique=True),
+        Index("idx_devices_user_id", "user_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    uuid: Mapped[str] = mapped_column(String(36), default=uuid_string, unique=True, nullable=False)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    family_id: Mapped[int | None] = mapped_column(ForeignKey("families.id", ondelete="SET NULL"), index=True)
+    device_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    device_name: Mapped[str | None] = mapped_column(String(255))
+    device_type: Mapped[str] = mapped_column(String(30), default="browser", nullable=False)
+    platform: Mapped[str | None] = mapped_column(String(100))
+    user_agent: Mapped[str | None] = mapped_column(String(512))
+    ip_address: Mapped[str | None] = mapped_column(String(45))
+    last_ip: Mapped[str | None] = mapped_column(String(45))
+    last_user_agent: Mapped[str | None] = mapped_column(String(512))
+    is_revoked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_trusted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    registered_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)
+    last_used_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)
+
+    user: Mapped["User"] = relationship(back_populates="devices")
+    sessions: Mapped[list["DeviceSession"]] = relationship(back_populates="device", cascade="all, delete-orphan")
+
+
+class DeviceSession(Base):
+    __tablename__ = "device_sessions"
+    __table_args__ = (
+        Index("idx_device_sessions_device", "device_id"),
+        Index("idx_device_sessions_jti", "jti", unique=True),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    uuid: Mapped[str] = mapped_column(String(36), default=uuid_string, unique=True, nullable=False)
+    device_id: Mapped[int] = mapped_column(ForeignKey("devices.id", ondelete="CASCADE"), nullable=False)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    family_id: Mapped[int | None] = mapped_column(ForeignKey("families.id", ondelete="SET NULL"))
+    jti: Mapped[str] = mapped_column(String(36), nullable=False)
+    token_type: Mapped[str] = mapped_column(String(10), nullable=False)  # access | refresh
+    issued_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime)
+    ip_address: Mapped[str | None] = mapped_column(String(45))
+    user_agent: Mapped[str | None] = mapped_column(String(512))
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    device: Mapped["Device"] = relationship(back_populates="sessions")
 
 
 class Family(Base, TimestampMixin, ActiveMixin):
