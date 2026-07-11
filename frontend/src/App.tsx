@@ -2,6 +2,7 @@ import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-
 import { LoginPage } from '@/components/auth/LoginPage'
 import { AnalyticsView } from '@/components/analytics/AnalyticsView'
 import { AssistantView } from '@/components/assistant/AssistantView'
+import { CommandCenterView } from '@/components/command-center/CommandCenterView'
 import { DashboardView } from '@/components/dashboard/DashboardView'
 import { FamilyView } from '@/components/family/FamilyView'
 import { GroceryView } from '@/components/grocery/GroceryView'
@@ -59,6 +60,16 @@ const App = () => {
           <Route element={<FamilyView store={store} />} path={viewPaths.family} />
           <Route element={<AnalyticsView store={store} />} path={viewPaths.analytics} />
           <Route element={<AssistantView store={store} />} path={viewPaths.assistant} />
+          <Route
+            element={
+              store.can('manage_family') ? (
+                <CommandCenterView store={store} />
+              ) : (
+                <Navigate replace to={viewPaths.dashboard} />
+              )
+            }
+            path={viewPaths['command-center']}
+          />
           <Route
             element={
               store.can('view_audit') ? (

@@ -12,15 +12,16 @@ from app.utils.dates import start_of_week
 from app.utils.sanitize import sanitize_text
 
 
-def weekly_meals(db: Session, family_id: int) -> list[dict]:
+def weekly_meals(db: Session, family_id: int, member_id: int | None = None) -> list[dict]:
     start = start_of_week()
     end = start + timedelta(days=6)
-    rows = (
+    query = (
         db.query(MealPlan)
         .filter(MealPlan.family_id == family_id, MealPlan.plan_date >= start, MealPlan.plan_date <= end, MealPlan.is_active.is_(True))
-        .order_by(MealPlan.plan_date, MealPlan.id)
-        .all()
     )
+    if member_id is not None:
+        query = query.filter(MealPlan.assigned_to == member_id)
+    rows = query.order_by(MealPlan.plan_date, MealPlan.id).all()
     return [serialize_meal(row) for row in rows]
 
 
@@ -65,7 +66,7 @@ def update_meal(db: Session, meal_id: int, payload: MealUpdate, family_id: int, 
     return serialize_meal(meal)
 
 
-def apply_template(db: Session, family_id: int, user_id: int, template_name: str | None = None) -> list[dict]:
+def apply_template(db: Session, family_id: int, user_id: int, template_name: str | None = None, member_id: int | None = None) -> list[dict]:
     selected_template_name = template_name
     if not selected_template_name:
         selected_template_name = (
@@ -103,6 +104,8 @@ def apply_template(db: Session, family_id: int, user_id: int, template_name: str
     start = start_of_week()
     day_lookup = {day.lower(): start + timedelta(days=index) for index, day in enumerate(["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"])}
 
+    assigned_to = member_id  # None means family-wide (shared)
+
     for template in templates:
         plan_date = day_lookup.get(template.day_of_week or "")
         if not plan_date:
@@ -110,11 +113,11 @@ def apply_template(db: Session, family_id: int, user_id: int, template_name: str
 
         meal = (
             db.query(MealPlan)
-            .filter_by(family_id=family_id, plan_date=plan_date, meal_type=template.meal_type)
+            .filter_by(family_id=family_id, plan_date=plan_date, meal_type=template.meal_type, assigned_to=assigned_to)
             .first()
         )
         if not meal:
-            meal = MealPlan(family_id=family_id, plan_date=plan_date, meal_type=template.meal_type, created_by=user_id)
+            meal = MealPlan(family_id=family_id, plan_date=plan_date, meal_type=template.meal_type, created_by=user_id, assigned_to=assigned_to)
             db.add(meal)
         meal.day_of_week = (template.day_of_week or "").title()
         meal.meal_name = template.meal_name
@@ -132,12 +135,13 @@ def apply_template(db: Session, family_id: int, user_id: int, template_name: str
             "sunday": "bg-indigo-500",
         }.get(template.day_of_week or "", "bg-blue-500")
 
+    member_label = f" for member {member_id}" if member_id else ""
     create_notification(
         db,
         user_id=user_id,
         family_id=family_id,
         title="Weekly template applied",
-        message="The full breakfast, lunch, snacks, and dinner plan is active for this week.",
+        message=f"The full breakfast, lunch, snacks, and dinner plan is active for this week{member_label}.",
         type_="meal",
     )
     write_audit_log(
@@ -147,7 +151,8 @@ def apply_template(db: Session, family_id: int, user_id: int, template_name: str
         action="apply_template",
         entity_type="meal_plan",
         entity_id=selected_template_name,
+        changes={"member_id": member_id},
     )
     db.commit()
     invalidate_entity("meals", family_id)
-    return weekly_meals(db, family_id)
+    return weekly_meals(db, family_id, member_id)

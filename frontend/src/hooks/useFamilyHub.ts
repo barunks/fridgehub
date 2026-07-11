@@ -80,6 +80,8 @@ export const useFamilyHub = (
   const [recipePageItems, setRecipePageItems] = useState<Recipe[] | null>(null)
   const [notificationPageItems, setNotificationPageItems] = useState<Notification[] | null>(null)
   const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([])
+  const [memberMeals, setMemberMeals] = useState<MealPlanItem[] | null>(null)
+  const [memberMealsLoading, setMemberMealsLoading] = useState(false)
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
 
   useEffect(() => {
@@ -301,6 +303,27 @@ export const useFamilyHub = (
         updatePageState(key, nextOffset, items.length)
       })
       .catch((error) => pageError(key, error))
+  }, [])
+
+  const loadMemberMeals = useCallback((memberId: number | null) => {
+    if (memberId === null) {
+      setMemberMeals(null)
+      return
+    }
+    setMemberMealsLoading(true)
+    api
+      .getWeeklyMeals(memberId)
+      .then((items) => {
+        setMemberMeals(items)
+        setIsBackendUnavailable(false)
+      })
+      .catch((error: unknown) => {
+        const msg = error instanceof Error ? error.message : 'Failed to load member meals'
+        if (msg !== 'AUTH_REQUIRED') {
+          setFeedback({ type: 'error', message: msg })
+        }
+      })
+      .finally(() => setMemberMealsLoading(false))
   }, [])
 
   useEffect(() => {
@@ -601,7 +624,7 @@ export const useFamilyHub = (
     )
   }
 
-  const applyWeeklyTemplate = () => {
+  const applyWeeklyTemplate = (memberId?: number | null) => {
     if (!guardPermission('manage_meals')) {
       return
     }
@@ -618,7 +641,7 @@ export const useFamilyHub = (
           ...current.notifications,
         ],
       }),
-      api.applyMealTemplate(),
+      api.applyMealTemplate(memberId),
       'Meal template applied',
     )
   }
@@ -700,6 +723,218 @@ export const useFamilyHub = (
       }),
       api.createMember(input),
       'Member added',
+    )
+  }
+
+  const updateMember = (memberId: number, payload: { name?: string; role?: string; colorClass?: string; status?: string; points?: number; dietaryNotes?: string[] }) => {
+    if (!guardPermission('manage_family')) {
+      return
+    }
+    mutateWithRollback(
+      (current) => ({
+        ...current,
+        members: current.members.map((m) =>
+          m.id === memberId ? { ...m, ...payload, initial: payload.name ? payload.name.charAt(0).toUpperCase() : m.initial } : m,
+        ),
+      }),
+      api.updateMember(memberId, payload),
+      'Member updated',
+    )
+  }
+
+  const deleteMember = (memberId: number) => {
+    if (!guardPermission('manage_family')) {
+      return
+    }
+    mutateWithRollback(
+      (current) => ({
+        ...current,
+        members: current.members.filter((m) => m.id !== memberId),
+      }),
+      api.deleteMember(memberId),
+      'Member removed',
+    )
+  }
+
+  const addEmergencyContact = (label: string, value: string) => {
+    if (!guardPermission('manage_contacts')) {
+      return
+    }
+    mutateWithRollback(
+      (current) => ({
+        ...current,
+        emergencyContacts: [
+          ...current.emergencyContacts,
+          { id: nextId(current.emergencyContacts), label, value },
+        ],
+      }),
+      api.createEmergencyContact(label, value),
+      'Emergency contact added',
+    )
+  }
+
+  const updateEmergencyContact = (contactId: number, payload: { label?: string; value?: string }) => {
+    if (!guardPermission('manage_contacts')) {
+      return
+    }
+    mutateWithRollback(
+      (current) => ({
+        ...current,
+        emergencyContacts: current.emergencyContacts.map((c) =>
+          c.id === contactId ? { ...c, ...payload } : c,
+        ),
+      }),
+      api.updateEmergencyContact(contactId, payload),
+      'Emergency contact updated',
+    )
+  }
+
+  const deleteEmergencyContact = (contactId: number) => {
+    if (!guardPermission('manage_contacts')) {
+      return
+    }
+    mutateWithRollback(
+      (current) => ({
+        ...current,
+        emergencyContacts: current.emergencyContacts.filter((c) => c.id !== contactId),
+      }),
+      api.deleteEmergencyContact(contactId),
+      'Emergency contact removed',
+    )
+  }
+
+  const deleteAnnouncement = (announcementId: number) => {
+    if (!guardPermission('manage_announcements')) {
+      return
+    }
+    mutateWithRollback(
+      (current) => ({
+        ...current,
+        announcements: current.announcements.filter((a) => a.id !== announcementId),
+      }),
+      api.deleteAnnouncement(announcementId),
+      'Announcement removed',
+    )
+  }
+
+  const deleteTask = (taskId: number) => {
+    if (!guardPermission('manage_tasks')) {
+      return
+    }
+    mutateWithRollback(
+      (current) => ({
+        ...current,
+        tasks: current.tasks.filter((t) => t.id !== taskId),
+      }),
+      api.deleteTask(taskId),
+      'Task deleted',
+      () => setTaskPageItems((current) => current ? current.filter((t) => t.id !== taskId) : current),
+    )
+  }
+
+  const deleteGroceryItem = (itemId: number) => {
+    if (!guardPermission('manage_groceries')) {
+      return
+    }
+    mutateWithRollback(
+      (current) => ({
+        ...current,
+        groceryItems: current.groceryItems.filter((i) => i.id !== itemId),
+      }),
+      api.deleteGroceryItem(itemId),
+      'Grocery item deleted',
+      () => setGroceryPageItems((current) => current ? current.filter((i) => i.id !== itemId) : current),
+    )
+  }
+
+  const updateListType = (listTypeId: number, payload: { listName?: string; description?: string; colorClass?: string }) => {
+    if (!guardPermission('manage_groceries')) {
+      return
+    }
+    mutateWithRollback(
+      (current) => ({
+        ...current,
+        listTypes: current.listTypes.map((lt) =>
+          lt.id === listTypeId ? { ...lt, ...payload } : lt,
+        ),
+      }),
+      api.updateListType(listTypeId, payload),
+      'Shopping place updated',
+    )
+  }
+
+  const deleteListType = (listTypeId: number) => {
+    if (!guardPermission('manage_groceries')) {
+      return
+    }
+    mutateWithRollback(
+      (current) => ({
+        ...current,
+        listTypes: current.listTypes.filter((lt) => lt.id !== listTypeId),
+      }),
+      api.deleteListType(listTypeId),
+      'Shopping place removed',
+    )
+  }
+
+  const addRecipe = (input: { recipeName: string; description?: string; ingredients?: string[]; prepTime?: number; cookTime?: number; servings?: number; difficulty?: 'easy' | 'medium' | 'hard'; cuisine?: string; dietaryTags?: string[] }) => {
+    if (!guardPermission('manage_recipes')) {
+      return
+    }
+    mutateWithRollback(
+      (current) => ({
+        ...current,
+        recipes: [
+          ...current.recipes,
+          {
+            id: nextId(current.recipes),
+            recipeName: input.recipeName,
+            description: input.description || '',
+            ingredients: input.ingredients || [],
+            prepTime: input.prepTime || 0,
+            cookTime: input.cookTime || 0,
+            servings: input.servings || 1,
+            difficulty: input.difficulty || 'easy',
+            cuisine: input.cuisine || '',
+            dietaryTags: input.dietaryTags || [],
+          },
+        ],
+      }),
+      api.createRecipe(input),
+      'Recipe added',
+      () => setRecipePageItems(null),
+    )
+  }
+
+  const updateRecipe = (recipeId: number, payload: Record<string, unknown>) => {
+    if (!guardPermission('manage_recipes')) {
+      return
+    }
+    mutateWithRollback(
+      (current) => ({
+        ...current,
+        recipes: current.recipes.map((r) =>
+          r.id === recipeId ? { ...r, ...payload } as Recipe : r,
+        ),
+      }),
+      api.updateRecipe(recipeId, payload),
+      'Recipe updated',
+      () => setRecipePageItems((current) => current ? current.map((r) => r.id === recipeId ? { ...r, ...payload } as Recipe : r) : current),
+    )
+  }
+
+  const deleteRecipe = (recipeId: number) => {
+    if (!guardPermission('manage_recipes')) {
+      return
+    }
+    mutateWithRollback(
+      (current) => ({
+        ...current,
+        recipes: current.recipes.filter((r) => r.id !== recipeId),
+      }),
+      api.deleteRecipe(recipeId),
+      'Recipe deleted',
+      () => setRecipePageItems((current) => current ? current.filter((r) => r.id !== recipeId) : current),
     )
   }
 
@@ -785,6 +1020,8 @@ export const useFamilyHub = (
       recipes: recipePageItems,
       notifications: notificationPageItems,
     },
+    memberMeals,
+    memberMealsLoading,
     auditLogs,
     clearFeedback: () => setFeedback(null),
     loadGroceryPage,
@@ -792,6 +1029,7 @@ export const useFamilyHub = (
     loadRecipePage,
     loadNotificationPage,
     loadAuditLogs,
+    loadMemberMeals,
     toggleTaskStatus,
     toggleGroceryPurchased,
     toggleCurrentStock,
@@ -806,6 +1044,19 @@ export const useFamilyHub = (
     markAllNotificationsRead,
     addAnnouncement,
     addMember,
+    updateMember,
+    deleteMember,
+    addEmergencyContact,
+    updateEmergencyContact,
+    deleteEmergencyContact,
+    deleteAnnouncement,
+    deleteTask,
+    deleteGroceryItem,
+    updateListType,
+    deleteListType,
+    addRecipe,
+    updateRecipe,
+    deleteRecipe,
     askAssistant,
     resetDemoData,
   }

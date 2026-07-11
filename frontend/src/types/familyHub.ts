@@ -10,6 +10,7 @@ export type ViewKey =
   | 'assistant'
   | 'history'
   | 'implementation'
+  | 'command-center'
 
 export type Priority = 'low' | 'medium' | 'high'
 export type TaskStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled'
@@ -237,4 +238,19 @@ export interface NewTaskInput {
   reminderAt?: string
   assignedTo: number
   recurrenceType?: RecurrenceType
+}
+
+export interface GroceryType {
+  id: number
+  typeName: string
+  description?: string
+  icon?: string
+  color?: string
+  isSystem: boolean
+}
+
+export interface FrequencyType {
+  id: number
+  name: string
+  days: number
 }

@@ -2,7 +2,10 @@ import type {
   AssistantInsight,
   AuditLogEntry,
   FamilyHubState,
+  FrequencyType,
   GroceryItem,
+  GroceryType,
+  MealPlanItem,
   NewGroceryItemInput,
   NewTaskInput,
   Notification,
@@ -259,9 +262,12 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify({ mealName }),
     }),
-  applyMealTemplate: () =>
+  getWeeklyMeals: (memberId?: number | null) =>
+    request<MealPlanItem[]>(`/api/v1/meal-plan/week${queryString({ member_id: memberId })}`),
+  applyMealTemplate: (memberId?: number | null) =>
     request('/api/v1/meal-plan/apply-template', {
       method: 'POST',
+      body: JSON.stringify({ memberId }),
     }),
   markNotificationRead: (notificationId: number) =>
     request(`/api/v1/notifications/${notificationId}/read`, {
@@ -281,6 +287,62 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
+  updateMember: (memberId: number, payload: Record<string, unknown>) =>
+    request(`/api/v1/family/members/${memberId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    }),
+  deleteMember: (memberId: number) =>
+    request(`/api/v1/family/members/${memberId}`, { method: 'DELETE' }),
+  createEmergencyContact: (label: string, value: string) =>
+    request('/api/v1/family/emergency-contacts', {
+      method: 'POST',
+      body: JSON.stringify({ label, value }),
+    }),
+  updateEmergencyContact: (contactId: number, payload: Record<string, unknown>) =>
+    request(`/api/v1/family/emergency-contacts/${contactId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    }),
+  deleteEmergencyContact: (contactId: number) =>
+    request(`/api/v1/family/emergency-contacts/${contactId}`, { method: 'DELETE' }),
+  deleteAnnouncement: (announcementId: number) =>
+    request(`/api/v1/family/announcements/${announcementId}`, { method: 'DELETE' }),
+  deleteTask: (taskId: number) =>
+    request(`/api/v1/tasks/${taskId}`, { method: 'DELETE' }),
+  deleteGroceryItem: (itemId: number) =>
+    request(`/api/v1/grocery/items/${itemId}`, { method: 'DELETE' }),
+  updateListType: (listTypeId: number, payload: Record<string, unknown>) =>
+    request(`/api/v1/grocery/list-types/${listTypeId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    }),
+  listGroceryTypes: () => request<GroceryType[]>('/api/v1/grocery/types'),
+  createGroceryType: (payload: { typeName: string; description?: string; icon?: string; color?: string }) =>
+    request('/api/v1/grocery/types', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  updateGroceryType: (typeId: number, payload: Record<string, unknown>) =>
+    request(`/api/v1/grocery/types/${typeId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    }),
+  deleteGroceryType: (typeId: number) =>
+    request(`/api/v1/grocery/types/${typeId}`, { method: 'DELETE' }),
+  listFrequencyTypes: () => request<FrequencyType[]>('/api/v1/grocery/frequency-types'),
+  createRecipe: (payload: Record<string, unknown>) =>
+    request('/api/v1/meal-plan/recipes', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  updateRecipe: (recipeId: number, payload: Record<string, unknown>) =>
+    request(`/api/v1/meal-plan/recipes/${recipeId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    }),
+  deleteRecipe: (recipeId: number) =>
+    request(`/api/v1/meal-plan/recipes/${recipeId}`, { method: 'DELETE' }),
   askAssistant: (query: string) =>
     request<{ answer: string; insights: AssistantInsight[] }>('/api/v1/assistant/recommendations', {
       method: 'POST',

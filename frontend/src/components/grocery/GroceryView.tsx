@@ -3,6 +3,7 @@ import type { FormEvent } from 'react'
 import {
   AlertTriangle,
   CheckCircle2,
+  Edit3,
   List,
   PackageCheck,
   Plus,
@@ -11,6 +12,7 @@ import {
   ShoppingBasket,
   ShoppingCart,
   Store,
+  Trash2,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
@@ -37,7 +39,7 @@ const emptyItem: NewGroceryItemInput = {
 type Tab = 'master' | 'shopping'
 
 export const GroceryView = ({ store }: { store: FamilyHubStore }) => {
-  const { state, addGroceryItem, addListType, loadGroceryPage, regenerateGroceryCycles, toggleCurrentStock, toggleGroceryPurchased } = store
+  const { state, addGroceryItem, addListType, updateListType, deleteListType, deleteGroceryItem, loadGroceryPage, regenerateGroceryCycles, toggleCurrentStock, toggleGroceryPurchased } = store
   const canManageGroceries = store.can('manage_groceries')
   const page = store.pagination.groceryItems
   const pageItems = store.paged.groceryItems ?? state.groceryItems
@@ -48,6 +50,8 @@ export const GroceryView = ({ store }: { store: FamilyHubStore }) => {
   const [draft, setDraft] = useState<NewGroceryItemInput>(emptyItem)
   const [newPlace, setNewPlace] = useState({ name: '', description: '', color: 'bg-slate-500' })
   const [showAddPlace, setShowAddPlace] = useState(false)
+  const [editingPlaceId, setEditingPlaceId] = useState<number | null>(null)
+  const [placeEdit, setPlaceEdit] = useState({ listName: '', description: '', colorClass: '' })
 
   useEffect(() => {
     loadGroceryPage(0, selectedListId)
@@ -283,19 +287,31 @@ export const GroceryView = ({ store }: { store: FamilyHubStore }) => {
                           {item.notes && <p className="mt-3 line-clamp-2 text-xs leading-5 text-slate-500">{item.notes}</p>}
                           <div className="mt-auto flex items-center justify-between gap-2 border-t border-slate-100 pt-3">
                             <p className="text-[11px] text-slate-400">{formatCompactDate(item.startDate)}</p>
-                            <button
-                              className={cn(
-                                'soft-pill px-3 py-1.5 text-[11px] font-bold transition',
-                                item.purchased
-                                  ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                                  : 'border-slate-200 bg-slate-50 text-slate-500 hover:border-indigo-200 hover:text-indigo-700',
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                className={cn(
+                                  'soft-pill px-3 py-1.5 text-[11px] font-bold transition',
+                                  item.purchased
+                                    ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                                    : 'border-slate-200 bg-slate-50 text-slate-500 hover:border-indigo-200 hover:text-indigo-700',
+                                )}
+                                disabled={!canManageGroceries}
+                                onClick={() => toggleGroceryPurchased(item.id)}
+                                type="button"
+                              >
+                                {item.purchased ? 'Purchased' : 'Mark purchased'}
+                              </button>
+                              {canManageGroceries && (
+                                <button
+                                  className="flex size-7 items-center justify-center rounded-lg border border-slate-200 text-slate-400 transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-500"
+                                  onClick={() => { if (window.confirm(`Delete ${item.itemName}?`)) deleteGroceryItem(item.id) }}
+                                  title="Delete item"
+                                  type="button"
+                                >
+                                  <Trash2 className="size-3" aria-hidden="true" />
+                                </button>
                               )}
-                              disabled={!canManageGroceries}
-                              onClick={() => toggleGroceryPurchased(item.id)}
-                              type="button"
-                            >
-                              {item.purchased ? 'Purchased' : 'Mark purchased'}
-                            </button>
+                            </div>
                           </div>
                         </article>
                       )
@@ -475,11 +491,47 @@ export const GroceryView = ({ store }: { store: FamilyHubStore }) => {
               <CardContent className="grid gap-2.5">
                 {state.listTypes.map((lt) => (
                   <div className="flex items-center gap-2.5 rounded-xl border border-slate-100/80 bg-slate-50/50 p-3.5 transition-all duration-200 hover:bg-white hover:shadow-sm" key={lt.id}>
-                    <span className={cn('size-3 rounded-full shadow-sm', lt.colorClass)} />
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-semibold text-slate-800">{lt.listName}</p>
-                      <p className="truncate text-[11px] text-slate-400">{lt.description}</p>
-                    </div>
+                    {editingPlaceId === lt.id ? (
+                      <form
+                        className="flex flex-1 flex-wrap items-center gap-2"
+                        onSubmit={(e) => {
+                          e.preventDefault()
+                          updateListType(lt.id, placeEdit)
+                          setEditingPlaceId(null)
+                        }}
+                      >
+                        <input className={inputClass} value={placeEdit.listName} onChange={(e) => setPlaceEdit((d) => ({ ...d, listName: e.target.value }))} />
+                        <input className={inputClass} value={placeEdit.description} onChange={(e) => setPlaceEdit((d) => ({ ...d, description: e.target.value }))} />
+                        <Button type="submit">Save</Button>
+                        <Button variant="secondary" onClick={() => setEditingPlaceId(null)} type="button">Cancel</Button>
+                      </form>
+                    ) : (
+                      <>
+                        <span className={cn('size-3 rounded-full shadow-sm', lt.colorClass)} />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-semibold text-slate-800">{lt.listName}</p>
+                          <p className="truncate text-[11px] text-slate-400">{lt.description}</p>
+                        </div>
+                        {canManageGroceries && (
+                          <div className="flex items-center gap-1">
+                            <button
+                              className="rounded-lg p-1.5 text-slate-400 transition hover:bg-white hover:text-indigo-600"
+                              onClick={() => { setEditingPlaceId(lt.id); setPlaceEdit({ listName: lt.listName, description: lt.description, colorClass: lt.colorClass }) }}
+                              title="Edit" type="button"
+                            >
+                              <Edit3 className="size-3.5" aria-hidden="true" />
+                            </button>
+                            <button
+                              className="rounded-lg p-1.5 text-slate-400 transition hover:bg-rose-50 hover:text-rose-500"
+                              onClick={() => { if (window.confirm(`Delete ${lt.listName}?`)) deleteListType(lt.id) }}
+                              title="Delete" type="button"
+                            >
+                              <Trash2 className="size-3.5" aria-hidden="true" />
+                            </button>
+                          </div>
+                        )}
+                      </>
+                    )}
                   </div>
                 ))}
                 {canManageGroceries && showAddPlace && (

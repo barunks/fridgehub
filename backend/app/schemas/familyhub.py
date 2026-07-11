@@ -289,6 +289,11 @@ class MealUpdate(CamelModel):
     dietaryFlags: list[str] | None = None
 
 
+class ApplyTemplateRequest(CamelModel):
+    templateName: str | None = None
+    memberId: int | None = None
+
+
 class RecipeOut(CamelModel):
     id: int
     recipeName: str

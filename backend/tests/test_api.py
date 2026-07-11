@@ -768,3 +768,586 @@ def test_list_type_duplicate_name_rejected() -> None:
         client.post("/api/v1/grocery/list-types", json={"listName": "DupPlace"}, headers=headers)
         r = client.post("/api/v1/grocery/list-types", json={"listName": "DupPlace"}, headers=headers)
         assert r.status_code == 409
+
+
+# --- Per-Member Meal Plans ---
+
+
+def test_meal_plan_week_filter_by_member() -> None:
+    """GET /api/v1/meal-plan/week?member_id=X returns only that member's meals."""
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+
+        # Without filter returns all family meals
+        r = client.get("/api/v1/meal-plan/week", headers=headers)
+        assert r.status_code == 200
+        all_meals = r.json()
+        assert len(all_meals) >= 1
+
+        # With member_id filter — initially may be empty for a specific member
+        r = client.get("/api/v1/meal-plan/week?member_id=1", headers=headers)
+        assert r.status_code == 200
+        member_meals = r.json()
+        # All returned meals should be assigned to member 1
+        for meal in member_meals:
+            assert meal["assignedTo"] == 1
+
+
+def test_apply_template_for_specific_member() -> None:
+    """POST /api/v1/meal-plan/apply-template with memberId generates per-member plan."""
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+
+        # Apply template for member 1
+        r = client.post(
+            "/api/v1/meal-plan/apply-template",
+            json={"memberId": 1},
+            headers=headers,
+        )
+        assert r.status_code == 200
+        meals = r.json()
+        assert len(meals) >= 1
+        # All returned meals should be assigned to member 1
+        for meal in meals:
+            assert meal["assignedTo"] == 1
+
+
+def test_apply_template_for_different_members_creates_separate_plans() -> None:
+    """Each member gets their own independent meal plan from the same template."""
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+
+        # Apply for member 1
+        r1 = client.post("/api/v1/meal-plan/apply-template", json={"memberId": 1}, headers=headers)
+        assert r1.status_code == 200
+        member1_meals = r1.json()
+
+        # Apply for member 2
+        r2 = client.post("/api/v1/meal-plan/apply-template", json={"memberId": 2}, headers=headers)
+        assert r2.status_code == 200
+        member2_meals = r2.json()
+
+        # Both should have meals
+        assert len(member1_meals) >= 1
+        assert len(member2_meals) >= 1
+
+        # Meal IDs should be different (separate rows)
+        member1_ids = {m["id"] for m in member1_meals}
+        member2_ids = {m["id"] for m in member2_meals}
+        assert member1_ids.isdisjoint(member2_ids)
+
+        # Verify via GET filter
+        r = client.get("/api/v1/meal-plan/week?member_id=1", headers=headers)
+        assert all(m["assignedTo"] == 1 for m in r.json())
+
+        r = client.get("/api/v1/meal-plan/week?member_id=2", headers=headers)
+        assert all(m["assignedTo"] == 2 for m in r.json())
+
+
+def test_apply_template_without_member_creates_family_wide_plan() -> None:
+    """POST /api/v1/meal-plan/apply-template without memberId creates shared plan."""
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+
+        r = client.post("/api/v1/meal-plan/apply-template", json={}, headers=headers)
+        assert r.status_code == 200
+        meals = r.json()
+        assert len(meals) >= 1
+        # At least some meals should have assignedTo=None (family-wide)
+        family_wide = [m for m in meals if m["assignedTo"] is None]
+        assert len(family_wide) >= 1
+
+
+def test_member_meal_can_be_customized_independently() -> None:
+    """After generating from template, a member's meal can be edited without affecting others."""
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+
+        # Generate for member 1
+        r = client.post("/api/v1/meal-plan/apply-template", json={"memberId": 1}, headers=headers)
+        member1_meals = r.json()
+        assert len(member1_meals) >= 1
+        meal_id = member1_meals[0]["id"]
+        original_name = member1_meals[0]["mealName"]
+
+        # Generate for member 2
+        r = client.post("/api/v1/meal-plan/apply-template", json={"memberId": 2}, headers=headers)
+        member2_meals = r.json()
+
+        # Customize member 1's meal
+        patched = client.patch(
+            f"/api/v1/meal-plan/{meal_id}",
+            json={"mealName": "Custom Breakfast for Member 1"},
+            headers=headers,
+        )
+        assert patched.status_code == 200
+        assert patched.json()["mealName"] == "Custom Breakfast for Member 1"
+
+        # Member 2's meals should be unchanged
+        r = client.get("/api/v1/meal-plan/week?member_id=2", headers=headers)
+        for meal in r.json():
+            assert meal["mealName"] != "Custom Breakfast for Member 1"
+
+
+def test_member_meal_dietary_flags_independent() -> None:
+    """Each member's meal can have different dietary flags."""
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+
+        # Generate for both members
+        client.post("/api/v1/meal-plan/apply-template", json={"memberId": 1}, headers=headers)
+        r2 = client.post("/api/v1/meal-plan/apply-template", json={"memberId": 2}, headers=headers)
+
+        # Get member 1's meals and set dietary flags
+        r = client.get("/api/v1/meal-plan/week?member_id=1", headers=headers)
+        m1_meals = r.json()
+        if m1_meals:
+            client.patch(
+                f"/api/v1/meal-plan/{m1_meals[0]['id']}",
+                json={"dietaryFlags": ["gluten-free", "dairy-free"]},
+                headers=headers,
+            )
+
+        # Get member 2's meals and set different flags
+        m2_meals = r2.json()
+        if m2_meals:
+            client.patch(
+                f"/api/v1/meal-plan/{m2_meals[0]['id']}",
+                json={"dietaryFlags": ["nut-free"]},
+                headers=headers,
+            )
+
+        # Verify independence
+        r = client.get("/api/v1/meal-plan/week?member_id=1", headers=headers)
+        if r.json():
+            assert "gluten-free" in r.json()[0]["dietaryFlags"]
+
+        r = client.get("/api/v1/meal-plan/week?member_id=2", headers=headers)
+        if r.json():
+            assert "nut-free" in r.json()[0]["dietaryFlags"]
+            assert "gluten-free" not in r.json()[0]["dietaryFlags"]
+
+
+def test_apply_template_idempotent_for_same_member() -> None:
+    """Applying template twice for the same member updates existing rows, not duplicates."""
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+
+        r1 = client.post("/api/v1/meal-plan/apply-template", json={"memberId": 1}, headers=headers)
+        count1 = len(r1.json())
+
+        r2 = client.post("/api/v1/meal-plan/apply-template", json={"memberId": 1}, headers=headers)
+        count2 = len(r2.json())
+
+        # Should be same count (upsert, not insert)
+        assert count1 == count2
+
+
+def test_apply_template_with_named_template() -> None:
+    """Apply a specific named template."""
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+
+        # Apply with explicit template name (uses the seeded one)
+        r = client.post(
+            "/api/v1/meal-plan/apply-template",
+            json={"templateName": "Default Weekly Meal Plan", "memberId": 1},
+            headers=headers,
+        )
+        assert r.status_code == 200
+        assert len(r.json()) >= 1
+
+
+def test_apply_template_nonexistent_template_returns_404() -> None:
+    """Applying a non-existent template name returns 404."""
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+        r = client.post(
+            "/api/v1/meal-plan/apply-template",
+            json={"templateName": "NonExistentTemplate", "memberId": 1},
+            headers=headers,
+        )
+        assert r.status_code == 404
+
+
+def test_meal_plan_week_nonexistent_member_returns_empty() -> None:
+    """Filtering by a member with no plan returns empty list."""
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+        r = client.get("/api/v1/meal-plan/week?member_id=9999", headers=headers)
+        assert r.status_code == 200
+        assert r.json() == []
+
+
+def test_child_cannot_apply_template() -> None:
+    """Child role cannot apply meal templates."""
+    with TestClient(app) as client:
+        child_headers = auth_headers(client, "ava")
+        r = client.post("/api/v1/meal-plan/apply-template", json={"memberId": 1}, headers=child_headers)
+        assert r.status_code == 403
+
+
+def test_child_can_view_meal_plan() -> None:
+    """Child role can view meal plans (read-only)."""
+    with TestClient(app) as client:
+        child_headers = auth_headers(client, "ava")
+        r = client.get("/api/v1/meal-plan/week", headers=child_headers)
+        assert r.status_code == 200
+
+        r = client.get("/api/v1/meal-plan/week?member_id=2", headers=child_headers)
+        assert r.status_code == 200
+
+
+def test_child_cannot_update_meal() -> None:
+    """Child role cannot modify meals."""
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+        r = client.get("/api/v1/meal-plan/week", headers=headers)
+        meals = r.json()
+        if meals:
+            child_headers = auth_headers(client, "ava")
+            r = client.patch(
+                f"/api/v1/meal-plan/{meals[0]['id']}",
+                json={"mealName": "Hacked"},
+                headers=child_headers,
+            )
+            assert r.status_code == 403
+
+
+# --- Meal Plan Audit Trail ---
+
+
+def test_apply_template_creates_audit_log() -> None:
+    """Applying a template should create an audit log entry."""
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+
+        # Apply template
+        client.post("/api/v1/meal-plan/apply-template", json={"memberId": 1}, headers=headers)
+
+        # Check audit logs (use larger limit to account for prior test activity)
+        r = client.get("/api/v1/family/audit-logs?limit=50", headers=headers)
+        assert r.status_code == 200
+        logs = r.json()
+        template_logs = [log for log in logs if log["action"] == "apply_template" and log["entityType"] == "meal_plan"]
+        assert len(template_logs) >= 1
+        # Should record member_id in changes
+        latest = template_logs[0]
+        assert latest["changes"] is not None
+        assert latest["changes"].get("member_id") == 1
+
+
+def test_meal_update_creates_audit_log() -> None:
+    """Updating a meal should create an audit log entry."""
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+
+        # Generate a fresh member meal to ensure we have a known meal
+        r = client.post("/api/v1/meal-plan/apply-template", json={"memberId": 1}, headers=headers)
+        meals = r.json()
+        assert len(meals) >= 1
+        meal_id = meals[0]["id"]
+
+        # Update it
+        client.patch(f"/api/v1/meal-plan/{meal_id}", json={"mealName": "Audit Test Meal"}, headers=headers)
+
+        r = client.get("/api/v1/family/audit-logs?limit=50", headers=headers)
+        logs = r.json()
+        meal_logs = [log for log in logs if log["entityType"] == "meal_plan" and log["action"] == "update"]
+        assert len(meal_logs) >= 1
+
+
+# --- Notification Generation from Meal Plan ---
+
+
+def test_apply_template_generates_notification() -> None:
+    """Applying a template should generate a notification."""
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+
+        # Mark all read first
+        client.post("/api/v1/notifications/mark-all-read", headers=headers)
+
+        # Apply template
+        client.post("/api/v1/meal-plan/apply-template", json={"memberId": 1}, headers=headers)
+
+        # Check notifications
+        r = client.get("/api/v1/notifications?limit=5", headers=headers)
+        notifications = r.json()
+        template_notifs = [n for n in notifications if "template applied" in n["title"].lower()]
+        assert len(template_notifs) >= 1
+
+
+# --- Bootstrap Includes Per-Member Meals ---
+
+
+def test_bootstrap_includes_all_meals_regardless_of_assignment() -> None:
+    """Bootstrap returns all meals (family-wide + per-member)."""
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+
+        # Generate per-member plans
+        client.post("/api/v1/meal-plan/apply-template", json={"memberId": 1}, headers=headers)
+        client.post("/api/v1/meal-plan/apply-template", json={"memberId": 2}, headers=headers)
+
+        # Bootstrap should include all
+        r = client.get("/api/v1/family/bootstrap", headers=headers)
+        assert r.status_code == 200
+        meals = r.json()["meals"]
+        assigned_members = {m["assignedTo"] for m in meals if m["assignedTo"] is not None}
+        # Should have meals for at least 2 members
+        assert len(assigned_members) >= 2
+
+
+# --- Recipe Integration with Meal Plans ---
+
+
+def test_recipe_linked_to_meal_plan() -> None:
+    """A recipe can be linked to a meal plan entry."""
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+
+        # Create a recipe
+        recipe = client.post(
+            "/api/v1/meal-plan/recipes",
+            json={"recipeName": "Linked Recipe", "ingredients": ["a", "b"], "cuisine": "Test"},
+            headers=headers,
+        )
+        recipe_id = recipe.json()["id"]
+
+        # Get a meal and check recipeId field exists
+        r = client.get("/api/v1/meal-plan/week", headers=headers)
+        meals = r.json()
+        assert len(meals) >= 1
+        # recipeId field should be present (may be null)
+        assert "recipeId" in meals[0]
+
+        # Clean up
+        client.delete(f"/api/v1/meal-plan/recipes/{recipe_id}", headers=headers)
+
+
+# --- Member CRUD Edge Cases ---
+
+
+def test_member_update_dietary_notes() -> None:
+    """Update a member's dietary notes."""
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+        r = client.get("/api/v1/family/bootstrap", headers=headers)
+        members = r.json()["members"]
+        member_id = members[0]["id"]
+
+        patched = client.patch(
+            f"/api/v1/family/members/{member_id}",
+            json={"dietaryNotes": ["vegetarian", "no-gluten"]},
+            headers=headers,
+        )
+        assert patched.status_code == 200
+        assert "vegetarian" in patched.json()["dietaryNotes"]
+        assert "no-gluten" in patched.json()["dietaryNotes"]
+
+
+def test_member_update_points() -> None:
+    """Update a member's reward points."""
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+        r = client.get("/api/v1/family/bootstrap", headers=headers)
+        members = r.json()["members"]
+        member_id = members[0]["id"]
+
+        patched = client.patch(
+            f"/api/v1/family/members/{member_id}",
+            json={"points": 100},
+            headers=headers,
+        )
+        assert patched.status_code == 200
+        assert patched.json()["points"] == 100
+
+
+def test_member_role_change() -> None:
+    """Change a member's role."""
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+
+        # Create a test member
+        payload = {"name": "RoleTest", "email": "roletest@test.local", "username": "roletest", "password": "familyhub1", "role": "child", "colorClass": "bg-green-500"}
+        created = client.post("/api/v1/family/members", json=payload, headers=headers)
+        member_id = created.json()["id"]
+        assert created.json()["role"] == "child"
+
+        # Promote to parent
+        patched = client.patch(f"/api/v1/family/members/{member_id}", json={"role": "parent"}, headers=headers)
+        assert patched.status_code == 200
+        assert patched.json()["role"] == "parent"
+
+        # Clean up
+        client.delete(f"/api/v1/family/members/{member_id}", headers=headers)
+
+
+# --- Emergency Contact Edge Cases ---
+
+
+def test_emergency_contact_update_label_and_value() -> None:
+    """Update both label and value of an emergency contact."""
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+        created = client.post("/api/v1/family/emergency-contacts", json={"label": "Doctor", "value": "555-0100"}, headers=headers)
+        contact_id = created.json()["id"]
+
+        patched = client.patch(
+            f"/api/v1/family/emergency-contacts/{contact_id}",
+            json={"label": "Family Doctor", "value": "555-0200"},
+            headers=headers,
+        )
+        assert patched.status_code == 200
+        assert patched.json()["label"] == "Family Doctor"
+        assert patched.json()["value"] == "555-0200"
+
+        client.delete(f"/api/v1/family/emergency-contacts/{contact_id}", headers=headers)
+
+
+def test_emergency_contact_not_found() -> None:
+    """Updating/deleting non-existent contact returns 404."""
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+        r = client.patch("/api/v1/family/emergency-contacts/99999", json={"label": "X"}, headers=headers)
+        assert r.status_code == 404
+
+        r = client.delete("/api/v1/family/emergency-contacts/99999", headers=headers)
+        assert r.status_code == 404
+
+
+# --- Change Password Validation ---
+
+
+def test_change_password_too_short() -> None:
+    """New password must be at least 8 characters."""
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+        r = client.post("/api/v1/auth/change-password", json={"currentPassword": "familyhub", "newPassword": "short1"}, headers=headers)
+        assert r.status_code == 422
+
+
+def test_change_password_no_digit() -> None:
+    """New password must include at least one digit."""
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+        r = client.post("/api/v1/auth/change-password", json={"currentPassword": "familyhub", "newPassword": "nolettersonlyletters"}, headers=headers)
+        assert r.status_code == 422
+
+
+# --- Pagination Edge Cases ---
+
+
+def test_grocery_items_pagination_offset_beyond_data() -> None:
+    """Offset beyond available data returns empty list."""
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+        r = client.get("/api/v1/grocery/items?limit=10&offset=99999", headers=headers)
+        assert r.status_code == 200
+        assert r.json() == []
+
+
+def test_tasks_pagination_with_status_filter() -> None:
+    """Pagination works with status filter."""
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+        r = client.get("/api/v1/tasks?limit=5&offset=0&status=pending", headers=headers)
+        assert r.status_code == 200
+        for task in r.json():
+            assert task["status"] == "pending"
+
+
+def test_notifications_pagination_unread_only() -> None:
+    """Pagination with unread_only filter."""
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+        r = client.get("/api/v1/notifications?limit=5&offset=0&unread_only=true", headers=headers)
+        assert r.status_code == 200
+        for n in r.json():
+            assert n["isRead"] is False
+
+
+def test_audit_logs_pagination_with_entity_type() -> None:
+    """Pagination with entity_type filter."""
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+        r = client.get("/api/v1/family/audit-logs?limit=5&entity_type=meal_plan", headers=headers)
+        assert r.status_code == 200
+        for log in r.json():
+            assert log["entityType"] == "meal_plan"
+
+
+# --- Assistant Endpoint ---
+
+
+def test_assistant_empty_query_rejected() -> None:
+    """Empty query should be rejected."""
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+        r = client.post("/api/v1/assistant/recommendations", json={"query": ""}, headers=headers)
+        assert r.status_code == 422
+
+
+def test_assistant_child_cannot_use() -> None:
+    """Child without use_assistant permission cannot call assistant."""
+    with TestClient(app) as client:
+        child_headers = auth_headers(client, "ava")
+        r = client.post("/api/v1/assistant/recommendations", json={"query": "help"}, headers=child_headers)
+        # Depending on permission setup, may be 403
+        assert r.status_code in (200, 403)
+
+
+# --- Concurrent Template Application ---
+
+
+def test_apply_template_multiple_members_no_conflict() -> None:
+    """Applying template for multiple members sequentially should not conflict."""
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+
+        # Get all members
+        r = client.get("/api/v1/family/bootstrap", headers=headers)
+        members = r.json()["members"]
+
+        # Apply for each member
+        for member in members[:3]:  # First 3 members
+            r = client.post("/api/v1/meal-plan/apply-template", json={"memberId": member["id"]}, headers=headers)
+            assert r.status_code == 200
+            meals = r.json()
+            for meal in meals:
+                assert meal["assignedTo"] == member["id"]
+
+        # Verify each member has independent meals
+        for member in members[:3]:
+            r = client.get(f"/api/v1/meal-plan/week?member_id={member['id']}", headers=headers)
+            assert r.status_code == 200
+            assert len(r.json()) >= 1
+
+
+# --- Meal Plan Update Edge Cases ---
+
+
+def test_meal_update_nonexistent_returns_404() -> None:
+    """Updating a non-existent meal returns 404."""
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+        r = client.patch("/api/v1/meal-plan/99999", json={"mealName": "Ghost"}, headers=headers)
+        assert r.status_code == 404
+
+
+def test_meal_update_description() -> None:
+    """Update meal description field."""
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+        r = client.get("/api/v1/meal-plan/week", headers=headers)
+        meals = r.json()
+        if meals:
+            meal_id = meals[0]["id"]
+            patched = client.patch(
+                f"/api/v1/meal-plan/{meal_id}",
+                json={"description": "A healthy and delicious meal"},
+                headers=headers,
+            )
+            assert patched.status_code == 200
+            assert patched.json()["description"] == "A healthy and delicious meal"

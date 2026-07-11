@@ -25,6 +25,7 @@ import {
   RotateCcw,
   Sparkles,
   Target,
+  Trash2,
   UserRound,
 } from 'lucide-react'
 import { Avatar } from '@/components/ui/Avatar'
@@ -74,6 +75,7 @@ const chipClass = (active: boolean) =>
 
 interface TaskCardProps {
   canManageTasks: boolean
+  deleteTask: (taskId: number) => void
   member?: FamilyMember
   members: FamilyMember[]
   reassignTask: (taskId: number, memberId: number) => void
@@ -81,7 +83,7 @@ interface TaskCardProps {
   toggleTaskStatus: (taskId: number) => void
 }
 
-const TaskCard = ({ canManageTasks, member, members, reassignTask, task, toggleTaskStatus }: TaskCardProps) => {
+const TaskCard = ({ canManageTasks, deleteTask, member, members, reassignTask, task, toggleTaskStatus }: TaskCardProps) => {
   const { attributes, isDragging, listeners, setNodeRef, transform } = useDraggable({
     id: `task-${task.id}`,
     data: { taskId: task.id },
@@ -161,29 +163,41 @@ const TaskCard = ({ canManageTasks, member, members, reassignTask, task, toggleT
               <option key={item.id} value={item.id}>{item.name}</option>
             ))}
           </select>
-          <button
-            className={cn(
-              'group/btn flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-semibold transition-all duration-200 active:scale-95',
-              isCompleted
-                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 hover:shadow-sm'
-                : 'bg-gradient-to-r from-indigo-500 to-blue-500 text-white shadow-md shadow-indigo-500/20 hover:shadow-lg hover:shadow-indigo-500/30 hover:from-indigo-400 hover:to-blue-400',
+          <div className="flex items-center gap-1.5">
+            <button
+              className={cn(
+                'group/btn flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-semibold transition-all duration-200 active:scale-95',
+                isCompleted
+                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 hover:shadow-sm'
+                  : 'bg-gradient-to-r from-indigo-500 to-blue-500 text-white shadow-md shadow-indigo-500/20 hover:shadow-lg hover:shadow-indigo-500/30 hover:from-indigo-400 hover:to-blue-400',
+              )}
+              onClick={() => toggleTaskStatus(task.id)}
+              disabled={!canManageTasks}
+              type="button"
+            >
+              {isCompleted ? (
+                <>
+                  <CheckCircle2 className="size-4" aria-hidden="true" />
+                  Done
+                </>
+              ) : (
+                <>
+                  <Circle className="size-4 transition-transform duration-200 group-hover/btn:scale-110" aria-hidden="true" />
+                  Complete
+                </>
+              )}
+            </button>
+            {canManageTasks && (
+              <button
+                className="flex size-8 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-400 transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-500"
+                onClick={() => { if (window.confirm(`Delete "${task.title}"?`)) deleteTask(task.id) }}
+                title="Delete task"
+                type="button"
+              >
+                <Trash2 className="size-3.5" aria-hidden="true" />
+              </button>
             )}
-            onClick={() => toggleTaskStatus(task.id)}
-            disabled={!canManageTasks}
-            type="button"
-          >
-            {isCompleted ? (
-              <>
-                <CheckCircle2 className="size-4" aria-hidden="true" />
-                Done
-              </>
-            ) : (
-              <>
-                <Circle className="size-4 transition-transform duration-200 group-hover/btn:scale-110" aria-hidden="true" />
-                Complete
-              </>
-            )}
-          </button>
+          </div>
         </div>
       </div>
     </article>
@@ -195,7 +209,7 @@ interface TaskLaneProps extends TaskCardProps {
   tasks: Task[]
 }
 
-const TaskLane = ({ canManageTasks, member, members, reassignTask, tasks, toggleTaskStatus }: Omit<TaskLaneProps, 'task'>) => {
+const TaskLane = ({ canManageTasks, deleteTask, member, members, reassignTask, tasks, toggleTaskStatus }: Omit<TaskLaneProps, 'task'>) => {
   const { isOver, setNodeRef } = useDroppable({
     id: `member-${member.id}`,
     data: { memberId: member.id },
@@ -247,6 +261,7 @@ const TaskLane = ({ canManageTasks, member, members, reassignTask, tasks, toggle
           {tasks.map((task) => (
             <TaskCard
               canManageTasks={canManageTasks}
+              deleteTask={deleteTask}
               key={task.id}
               member={member}
               members={members}
@@ -269,7 +284,7 @@ const TaskLane = ({ canManageTasks, member, members, reassignTask, tasks, toggle
 }
 
 export const TasksView = ({ store }: { store: FamilyHubStore }) => {
-  const { state, addTask, reassignTask, toggleTaskStatus, loadTaskPage } = store
+  const { state, addTask, reassignTask, toggleTaskStatus, deleteTask, loadTaskPage } = store
   const canManageTasks = store.can('manage_tasks')
   const page = store.pagination.tasks
   const pageTasks = store.paged.tasks ?? state.tasks
@@ -474,6 +489,7 @@ export const TasksView = ({ store }: { store: FamilyHubStore }) => {
                   {state.members.map((member) => (
                     <TaskLane
                       canManageTasks={canManageTasks}
+                      deleteTask={deleteTask}
                       key={member.id}
                       member={member}
                       members={state.members}

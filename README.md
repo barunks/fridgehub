@@ -8,6 +8,8 @@ The implementation now includes the React UI, FastAPI backend, SQLAlchemy data m
 
 - React + TypeScript frontend with routed dashboard, groceries, meal plans, tasks, family workspace, assistant, and implementation-readiness views.
 - Dark/light theme persistence, drag-and-drop task reassignment, and lazy-loaded Recharts household analytics.
+- Household Command Center — unified admin dashboard with tabbed CRUD for members, contacts, grocery places, recipes, tasks, per-member meal plans, AI insights, and account security.
+- Per-member meal plans — each family member gets an independent weekly plan generated from the family template, customizable per individual.
 - FastAPI backend with versioned REST routes under `/api/v1`.
 - SQLAlchemy models for the document's core tables: users, families, family members, grocery types, frequency types, grocery list types, grocery items, purchase cycles, sub-lists, tasks, meal plans, meal templates, recipes, audit logs, and notifications.
 - Extra UI-backed tables for announcements and emergency contacts.
@@ -40,6 +42,22 @@ FamilyHub/
 |   `-- .env.example
 |-- frontend/
 |   |-- src/
+|   |   |-- components/
+|   |   |   |-- command-center/
+|   |   |   |-- analytics/
+|   |   |   |-- assistant/
+|   |   |   |-- dashboard/
+|   |   |   |-- family/
+|   |   |   |-- grocery/
+|   |   |   |-- mealplan/
+|   |   |   |-- tasks/
+|   |   |   |-- layout/
+|   |   |   `-- ui/
+|   |   |-- hooks/
+|   |   |-- services/
+|   |   |-- types/
+|   |   `-- utils/
+|   |-- tests/e2e/
 |   |-- public/assets/
 |   |-- Dockerfile
 |   `-- package.json
@@ -83,12 +101,48 @@ Frontend route map:
 /                 Dashboard — stat cards, today's agenda, tasks, meals, groceries, assistant, family
 /tasks            Drag-and-drop assignment board
 /groceries        Grocery master list and cycle tools
-/meals            Weekly meal planner and recipes
+/meals            Weekly meal planner with per-member filtering and recipes
 /family           Members, announcements, contacts, notifications
 /analytics        Household analytics — task flow, pantry coverage, calories, reward points
+/command-center   Household Command Center — unified admin for all CRUD workflows
 /assistant        Family assistant chat
+/history          Audit log viewer
 /implementation   Build and deployment readiness
 ```
+
+## Household Command Center
+
+The `/command-center` route (parent-only) provides a unified admin workspace with tabbed sections:
+
+| Tab | Capabilities |
+|-----|-------------|
+| Members | List, create, edit role/name/color, delete with confirmation |
+| Meal Plans | Per-member plan generation from template, inline meal editing, bulk generate for all |
+| Contacts | Emergency contacts CRUD |
+| Grocery Places | Shopping list types management, regenerate purchase cycles |
+| Recipes | Full list with real-time filter, create, delete |
+| Tasks | Status filter, checkbox toggle, delete |
+| Insights | Live AI assistant insights from `/api/v1/assistant/insights` |
+| Security | Change password with validation |
+
+## Per-Member Meal Plans
+
+Each family member can have an independent weekly meal plan:
+
+1. A parent generates plans from the family template for individual members or all at once.
+2. Each member's plan is stored as separate database rows (`assigned_to` column).
+3. Plans can be customized per individual (different meals, dietary flags, calories) without affecting other members.
+4. The meal plan page includes a member selector dropdown to switch between views.
+
+API support:
+
+```text
+GET  /api/v1/meal-plan/week?member_id=3     # Get member 3's plan
+POST /api/v1/meal-plan/apply-template        # Body: {"memberId": 3}
+POST /api/v1/meal-plan/apply-template        # Body: {} → family-wide plan
+```
+
+The unique constraint is `(family_id, plan_date, meal_type, assigned_to)`, allowing one meal per slot per member.
 
 ## Docker Deployment
 
@@ -151,6 +205,7 @@ POST   /api/v1/tasks
 PATCH  /api/v1/tasks/{task_id}
 DELETE /api/v1/tasks/{task_id}
 GET    /api/v1/meal-plan/week
+GET    /api/v1/meal-plan/week?member_id={user_id}
 PATCH  /api/v1/meal-plan/{meal_id}
 POST   /api/v1/meal-plan/apply-template
 GET    /api/v1/meal-plan/recipes
@@ -195,6 +250,15 @@ Schema locations:
 - Alembic migrations: `backend/alembic/versions/`
 - MySQL schema: `backend/sql/schema.sql`
 
+Migrations:
+
+```text
+0001_initial_schema              — Full schema creation
+0002_auth_membership_cache_fixes — Auth and membership hardening
+0003_membership_permissions      — Permission grants on family_members
+0004_per_member_meal_plans       — Unique constraint change for per-member meals
+```
+
 Local SQLite is used only for fast development and tests. Docker uses MySQL:
 
 ```text
@@ -229,7 +293,7 @@ It evaluates current tasks, grocery expiry, pending purchases, today's meal plan
 
 ## Verification
 
-Backend:
+Backend (78 tests):
 
 ```bash
 . .venv/bin/activate
@@ -251,6 +315,20 @@ Alembic smoke test:
 cd backend
 PYTHONPATH=. DATABASE_URL=sqlite:///./alembic_test.db ../.venv/bin/alembic upgrade head
 ```
+
+Test coverage includes:
+
+- Auth flow (login, refresh, logout, change password, validation)
+- RBAC enforcement (parent vs child permissions)
+- Full CRUD for groceries, tasks, recipes, members, contacts, announcements
+- Per-member meal plan generation, filtering, customization, and independence
+- Audit log creation on mutations
+- Notification generation from template application
+- Pagination with filters (status, unread, entity type)
+- Soft-delete behavior
+- API versioning headers
+- Error response format consistency
+- E2E tests for Command Center navigation, tabs, and per-member meal plan UI
 
 ## Audit Remediation Notes
 
@@ -279,8 +357,10 @@ Addressed from the audit report:
 - Persistent dark/light mode.
 - Drag-and-drop task assignment board.
 - Lazy-loaded Recharts analytics for task status, grocery coverage, meal calories, and reward points.
-- Playwright E2E coverage for routing, theme persistence, and drag/drop reassignment.
+- Playwright E2E coverage for routing, theme persistence, drag/drop reassignment, command center, and per-member meal plans.
 - API versioning with `X-API-Version` response header, `/api/versions` discovery endpoint, and deprecation/sunset support.
 - GroceryType admin CRUD (parent-only) for managing the grocery category reference table.
 - Cmd+K command palette for global fuzzy search across tasks, groceries, meals, and family members.
 - Service worker for offline PWA support with cache-first static assets and network-first API responses.
+- Household Command Center with unified tabbed admin for all family CRUD workflows.
+- Per-member meal plans with template-based generation and individual customization.

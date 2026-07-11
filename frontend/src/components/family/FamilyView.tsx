@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
-import { Bell, HeartPulse, Megaphone, Phone, Plus, ShieldCheck, UserPlus, Users } from 'lucide-react'
+import { Bell, Edit3, HeartPulse, Megaphone, Phone, Plus, ShieldCheck, Trash2, UserPlus, Users, X } from 'lucide-react'
 import { Avatar } from '@/components/ui/Avatar'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
@@ -21,9 +21,10 @@ const colorOptions = [
 ]
 
 export const FamilyView = ({ store }: { store: FamilyHubStore }) => {
-  const { state, addAnnouncement, addMember, markNotificationRead, loadNotificationPage, loadAuditLogs } = store
+  const { state, addAnnouncement, addMember, updateMember, deleteMember, deleteAnnouncement, addEmergencyContact, updateEmergencyContact, deleteEmergencyContact, markNotificationRead, loadNotificationPage, loadAuditLogs } = store
   const canManageFamily = store.can('manage_family')
   const canManageAnnouncements = store.can('manage_announcements')
+  const canManageContacts = store.can('manage_contacts')
   const canViewAudit = store.can('view_audit')
   const notifications = store.paged.notifications ?? state.notifications
   const notificationPage = store.pagination.notifications
@@ -32,7 +33,13 @@ export const FamilyView = ({ store }: { store: FamilyHubStore }) => {
   const [message, setMessage] = useState('')
   const [showAddMember, setShowAddMember] = useState(false)
   const [showAudit, setShowAudit] = useState(false)
+  const [editingMemberId, setEditingMemberId] = useState<number | null>(null)
+  const [memberEdit, setMemberEdit] = useState({ name: '', role: '', colorClass: '', status: '' })
   const [memberDraft, setMemberDraft] = useState({ name: '', email: '', username: '', password: '', role: 'member', colorClass: 'bg-indigo-500' })
+  const [showAddContact, setShowAddContact] = useState(false)
+  const [contactDraft, setContactDraft] = useState({ label: '', value: '' })
+  const [editingContactId, setEditingContactId] = useState<number | null>(null)
+  const [contactEdit, setContactEdit] = useState({ label: '', value: '' })
 
   useEffect(() => {
     loadNotificationPage(0)
@@ -130,24 +137,76 @@ export const FamilyView = ({ store }: { store: FamilyHubStore }) => {
               <div className="stagger-children grid gap-4 md:grid-cols-2">
                 {state.members.map((member) => (
                   <article className="group rounded-2xl border border-slate-100/80 bg-slate-50/50 p-5 transition-all duration-200 hover:bg-white hover:shadow-md hover:border-slate-200" key={member.id}>
-                    <div className="flex items-start gap-3.5">
-                      <Avatar className="size-12" colorClass={member.colorClass} initial={member.initial} label={member.name} />
-                      <div className="min-w-0">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <h3 className="font-semibold text-slate-900">{member.name}</h3>
-                          <Badge tone="indigo">{member.role}</Badge>
+                    {editingMemberId === member.id ? (
+                      <form
+                        className="grid gap-3"
+                        onSubmit={(e) => {
+                          e.preventDefault()
+                          updateMember(member.id, memberEdit)
+                          setEditingMemberId(null)
+                        }}
+                      >
+                        <FormField label="Name">
+                          <input className={inputClass} value={memberEdit.name} onChange={(e) => setMemberEdit((d) => ({ ...d, name: e.target.value }))} />
+                        </FormField>
+                        <div className="grid grid-cols-2 gap-2">
+                          <FormField label="Role">
+                            <select className={inputClass} value={memberEdit.role} onChange={(e) => setMemberEdit((d) => ({ ...d, role: e.target.value }))}>
+                              <option value="Mom">Mom</option>
+                              <option value="Dad">Dad</option>
+                              <option value="Child">Child</option>
+                              <option value="member">Member</option>
+                            </select>
+                          </FormField>
+                          <FormField label="Color">
+                            <select className={inputClass} value={memberEdit.colorClass} onChange={(e) => setMemberEdit((d) => ({ ...d, colorClass: e.target.value }))}>
+                              {colorOptions.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+                            </select>
+                          </FormField>
                         </div>
-                        <p className="mt-1 text-xs text-slate-400">{member.status}</p>
-                        <p className="mt-3 text-sm font-semibold text-slate-700">⭐ {member.points} points</p>
-                        {member.dietaryNotes && (
-                          <div className="mt-3 flex flex-wrap gap-1.5">
-                            {member.dietaryNotes.map((note) => (
-                              <Badge key={note} tone="teal">{note}</Badge>
-                            ))}
+                        <div className="flex gap-2">
+                          <Button type="submit">Save</Button>
+                          <Button variant="secondary" onClick={() => setEditingMemberId(null)} type="button">Cancel</Button>
+                        </div>
+                      </form>
+                    ) : (
+                      <div className="flex items-start gap-3.5">
+                        <Avatar className="size-12" colorClass={member.colorClass} initial={member.initial} label={member.name} />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h3 className="font-semibold text-slate-900">{member.name}</h3>
+                            <Badge tone="indigo">{member.role}</Badge>
                           </div>
-                        )}
+                          <p className="mt-1 text-xs text-slate-400">{member.status}</p>
+                          <p className="mt-3 text-sm font-semibold text-slate-700">⭐ {member.points} points</p>
+                          {member.dietaryNotes && (
+                            <div className="mt-3 flex flex-wrap gap-1.5">
+                              {member.dietaryNotes.map((note) => (
+                                <Badge key={note} tone="teal">{note}</Badge>
+                              ))}
+                            </div>
+                          )}
+                          {canManageFamily && (
+                            <div className="mt-3 flex gap-2 opacity-0 transition-opacity group-hover:opacity-100">
+                              <button
+                                className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-slate-600 transition hover:border-indigo-200 hover:text-indigo-600"
+                                onClick={() => { setEditingMemberId(member.id); setMemberEdit({ name: member.name, role: member.role, colorClass: member.colorClass, status: member.status }) }}
+                                type="button"
+                              >
+                                <Edit3 className="size-3" aria-hidden="true" /> Edit
+                              </button>
+                              <button
+                                className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-rose-600 transition hover:border-rose-200 hover:bg-rose-50"
+                                onClick={() => { if (window.confirm(`Remove ${member.name} from the family?`)) deleteMember(member.id) }}
+                                type="button"
+                              >
+                                <Trash2 className="size-3" aria-hidden="true" /> Remove
+                              </button>
+                            </div>
+                          )}
+                        </div>
                       </div>
-                    </div>
+                    )}
                   </article>
                 ))}
               </div>
@@ -168,7 +227,7 @@ export const FamilyView = ({ store }: { store: FamilyHubStore }) => {
                       <div className="flex size-10 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600">
                         <Megaphone className="size-4" aria-hidden="true" />
                       </div>
-                      <div className="min-w-0">
+                      <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
                           <h3 className="text-sm font-semibold text-slate-900">{announcement.title}</h3>
                           <Badge tone="slate">{announcement.tag}</Badge>
@@ -178,6 +237,16 @@ export const FamilyView = ({ store }: { store: FamilyHubStore }) => {
                           {owner?.name ?? 'Family'} - {formatCompactDate(announcement.createdAt.slice(0, 10))}
                         </p>
                       </div>
+                      {canManageAnnouncements && (
+                        <button
+                          className="flex size-8 items-center justify-center rounded-lg text-slate-300 transition hover:bg-rose-50 hover:text-rose-500"
+                          onClick={() => { if (window.confirm('Delete this announcement?')) deleteAnnouncement(announcement.id) }}
+                          title="Delete announcement"
+                          type="button"
+                        >
+                          <X className="size-4" aria-hidden="true" />
+                        </button>
+                      )}
                     </div>
                   </article>
                 )
@@ -214,17 +283,77 @@ export const FamilyView = ({ store }: { store: FamilyHubStore }) => {
             </Card>
 
           <Card>
-            <CardHeader>
+            <CardHeader className="flex flex-row items-center justify-between gap-3">
               <CardTitle>Emergency Contacts</CardTitle>
+              {canManageContacts && (
+                <Button variant="secondary" onClick={() => setShowAddContact(!showAddContact)}>
+                  <Plus className="size-4" aria-hidden="true" />
+                  Add
+                </Button>
+              )}
             </CardHeader>
             <CardContent className="grid gap-2.5">
+              {canManageContacts && showAddContact && (
+                <form
+                  className="grid gap-2 rounded-xl border border-indigo-100 bg-indigo-50/30 p-3"
+                  onSubmit={(e) => {
+                    e.preventDefault()
+                    if (!contactDraft.label.trim() || !contactDraft.value.trim()) return
+                    addEmergencyContact(contactDraft.label.trim(), contactDraft.value.trim())
+                    setContactDraft({ label: '', value: '' })
+                    setShowAddContact(false)
+                  }}
+                >
+                  <input className={inputClass} placeholder="Label (e.g. Doctor)" value={contactDraft.label} onChange={(e) => setContactDraft((d) => ({ ...d, label: e.target.value }))} />
+                  <input className={inputClass} placeholder="Number (e.g. 6123 4567)" value={contactDraft.value} onChange={(e) => setContactDraft((d) => ({ ...d, value: e.target.value }))} />
+                  <Button type="submit"><Plus className="size-4" aria-hidden="true" /> Add contact</Button>
+                </form>
+              )}
               {state.emergencyContacts.map((contact) => (
                 <div className="flex items-center justify-between rounded-xl border border-rose-100/60 bg-rose-50/50 p-4 transition-all duration-200 hover:bg-rose-50" key={contact.id}>
-                  <span className="flex items-center gap-2 text-sm font-semibold text-rose-800">
-                    <Phone className="size-4" aria-hidden="true" />
-                    {contact.label}
-                  </span>
-                  <span className="font-bold text-rose-700">{contact.value}</span>
+                  {editingContactId === contact.id ? (
+                    <form
+                      className="flex flex-1 items-center gap-2"
+                      onSubmit={(e) => {
+                        e.preventDefault()
+                        updateEmergencyContact(contact.id, contactEdit)
+                        setEditingContactId(null)
+                      }}
+                    >
+                      <input className={inputClass} value={contactEdit.label} onChange={(e) => setContactEdit((d) => ({ ...d, label: e.target.value }))} />
+                      <input className={inputClass} value={contactEdit.value} onChange={(e) => setContactEdit((d) => ({ ...d, value: e.target.value }))} />
+                      <Button type="submit">Save</Button>
+                      <Button variant="secondary" onClick={() => setEditingContactId(null)} type="button">Cancel</Button>
+                    </form>
+                  ) : (
+                    <>
+                      <span className="flex items-center gap-2 text-sm font-semibold text-rose-800">
+                        <Phone className="size-4" aria-hidden="true" />
+                        {contact.label}
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-rose-700">{contact.value}</span>
+                        {canManageContacts && (
+                          <>
+                            <button
+                              className="rounded-lg p-1.5 text-slate-400 transition hover:bg-white hover:text-indigo-600"
+                              onClick={() => { setEditingContactId(contact.id); setContactEdit({ label: contact.label, value: contact.value }) }}
+                              title="Edit" type="button"
+                            >
+                              <Edit3 className="size-3.5" aria-hidden="true" />
+                            </button>
+                            <button
+                              className="rounded-lg p-1.5 text-slate-400 transition hover:bg-rose-50 hover:text-rose-600"
+                              onClick={() => { if (window.confirm(`Remove ${contact.label}?`)) deleteEmergencyContact(contact.id) }}
+                              title="Delete" type="button"
+                            >
+                              <Trash2 className="size-3.5" aria-hidden="true" />
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </>
+                  )}
                 </div>
               ))}
             </CardContent>

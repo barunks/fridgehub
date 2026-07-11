@@ -218,7 +218,7 @@ class Task(Base, TimestampMixin, ActiveMixin):
 class MealPlan(Base, TimestampMixin, ActiveMixin):
     __tablename__ = "meal_plans"
     __table_args__ = (
-        UniqueConstraint("family_id", "plan_date", "meal_type", name="unique_meal"),
+        UniqueConstraint("family_id", "plan_date", "meal_type", "assigned_to", name="unique_meal_per_member"),
         Index("idx_meal_plan_family_date", "family_id", "plan_date"),
     )
 

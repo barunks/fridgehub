@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from app.core.dependencies import CurrentUser, get_current_user, require_permission
 from app.core.database import get_db
 from app.core.permissions import Permission
-from app.schemas.familyhub import ErrorResponse, MealPlanItemOut, MealUpdate, RecipeCreate, RecipeOut, RecipeUpdate
+from app.schemas.familyhub import ApplyTemplateRequest, ErrorResponse, MealPlanItemOut, MealUpdate, RecipeCreate, RecipeOut, RecipeUpdate
 from app.services import meal_plan_service
 from app.services import recipe_service
 
@@ -12,8 +12,12 @@ router = APIRouter()
 
 
 @router.get("/week", response_model=list[MealPlanItemOut])
-def get_week(current_user: CurrentUser = Depends(get_current_user), db: Session = Depends(get_db)) -> list[dict]:
-    return meal_plan_service.weekly_meals(db, current_user.family_id)
+def get_week(
+    member_id: int | None = None,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> list[dict]:
+    return meal_plan_service.weekly_meals(db, current_user.family_id, member_id)
 
 
 @router.patch("/{meal_id}", response_model=MealPlanItemOut, responses={403: {"model": ErrorResponse}, 404: {"model": ErrorResponse}})
@@ -28,11 +32,13 @@ def update_meal(
 
 @router.post("/apply-template", response_model=list[MealPlanItemOut])
 def apply_template(
-    template_name: str | None = None,
+    payload: ApplyTemplateRequest | None = None,
     current_user: CurrentUser = Depends(require_permission(Permission.MANAGE_MEALS)),
     db: Session = Depends(get_db),
 ) -> list[dict]:
-    return meal_plan_service.apply_template(db, current_user.family_id, current_user.user_id, template_name)
+    template_name = payload.templateName if payload else None
+    member_id = payload.memberId if payload else None
+    return meal_plan_service.apply_template(db, current_user.family_id, current_user.user_id, template_name, member_id)
 
 
 @router.get("/recipes", response_model=list[RecipeOut])

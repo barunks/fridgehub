@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
-import { BookOpen, CalendarCheck2, ChefHat, ClipboardCheck, Clock3, Flame, Gauge, Save, Timer } from 'lucide-react'
+import { BookOpen, CalendarCheck2, ChefHat, ClipboardCheck, Clock3, Edit3, Flame, Gauge, Plus, Save, Timer, Trash2, Users } from 'lucide-react'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
@@ -19,27 +19,47 @@ const mealColumns: { key: MealType; label: string }[] = [
 const dayOrder = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
 
 export const MealPlanView = ({ store }: { store: FamilyHubStore }) => {
-  const { state, mealsByDay, updateMeal, applyWeeklyTemplate, loadRecipePage } = store
+  const { state, updateMeal, applyWeeklyTemplate, addRecipe, updateRecipe, deleteRecipe, loadRecipePage, loadMemberMeals, memberMeals, memberMealsLoading } = store
   const canManageMeals = store.can('manage_meals')
+  const canManageRecipes = store.can('manage_recipes')
   const page = store.pagination.recipes
   const recipes = store.paged.recipes ?? state.recipes
+  const [selectedMemberId, setSelectedMemberId] = useState<number | null>(null)
   const [selectedMealId, setSelectedMealId] = useState<number>(state.meals[0]?.id ?? 0)
-  const selectedMeal = state.meals.find((meal) => meal.id === selectedMealId)
-  const [draftName, setDraftName] = useState(selectedMeal?.mealName ?? '')
+  const [showAddRecipe, setShowAddRecipe] = useState(false)
+  const [recipeDraft, setRecipeDraft] = useState({ recipeName: '', description: '', ingredients: '', prepTime: 10, cookTime: 15, servings: 4, difficulty: 'easy' as 'easy' | 'medium' | 'hard', cuisine: '', dietaryTags: '' })
+  const [editingRecipeId, setEditingRecipeId] = useState<number | null>(null)
+  const [recipeEdit, setRecipeEdit] = useState({ recipeName: '', description: '', cuisine: '' })
 
   useEffect(() => {
     loadRecipePage(0)
   }, [loadRecipePage])
 
+  useEffect(() => {
+    loadMemberMeals(selectedMemberId)
+  }, [selectedMemberId, loadMemberMeals])
+
+  // Active meals: member-filtered or all family meals
+  const activeMeals = selectedMemberId !== null && memberMeals ? memberMeals : state.meals
+  const activeMealsByDay = useMemo(() => {
+    return activeMeals.reduce<Record<string, MealPlanItem[]>>((acc, meal) => {
+      acc[meal.dayOfWeek] = [...(acc[meal.dayOfWeek] ?? []), meal]
+      return acc
+    }, {})
+  }, [activeMeals])
+
+  const selectedMeal = activeMeals.find((meal) => meal.id === selectedMealId)
+  const [draftName, setDraftName] = useState(selectedMeal?.mealName ?? '')
+
   const mealStats = useMemo(() => {
     const averagePrep = Math.round(
-      state.meals.reduce((total, meal) => total + meal.prepTime, 0) / Math.max(1, state.meals.length),
+      activeMeals.reduce((total, meal) => total + meal.prepTime, 0) / Math.max(1, activeMeals.length),
     )
-    const weeklyCalories = state.meals.reduce((total, meal) => total + meal.calories, 0)
-    const plannedSlots = state.meals.length
+    const weeklyCalories = activeMeals.reduce((total, meal) => total + meal.calories, 0)
+    const plannedSlots = activeMeals.length
     const coverage = Math.min(100, Math.round((plannedSlots / (dayOrder.length * mealColumns.length)) * 100))
     return { averagePrep, coverage, plannedSlots, weeklyCalories }
-  }, [state.meals])
+  }, [activeMeals])
 
   const selectedRecipe = selectedMeal?.recipeId
     ? state.recipes.find((recipe) => recipe.id === selectedMeal.recipeId)
@@ -64,17 +84,34 @@ export const MealPlanView = ({ store }: { store: FamilyHubStore }) => {
           <h2 className="text-2xl font-bold tracking-tight text-slate-900">Weekly Meal Plan</h2>
           <p className="mt-1 text-sm text-slate-400">Template-driven meals, recipes, and nutrition</p>
         </div>
-        <Button
-          disabled={!canManageMeals}
-          onClick={() => {
-            if (window.confirm('Apply the weekly meal template to this week?')) {
-              applyWeeklyTemplate()
-            }
-          }}
-        >
-          <ClipboardCheck className="size-4" aria-hidden="true" />
-          Apply template
-        </Button>
+        <div className="flex flex-wrap items-center gap-3">
+          {/* Member selector */}
+          <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm">
+            <Users className="size-4 text-slate-400" />
+            <select
+              className="bg-transparent text-sm font-medium text-slate-700 outline-none"
+              value={selectedMemberId ?? ''}
+              onChange={(e) => setSelectedMemberId(e.target.value ? Number(e.target.value) : null)}
+            >
+              <option value="">All members</option>
+              {state.members.map((m) => (
+                <option key={m.id} value={m.id}>{m.name}</option>
+              ))}
+            </select>
+          </div>
+          <Button
+            disabled={!canManageMeals}
+            onClick={() => {
+              const target = selectedMemberId !== null ? state.members.find((m) => m.id === selectedMemberId)?.name : 'the family'
+              if (window.confirm(`Apply the weekly meal template for ${target}?`)) {
+                applyWeeklyTemplate(selectedMemberId)
+              }
+            }}
+          >
+            <ClipboardCheck className="size-4" aria-hidden="true" />
+            Apply template{selectedMemberId !== null ? ` for ${state.members.find((m) => m.id === selectedMemberId)?.name ?? 'member'}` : ''}
+          </Button>
+        </div>
       </div>
 
       <Card variant="accent" className="overflow-hidden">
@@ -111,10 +148,10 @@ export const MealPlanView = ({ store }: { store: FamilyHubStore }) => {
         <Card className="overflow-hidden">
           <CardHeader className="flex flex-row items-center justify-between gap-3">
             <div>
-              <CardTitle>Week Grid</CardTitle>
-              <p className="mt-1 text-xs text-slate-400">Breakfast, lunch, snacks, and dinner by day</p>
+              <CardTitle>Week Grid{selectedMemberId !== null ? ` — ${state.members.find((m) => m.id === selectedMemberId)?.name ?? ''}` : ''}</CardTitle>
+              <p className="mt-1 text-xs text-slate-400">{selectedMemberId !== null ? 'Personal meal plan' : 'Family-wide meals'}{memberMealsLoading ? ' · Loading...' : ''}</p>
             </div>
-            <Badge tone="green">{state.meals.length} meals</Badge>
+            <Badge tone="green">{activeMeals.length} meals</Badge>
           </CardHeader>
           <CardContent className="p-0">
             <div className="overflow-x-auto">
@@ -133,7 +170,7 @@ export const MealPlanView = ({ store }: { store: FamilyHubStore }) => {
                         {day.slice(0, 3)}
                       </div>
                       {mealColumns.map((column) => {
-                        const meal = mealsByDay[day]?.find((item) => item.mealType === column.key)
+                        const meal = activeMealsByDay[day]?.find((item) => item.mealType === column.key)
                         const active = meal?.id === selectedMealId
 
                         if (!meal) {
@@ -241,11 +278,78 @@ export const MealPlanView = ({ store }: { store: FamilyHubStore }) => {
           </Card>
 
           <Card>
-            <CardHeader>
-              <CardTitle>Recipe Library</CardTitle>
-              <p className="mt-1 text-xs text-slate-400">Reusable meals and substitutions</p>
+            <CardHeader className="flex flex-row items-center justify-between gap-3">
+              <div>
+                <CardTitle>Recipe Library</CardTitle>
+                <p className="mt-1 text-xs text-slate-400">Reusable meals and substitutions</p>
+              </div>
+              {canManageRecipes && (
+                <Button variant="secondary" onClick={() => setShowAddRecipe(!showAddRecipe)}>
+                  <Plus className="size-4" aria-hidden="true" />
+                  Add
+                </Button>
+              )}
             </CardHeader>
             <CardContent className="grid gap-3">
+              {canManageRecipes && showAddRecipe && (
+                <form
+                  className="grid gap-3 rounded-xl border border-indigo-100 bg-indigo-50/30 p-4"
+                  onSubmit={(e) => {
+                    e.preventDefault()
+                    if (!recipeDraft.recipeName.trim()) return
+                    addRecipe({
+                      recipeName: recipeDraft.recipeName.trim(),
+                      description: recipeDraft.description.trim(),
+                      ingredients: recipeDraft.ingredients.split(',').map((s) => s.trim()).filter(Boolean),
+                      prepTime: recipeDraft.prepTime,
+                      cookTime: recipeDraft.cookTime,
+                      servings: recipeDraft.servings,
+                      difficulty: recipeDraft.difficulty,
+                      cuisine: recipeDraft.cuisine.trim(),
+                      dietaryTags: recipeDraft.dietaryTags.split(',').map((s) => s.trim()).filter(Boolean),
+                    })
+                    setRecipeDraft({ recipeName: '', description: '', ingredients: '', prepTime: 10, cookTime: 15, servings: 4, difficulty: 'easy', cuisine: '', dietaryTags: '' })
+                    setShowAddRecipe(false)
+                  }}
+                >
+                  <FormField label="Recipe name">
+                    <input className={inputClass} value={recipeDraft.recipeName} onChange={(e) => setRecipeDraft((d) => ({ ...d, recipeName: e.target.value }))} placeholder="e.g. Veggie Stir Fry" />
+                  </FormField>
+                  <FormField label="Description">
+                    <input className={inputClass} value={recipeDraft.description} onChange={(e) => setRecipeDraft((d) => ({ ...d, description: e.target.value }))} />
+                  </FormField>
+                  <FormField label="Ingredients (comma-separated)">
+                    <input className={inputClass} value={recipeDraft.ingredients} onChange={(e) => setRecipeDraft((d) => ({ ...d, ingredients: e.target.value }))} placeholder="tofu, broccoli, soy sauce" />
+                  </FormField>
+                  <div className="grid grid-cols-3 gap-2">
+                    <FormField label="Prep (min)">
+                      <input className={inputClass} type="number" value={recipeDraft.prepTime} onChange={(e) => setRecipeDraft((d) => ({ ...d, prepTime: Number(e.target.value) }))} />
+                    </FormField>
+                    <FormField label="Cook (min)">
+                      <input className={inputClass} type="number" value={recipeDraft.cookTime} onChange={(e) => setRecipeDraft((d) => ({ ...d, cookTime: Number(e.target.value) }))} />
+                    </FormField>
+                    <FormField label="Servings">
+                      <input className={inputClass} type="number" value={recipeDraft.servings} onChange={(e) => setRecipeDraft((d) => ({ ...d, servings: Number(e.target.value) }))} />
+                    </FormField>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <FormField label="Difficulty">
+                      <select className={inputClass} value={recipeDraft.difficulty} onChange={(e) => setRecipeDraft((d) => ({ ...d, difficulty: e.target.value as 'easy' | 'medium' | 'hard' }))}>
+                        <option value="easy">Easy</option>
+                        <option value="medium">Medium</option>
+                        <option value="hard">Hard</option>
+                      </select>
+                    </FormField>
+                    <FormField label="Cuisine">
+                      <input className={inputClass} value={recipeDraft.cuisine} onChange={(e) => setRecipeDraft((d) => ({ ...d, cuisine: e.target.value }))} placeholder="Italian" />
+                    </FormField>
+                  </div>
+                  <FormField label="Tags (comma-separated)">
+                    <input className={inputClass} value={recipeDraft.dietaryTags} onChange={(e) => setRecipeDraft((d) => ({ ...d, dietaryTags: e.target.value }))} placeholder="vegetarian, quick" />
+                  </FormField>
+                  <Button type="submit"><Plus className="size-4" aria-hidden="true" /> Add recipe</Button>
+                </form>
+              )}
               {recipes.map((recipe) => (
                 <div
                   className={cn(
@@ -254,32 +358,73 @@ export const MealPlanView = ({ store }: { store: FamilyHubStore }) => {
                   )}
                   key={recipe.id}
                 >
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <p className="text-sm font-semibold text-slate-900">{recipe.recipeName}</p>
-                      <p className="mt-1 text-xs text-slate-400">{recipe.description}</p>
-                    </div>
-                    <ChefHat className="size-5 text-emerald-500" aria-hidden="true" />
-                  </div>
-                  <div className="mt-3 flex flex-wrap gap-1.5">
-                    {recipe.dietaryTags.map((tag) => (
-                      <Badge key={tag} tone="teal">{tag}</Badge>
-                    ))}
-                  </div>
-                  <div className="mt-3 grid grid-cols-3 gap-2 text-[11px] font-semibold text-slate-500">
-                    <span className="flex items-center gap-1 rounded-lg bg-white/80 px-2 py-1.5">
-                      <Clock3 className="size-3.5 text-indigo-500" aria-hidden="true" />
-                      {recipe.prepTime + recipe.cookTime}m
-                    </span>
-                    <span className="flex items-center gap-1 rounded-lg bg-white/80 px-2 py-1.5">
-                      <Gauge className="size-3.5 text-amber-500" aria-hidden="true" />
-                      {recipe.difficulty}
-                    </span>
-                    <span className="flex items-center gap-1 rounded-lg bg-white/80 px-2 py-1.5">
-                      <ChefHat className="size-3.5 text-emerald-500" aria-hidden="true" />
-                      {recipe.servings}
-                    </span>
-                  </div>
+                  {editingRecipeId === recipe.id ? (
+                    <form
+                      className="grid gap-2"
+                      onSubmit={(e) => {
+                        e.preventDefault()
+                        updateRecipe(recipe.id, recipeEdit)
+                        setEditingRecipeId(null)
+                      }}
+                    >
+                      <input className={inputClass} value={recipeEdit.recipeName} onChange={(e) => setRecipeEdit((d) => ({ ...d, recipeName: e.target.value }))} />
+                      <input className={inputClass} value={recipeEdit.description} onChange={(e) => setRecipeEdit((d) => ({ ...d, description: e.target.value }))} />
+                      <input className={inputClass} value={recipeEdit.cuisine} onChange={(e) => setRecipeEdit((d) => ({ ...d, cuisine: e.target.value }))} placeholder="Cuisine" />
+                      <div className="flex gap-2">
+                        <Button type="submit">Save</Button>
+                        <Button variant="secondary" onClick={() => setEditingRecipeId(null)} type="button">Cancel</Button>
+                      </div>
+                    </form>
+                  ) : (
+                    <>
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <p className="text-sm font-semibold text-slate-900">{recipe.recipeName}</p>
+                          <p className="mt-1 text-xs text-slate-400">{recipe.description}</p>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          {canManageRecipes && (
+                            <>
+                              <button
+                                className="rounded-lg p-1.5 text-slate-400 transition hover:bg-white hover:text-indigo-600"
+                                onClick={() => { setEditingRecipeId(recipe.id); setRecipeEdit({ recipeName: recipe.recipeName, description: recipe.description, cuisine: recipe.cuisine }) }}
+                                title="Edit" type="button"
+                              >
+                                <Edit3 className="size-3.5" aria-hidden="true" />
+                              </button>
+                              <button
+                                className="rounded-lg p-1.5 text-slate-400 transition hover:bg-rose-50 hover:text-rose-500"
+                                onClick={() => { if (window.confirm(`Delete ${recipe.recipeName}?`)) deleteRecipe(recipe.id) }}
+                                title="Delete" type="button"
+                              >
+                                <Trash2 className="size-3.5" aria-hidden="true" />
+                              </button>
+                            </>
+                          )}
+                          <ChefHat className="size-5 text-emerald-500" aria-hidden="true" />
+                        </div>
+                      </div>
+                      <div className="mt-3 flex flex-wrap gap-1.5">
+                        {recipe.dietaryTags.map((tag) => (
+                          <Badge key={tag} tone="teal">{tag}</Badge>
+                        ))}
+                      </div>
+                      <div className="mt-3 grid grid-cols-3 gap-2 text-[11px] font-semibold text-slate-500">
+                        <span className="flex items-center gap-1 rounded-lg bg-white/80 px-2 py-1.5">
+                          <Clock3 className="size-3.5 text-indigo-500" aria-hidden="true" />
+                          {recipe.prepTime + recipe.cookTime}m
+                        </span>
+                        <span className="flex items-center gap-1 rounded-lg bg-white/80 px-2 py-1.5">
+                          <Gauge className="size-3.5 text-amber-500" aria-hidden="true" />
+                          {recipe.difficulty}
+                        </span>
+                        <span className="flex items-center gap-1 rounded-lg bg-white/80 px-2 py-1.5">
+                          <ChefHat className="size-3.5 text-emerald-500" aria-hidden="true" />
+                          {recipe.servings}
+                        </span>
+                      </div>
+                    </>
+                  )}
                 </div>
               ))}
               <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-3">
