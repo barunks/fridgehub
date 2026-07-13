@@ -1714,3 +1714,31 @@ def test_max_devices_per_user_limit() -> None:
             ava.max_devices = original_max
             db.commit()
             db.close()
+
+
+def test_shopping_report_pdf_download() -> None:
+    """GET /api/v1/grocery/shopping-report returns a PDF."""
+    with TestClient(app) as client:
+        r = client.get("/api/v1/grocery/shopping-report", headers=auth_headers(client))
+        assert r.status_code == 200
+        assert r.headers["content-type"] == "application/pdf"
+        assert r.content[:4] == b"%PDF"
+
+
+def test_shopping_report_with_filters() -> None:
+    """Shopping report respects query filters."""
+    with TestClient(app) as client:
+        r = client.get(
+            "/api/v1/grocery/shopping-report",
+            params={"stock": "no", "only_needed": "true"},
+            headers=auth_headers(client),
+        )
+        assert r.status_code == 200
+        assert r.headers["content-type"] == "application/pdf"
+
+
+def test_shopping_report_requires_auth() -> None:
+    """Shopping report requires authentication."""
+    with TestClient(app) as client:
+        r = client.get("/api/v1/grocery/shopping-report")
+        assert r.status_code in (401, 403)

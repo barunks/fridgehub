@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app.core.dependencies import CurrentUser, get_current_user, require_permission
@@ -22,6 +23,7 @@ from app.schemas.familyhub import (
     GroceryTypeUpdate,
 )
 from app.services import grocery_service
+from app.services.report_service import generate_shopping_report
 
 router = APIRouter()
 
@@ -188,6 +190,32 @@ def delete_item(
     db: Session = Depends(get_db),
 ) -> None:
     grocery_service.delete_item(db, item_id, current_user.family_id, current_user.user_id)
+
+
+@router.get("/shopping-report")
+def download_shopping_report(
+    list_type_id: int | None = None,
+    frequency: str | None = None,
+    stock: str | None = None,
+    item_name: str | None = None,
+    only_needed: bool = False,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> Response:
+    pdf_bytes = generate_shopping_report(
+        db,
+        current_user.family_id,
+        list_type_id=list_type_id,
+        frequency=frequency,
+        stock_filter=stock,
+        item_name=item_name,
+        only_needed=only_needed,
+    )
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": "attachment; filename=shopping-report.pdf"},
+    )
 
 
 @router.post("/regenerate-cycles", response_model=list[GroceryCycleOut])

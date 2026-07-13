@@ -424,6 +424,36 @@ export const api = {
   deleteGroceryType: (typeId: number) =>
     request(`/api/v1/grocery/types/${typeId}`, { method: 'DELETE' }),
   listFrequencyTypes: () => request<FrequencyType[]>('/api/v1/grocery/frequency-types'),
+  downloadShoppingReport: async (params: {
+    listTypeId?: number | 'all'
+    frequency?: string | 'all'
+    stock?: string | 'all'
+    itemName?: string | 'all'
+    onlyNeeded?: boolean
+  } = {}) => {
+    const token = await accessTokenOrRefresh()
+    const search = new URLSearchParams()
+    if (params.listTypeId && params.listTypeId !== 'all') search.set('list_type_id', String(params.listTypeId))
+    if (params.frequency && params.frequency !== 'all') search.set('frequency', params.frequency)
+    if (params.stock && params.stock !== 'all') search.set('stock', params.stock)
+    if (params.itemName && params.itemName !== 'all') search.set('item_name', params.itemName)
+    if (params.onlyNeeded) search.set('only_needed', 'true')
+    const qs = search.toString() ? `?${search.toString()}` : ''
+    const response = await fetch(apiUrl(`/api/v1/grocery/shopping-report${qs}`), {
+      headers: { Authorization: `Bearer ${token}` },
+      credentials: 'include',
+    })
+    if (!response.ok) throw new Error(await readError(response))
+    const blob = await response.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'shopping-report.pdf'
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+  },
   // Device management
   listDevices: () => request<DeviceInfo[]>('/api/v1/auth/devices'),
   updateDevice: (deviceId: number, payload: { deviceName?: string; isTrusted?: boolean }) =>

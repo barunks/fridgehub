@@ -10,5 +10,6 @@ celery==5.5.3
 python-jose[cryptography]==3.5.0
 passlib==1.7.4
 python-multipart==0.0.20
+reportlab==4.4.0
 pytest==8.4.2
 httpx==0.28.1

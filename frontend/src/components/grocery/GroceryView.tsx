@@ -5,6 +5,7 @@ import {
   Check,
   CheckCircle2,
   ChevronsUpDown,
+  Download,
   Edit3,
   Filter,
   List,
@@ -33,6 +34,7 @@ import type {
 } from '@/types/familyHub'
 import { formatCompactDate, todayIso } from '@/utils/date'
 import { cn } from '@/utils/style'
+import { api } from '@/services/api'
 
 const frequencyOptions = [
   { value: 'daily', label: 'Daily' },
@@ -1107,10 +1109,27 @@ export const GroceryView = ({ store }: { store: FamilyHubStore }) => {
                   {state.shoppingItems.length} active rows across {shoppingLists.length} list{shoppingLists.length === 1 ? '' : 's'}
                 </p>
               </div>
-              <Button onClick={() => void buildShoppingList()} variant="secondary">
-                <RefreshCw className="size-4" aria-hidden="true" />
-                Build now
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  onClick={() => {
+                    void api.downloadShoppingReport({
+                      listTypeId: shopFilters.listTypeId,
+                      frequency: shopFilters.frequency,
+                      stock: shopFilters.stock,
+                      itemName: shopFilters.itemName,
+                      onlyNeeded: false,
+                    })
+                  }}
+                  variant="secondary"
+                >
+                  <Download className="size-4" aria-hidden="true" />
+                  Download PDF
+                </Button>
+                <Button onClick={() => void buildShoppingList()} variant="secondary">
+                  <RefreshCw className="size-4" aria-hidden="true" />
+                  Build now
+                </Button>
+              </div>
             </CardHeader>
             {canManageGroceries && (
               <CardContent>
