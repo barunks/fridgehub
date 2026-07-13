@@ -4,6 +4,7 @@ import type {
   DeviceInfo,
   FamilyHubState,
   FrequencyType,
+  GroceryItemUpdateInput,
   GroceryItem,
   GroceryType,
   MealPlanItem,
@@ -288,8 +289,8 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
-  updateGroceryItem: (itemId: number, payload: Record<string, unknown>) =>
-    request(`/api/v1/grocery/items/${itemId}`, {
+  updateGroceryItem: (itemId: number, payload: GroceryItemUpdateInput) =>
+    request<GroceryItem>(`/api/v1/grocery/items/${itemId}`, {
       method: 'PATCH',
       body: JSON.stringify(payload),
     }),

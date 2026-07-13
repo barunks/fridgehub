@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 Priority = Literal["low", "medium", "high"]
 TaskStatus = Literal["pending", "in_progress", "completed", "cancelled"]
 RecurrenceType = Literal["none", "daily", "weekly", "monthly", "yearly"]
-Frequency = Literal["daily", "weekly", "monthly", "quarterly"]
+Frequency = Literal["daily", "weekly", "monthly", "quarterly", "semi_annually", "yearly"]
 MealType = Literal["breakfast", "lunch", "snacks", "dinner"]
 
 
@@ -203,17 +203,20 @@ class GroceryItemCreate(CamelModel):
     unit: str = "Unit"
     purchaseFrequency: Frequency = "weekly"
     currentStock: bool = False
+    startDate: date | None = None
     notes: str = ""
     expiryDate: date | None = None
 
 
 class GroceryItemUpdate(CamelModel):
     itemName: str | None = None
+    listTypeId: int | None = None
     quantity: Decimal | float | None = None
     unit: str | None = None
     purchaseFrequency: Frequency | None = None
     currentStock: bool | None = None
     purchased: bool | None = None
+    startDate: date | None = None
     notes: str | None = None
     expiryDate: date | None = None
 

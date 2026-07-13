@@ -5,6 +5,7 @@ import type {
   AuditLogEntry,
   FamilyHubState,
   GroceryItem,
+  GroceryItemUpdateInput,
   MealPlanItem,
   NewGroceryItemInput,
   NewShoppingItemInput,
@@ -39,6 +40,8 @@ const cycleLengthDays = {
   weekly: 7,
   monthly: 30,
   quarterly: 90,
+  semi_annually: 182,
+  yearly: 365,
 }
 
 type PaginationKey = 'groceryItems' | 'tasks' | 'recipes' | 'notifications' | 'auditLogs'
@@ -485,6 +488,36 @@ export const useFamilyHub = (
       api.updateGroceryItem(itemId, { currentStock }),
       'Stock updated',
       () => setGroceryPageItems((current) => (current ? updateGroceryStock(current) : current)),
+    )
+  }
+
+  const updateGroceryItem = (itemId: number, patch: GroceryItemUpdateInput) => {
+    if (!guardPermission('manage_groceries')) {
+      return
+    }
+
+    const applyPatch = (items: GroceryItem[]) =>
+      items.map((item) => {
+        if (item.id !== itemId) return item
+
+        const currentStock = patch.currentStock ?? item.currentStock
+        return {
+          ...item,
+          ...patch,
+          currentStock,
+          purchased: patch.currentStock !== undefined ? currentStock : patch.purchased ?? item.purchased,
+          needsPurchase: patch.currentStock !== undefined ? !currentStock : item.needsPurchase,
+        }
+      })
+
+    return mutateWithRollback(
+      (current) => ({
+        ...current,
+        groceryItems: applyPatch(current.groceryItems),
+      }),
+      api.updateGroceryItem(itemId, patch),
+      'Grocery item updated',
+      () => setGroceryPageItems((current) => (current ? applyPatch(current) : current)),
     )
   }
 
@@ -1224,6 +1257,7 @@ export const useFamilyHub = (
     toggleTaskStatus,
     toggleGroceryPurchased,
     toggleCurrentStock,
+    updateGroceryItem,
     updateShoppingItem,
     addShoppingItem,
     addGroceryItem,

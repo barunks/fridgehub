@@ -164,12 +164,19 @@ def seed_demo_data(db: Session) -> None:
     ]
     db.add_all(members)
 
+    existing_frequencies = {row.frequency_name for row in db.query(FrequencyType).all()}
     db.add_all(
         [
-            FrequencyType(frequency_name="daily", days_interval=1, display_order=1),
-            FrequencyType(frequency_name="weekly", days_interval=7, display_order=2),
-            FrequencyType(frequency_name="monthly", days_interval=30, display_order=3),
-            FrequencyType(frequency_name="quarterly", days_interval=90, display_order=4),
+            FrequencyType(frequency_name=name, days_interval=days, display_order=display_order)
+            for name, days, display_order in (
+                ("daily", 1, 1),
+                ("weekly", 7, 2),
+                ("monthly", 30, 3),
+                ("quarterly", 90, 4),
+                ("semi_annually", 182, 5),
+                ("yearly", 365, 6),
+            )
+            if name not in existing_frequencies
         ]
     )
 

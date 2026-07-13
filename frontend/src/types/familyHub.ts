@@ -15,7 +15,7 @@ export type ViewKey =
 export type Priority = 'low' | 'medium' | 'high'
 export type TaskStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled'
 export type RecurrenceType = 'none' | 'daily' | 'weekly' | 'monthly' | 'yearly'
-export type Frequency = 'daily' | 'weekly' | 'monthly' | 'quarterly'
+export type Frequency = 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'semi_annually' | 'yearly'
 export type MealType = 'breakfast' | 'lunch' | 'snacks' | 'dinner'
 export type Permission =
   | 'view_dashboard'
@@ -91,7 +91,7 @@ export interface GroceryItem {
   purchaseFrequency: Frequency
   currentStock: boolean
   startDate: string
-  expiryDate?: string
+  expiryDate?: string | null
   notes: string
   familyId: number
   purchased: boolean
@@ -246,6 +246,20 @@ export interface NewGroceryItemInput {
   purchaseFrequency: Frequency
   currentStock: boolean
   notes: string
+  startDate?: string
+}
+
+export interface GroceryItemUpdateInput {
+  itemName?: string
+  listTypeId?: number
+  quantity?: number
+  unit?: string
+  purchaseFrequency?: Frequency
+  currentStock?: boolean
+  startDate?: string
+  notes?: string
+  expiryDate?: string | null
+  purchased?: boolean
 }
 
 export interface NewShoppingItemInput {

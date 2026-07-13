@@ -26,7 +26,14 @@ from app.utils.dates import today_for_timezone
 from app.utils.sanitize import sanitize_text
 
 
-FALLBACK_FREQUENCY_DAYS = {"daily": 1, "weekly": 7, "monthly": 30, "quarterly": 90}
+FALLBACK_FREQUENCY_DAYS = {
+    "daily": 1,
+    "weekly": 7,
+    "monthly": 30,
+    "quarterly": 90,
+    "semi_annually": 182,
+    "yearly": 365,
+}
 
 
 def _invalidate_shopping_state(family_id: int) -> None:
@@ -318,14 +325,15 @@ def create_item(db: Session, payload: GroceryItemCreate, family_id: int, user_id
     if existing:
         raise HTTPException(status_code=409, detail="A grocery item with this name already exists in this list")
     today = _today_for_family(db, family_id)
+    start_date = payload.startDate or today
     inactive = db.query(GroceryItem).filter_by(list_type_id=payload.listTypeId, item_name=item_name, is_active=False).first()
     if inactive:
         inactive.quantity = Decimal(str(payload.quantity))
         inactive.unit = sanitize_text(payload.unit)
         inactive.purchase_frequency = payload.purchaseFrequency
         inactive.current_stock = payload.currentStock
-        inactive.start_date = today
-        inactive.expiry_date = payload.expiryDate or (today + timedelta(days=5) if payload.purchaseFrequency == "weekly" else None)
+        inactive.start_date = start_date
+        inactive.expiry_date = payload.expiryDate or (start_date + timedelta(days=5) if payload.purchaseFrequency == "weekly" else None)
         inactive.notes = sanitize_text(payload.notes)
         inactive.created_by = user_id
         inactive.is_active = True
@@ -354,8 +362,8 @@ def create_item(db: Session, payload: GroceryItemCreate, family_id: int, user_id
         unit=sanitize_text(payload.unit),
         purchase_frequency=payload.purchaseFrequency,
         current_stock=payload.currentStock,
-        start_date=today,
-        expiry_date=payload.expiryDate or (today + timedelta(days=5) if payload.purchaseFrequency == "weekly" else None),
+        start_date=start_date,
+        expiry_date=payload.expiryDate or (start_date + timedelta(days=5) if payload.purchaseFrequency == "weekly" else None),
         notes=sanitize_text(payload.notes),
         family_id=family_id,
         created_by=user_id,
@@ -396,47 +404,64 @@ def update_item(db: Session, item_id: int, payload: GroceryItemUpdate, family_id
         raise HTTPException(status_code=404, detail="Grocery item not found")
 
     updates = payload.model_dump(exclude_unset=True)
+    next_list_type_id = int(updates.get("listTypeId") or item.list_type_id)
+    if "listTypeId" in updates and updates["listTypeId"] is not None:
+        list_type = db.get(GroceryListType, next_list_type_id)
+        if not list_type or list_type.family_id != family_id or not list_type.is_active:
+            raise HTTPException(status_code=404, detail="Grocery list type not found")
+
+    next_item_name = item.item_name
+    if "itemName" in updates and updates["itemName"]:
+        next_item_name = sanitize_text(updates["itemName"])
+
+    if "itemName" in updates or "listTypeId" in updates:
+        active_duplicate = (
+            db.query(GroceryItem)
+            .filter(
+                GroceryItem.list_type_id == next_list_type_id,
+                GroceryItem.item_name == next_item_name,
+                GroceryItem.id != item.id,
+                GroceryItem.is_active.is_(True),
+            )
+            .first()
+        )
+        if active_duplicate:
+            raise HTTPException(status_code=409, detail="A grocery item with this name already exists in this list")
+        inactive_duplicates = (
+            db.query(GroceryItem)
+            .filter(
+                GroceryItem.list_type_id == next_list_type_id,
+                GroceryItem.item_name == next_item_name,
+                GroceryItem.id != item.id,
+                GroceryItem.is_active.is_(False),
+            )
+            .all()
+        )
+        for duplicate in inactive_duplicates:
+            duplicate.item_name = f"{duplicate.item_name}__deleted_{duplicate.id}"
+
     field_map = {
         "itemName": "item_name",
+        "listTypeId": "list_type_id",
         "quantity": "quantity",
         "unit": "unit",
         "purchaseFrequency": "purchase_frequency",
         "currentStock": "current_stock",
+        "startDate": "start_date",
         "notes": "notes",
         "expiryDate": "expiry_date",
     }
     for api_field, model_field in field_map.items():
         if api_field in updates:
             value = updates[api_field]
+            if value is None and api_field != "expiryDate":
+                continue
             if api_field == "quantity":
                 value = Decimal(str(value))
+            if api_field == "listTypeId":
+                value = int(value)
             if isinstance(value, str):
                 value = sanitize_text(value)
-            if api_field == "itemName" and value:
-                active_duplicate = (
-                    db.query(GroceryItem)
-                    .filter(
-                        GroceryItem.list_type_id == item.list_type_id,
-                        GroceryItem.item_name == value,
-                        GroceryItem.id != item.id,
-                        GroceryItem.is_active.is_(True),
-                    )
-                    .first()
-                )
-                if active_duplicate:
-                    raise HTTPException(status_code=409, detail="A grocery item with this name already exists in this list")
-                inactive_duplicates = (
-                    db.query(GroceryItem)
-                    .filter(
-                        GroceryItem.list_type_id == item.list_type_id,
-                        GroceryItem.item_name == value,
-                        GroceryItem.id != item.id,
-                        GroceryItem.is_active.is_(False),
-                    )
-                    .all()
-                )
-                for duplicate in inactive_duplicates:
-                    duplicate.item_name = f"{duplicate.item_name}__deleted_{duplicate.id}"
             setattr(item, model_field, value)
 
     if "purchased" in updates:
@@ -445,7 +470,29 @@ def update_item(db: Session, item_id: int, payload: GroceryItemUpdate, family_id
     elif "currentStock" in updates:
         _set_item_purchased(db, item, bool(updates["currentStock"]))
 
-    _ensure_cycle_for_item(db, item)
+    today = _today_for_family(db, family_id)
+    target_cycle_start = _cycle_start_for_item(db, item, today)
+    for sub_item in list(item.sub_list_items):
+        cycle = sub_item.purchase_cycle
+        if cycle and not cycle.is_completed and (
+            cycle.list_type_id != item.list_type_id
+            or cycle.frequency != item.purchase_frequency
+            or cycle.cycle_start_date != target_cycle_start
+        ):
+            db.delete(sub_item)
+
+    cycle = _ensure_cycle_for_item(db, item, today)
+    sub_item = db.query(GrocerySubList).filter_by(purchase_cycle_id=cycle.id, item_id=item.id).first()
+    if sub_item and any(field in updates for field in ("quantity", "unit", "notes", "listTypeId", "purchaseFrequency", "startDate")):
+        sub_item.quantity = item.quantity
+        sub_item.unit = item.unit
+        sub_item.notes = item.notes
+        if item.current_stock:
+            sub_item.is_purchased = True
+            sub_item.purchased_quantity = item.quantity
+        else:
+            _reconcile_sub_item_purchase(sub_item)
+
     write_audit_log(
         db,
         user_id=user_id,

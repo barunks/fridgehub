@@ -25,5 +25,12 @@ def datetime_offset(days: int, hour: int, minute: int = 0) -> datetime:
 
 
 def cycle_end(start: date, frequency: str) -> date:
-    days = {"daily": 1, "weekly": 7, "monthly": 30, "quarterly": 90}.get(frequency, 7)
+    days = {
+        "daily": 1,
+        "weekly": 7,
+        "monthly": 30,
+        "quarterly": 90,
+        "semi_annually": 182,
+        "yearly": 365,
+    }.get(frequency, 7)
     return start + timedelta(days=days - 1)

@@ -1204,7 +1204,7 @@ def test_apply_template_creates_audit_log() -> None:
         client.post("/api/v1/meal-plan/apply-template", json={"memberId": 1}, headers=headers)
 
         # Check audit logs (use larger limit to account for prior test activity)
-        r = client.get("/api/v1/family/audit-logs?limit=50", headers=headers)
+        r = client.get("/api/v1/family/audit-logs?limit=100", headers=headers)
         assert r.status_code == 200
         logs = r.json()
         template_logs = [log for log in logs if log["action"] == "apply_template" and log["entityType"] == "meal_plan"]
@@ -1229,7 +1229,7 @@ def test_meal_update_creates_audit_log() -> None:
         # Update it
         client.patch(f"/api/v1/meal-plan/{meal_id}", json={"mealName": "Audit Test Meal"}, headers=headers)
 
-        r = client.get("/api/v1/family/audit-logs?limit=50", headers=headers)
+        r = client.get("/api/v1/family/audit-logs?limit=100", headers=headers)
         logs = r.json()
         meal_logs = [log for log in logs if log["entityType"] == "meal_plan" and log["action"] == "update"]
         assert len(meal_logs) >= 1
@@ -1666,7 +1666,7 @@ def test_device_registered_audit_event() -> None:
         headers = {"Authorization": f"Bearer {r.json()['accessToken']}"}
 
         # Check audit logs for device_registered event
-        r = client.get("/api/v1/family/audit-logs?limit=50", headers=headers)
+        r = client.get("/api/v1/family/audit-logs?limit=100", headers=headers)
         logs = r.json()
         device_logs = [log for log in logs if log["action"] == "device_registered" and log["changes"].get("device_id") == unique_device_id]
         assert len(device_logs) >= 1
