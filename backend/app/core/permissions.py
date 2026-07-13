@@ -10,7 +10,7 @@ class Permission(str, Enum):
     VIEW_FAMILY = "view_family"
     VIEW_ANALYTICS = "view_analytics"
     USE_ASSISTANT = "use_assistant"
-    VIEW_IMPLEMENTATION = "view_implementation"
+    VIEW_DEMO = "view_demo"
     VIEW_AUDIT = "view_audit"
     VIEW_CACHE_STATS = "view_cache_stats"
     MANAGE_TASKS = "manage_tasks"

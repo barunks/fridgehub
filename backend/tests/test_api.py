@@ -6,14 +6,14 @@ os.environ["DATABASE_URL"] = "sqlite:///./test_familyhub.db"
 os.environ["SEED_ON_STARTUP"] = "true"
 os.environ["CACHE_ENABLED"] = "false"
 os.environ["SECRET_KEY"] = "test-secret-key-that-is-long-enough-for-jwt-tests"
-os.environ["LOGIN_RATE_LIMIT_PER_MINUTE"] = "100"
+os.environ["LOGIN_RATE_LIMIT_PER_MINUTE"] = "1000"
 
 from fastapi.testclient import TestClient  # noqa: E402
 
 from app.core.database import SessionLocal  # noqa: E402
-from app.core.security import hash_password  # noqa: E402
+from app.core.security import decode_token, hash_password  # noqa: E402
 from app.main import app  # noqa: E402
-from app.models import DeviceSession, User  # noqa: E402
+from app.models import Device, DeviceSession, FamilyInvite, FamilyMember, User  # noqa: E402
 
 
 def auth_headers(client: TestClient, username: str = "meera") -> dict[str, str]:
@@ -128,6 +128,77 @@ def test_change_password_wrong_current() -> None:
         headers = auth_headers(client)
         r = client.post("/api/v1/auth/change-password", json={"currentPassword": "wrong", "newPassword": "newpass123"}, headers=headers)
         assert r.status_code == 400
+
+
+def test_signup_status_bootstrap_closed_for_seeded_family() -> None:
+    with TestClient(app) as client:
+        r = client.get("/api/v1/auth/signup/status")
+        assert r.status_code == 200
+        assert r.json()["bootstrapAllowed"] is False
+
+
+def test_invite_signup_registers_device_and_closes_invite() -> None:
+    unique = uuid4().hex[:10]
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+        invite = client.post(
+            "/api/v1/auth/invites",
+            json={"email": f"join-{unique}@familyhub.local", "role": "member", "expiresInDays": 3, "maxUses": 1},
+            headers=headers,
+        )
+        assert invite.status_code == 201
+        invite_data = invite.json()
+        invite_token = invite_data["inviteToken"]
+        assert invite_token
+
+        preview = client.get(f"/api/v1/auth/invites/{invite_token}")
+        assert preview.status_code == 200
+        assert preview.json()["email"] == f"join-{unique}@familyhub.local"
+
+        signup = client.post(
+            "/api/v1/auth/signup",
+            json={
+                "inviteToken": invite_token,
+                "fullName": "Invite User",
+                "email": f"join-{unique}@familyhub.local",
+                "username": f"join{unique}",
+                "password": "joinpass1",
+                "deviceId": f"invite-device-{unique}",
+                "deviceName": "Invite Phone",
+                "deviceType": "phone",
+                "platform": "iPhone",
+            },
+        )
+        assert signup.status_code == 200
+        assert "accessToken" in signup.json()
+
+        db = SessionLocal()
+        try:
+            user = db.query(User).filter_by(username=f"join{unique}").one()
+            assert db.query(FamilyMember).filter_by(user_id=user.id, is_active=True).count() == 1
+            device = db.query(Device).filter_by(user_id=user.id, device_id=f"invite-device-{unique}").one()
+            assert device.device_name == "Invite Phone"
+            assert device.device_type == "phone"
+            saved_invite = db.query(FamilyInvite).filter_by(id=invite_data["id"]).one()
+            assert saved_invite.used_count == 1
+            assert saved_invite.is_active is False
+        finally:
+            db.close()
+
+        reused = client.post(
+            "/api/v1/auth/signup",
+            json={
+                "inviteToken": invite_token,
+                "fullName": "Second User",
+                "email": f"second-{unique}@familyhub.local",
+                "username": f"second{unique}",
+                "password": "joinpass1",
+                "deviceId": f"invite-device-second-{unique}",
+                "deviceName": "Second Phone",
+                "deviceType": "phone",
+            },
+        )
+        assert reused.status_code == 404
 
 
 # --- RBAC ---
@@ -354,6 +425,91 @@ def test_meal_apply_template() -> None:
         assert len(r.json()) >= 1
 
 
+def test_meal_update_full_payload_and_validation() -> None:
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+        meals = client.get("/api/v1/meal-plan/week", headers=headers).json()
+        meal_id = meals[0]["id"]
+        recipe = client.post(
+            "/api/v1/meal-plan/recipes",
+            json={"recipeName": "Protein Bowl", "ingredients": ["rice", "tofu"], "dietaryTags": ["vegan"]},
+            headers=headers,
+        ).json()
+
+        patched = client.patch(
+            f"/api/v1/meal-plan/{meal_id}",
+            json={
+                "mealName": "Protein Bowl Lunch",
+                "description": "High protein meal",
+                "calories": 520,
+                "prepTime": 25,
+                "assignedTo": 1,
+                "dietaryFlags": ["vegan", " vegan ", ""],
+                "recipeId": recipe["id"],
+            },
+            headers=headers,
+        )
+        assert patched.status_code == 200
+        body = patched.json()
+        assert body["mealName"] == "Protein Bowl Lunch"
+        assert body["calories"] == 520
+        assert body["prepTime"] == 25
+        assert body["assignedTo"] == 1
+        assert body["dietaryFlags"] == ["vegan"]
+        assert body["recipeId"] == recipe["id"]
+
+        invalid = client.patch(f"/api/v1/meal-plan/{meal_id}", json={"calories": -1}, headers=headers)
+        assert invalid.status_code == 422
+
+        invalid_recipe = client.patch(f"/api/v1/meal-plan/{meal_id}", json={"recipeId": 999999}, headers=headers)
+        assert invalid_recipe.status_code == 400
+
+
+def test_meal_template_row_crud_and_apply_named_template() -> None:
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+        payload = {
+            "templateName": "School Week",
+            "dayOfWeek": "Monday",
+            "mealType": "breakfast",
+            "mealName": "Banana Oats",
+            "description": "Fast school breakfast",
+            "calories": 310,
+            "prepTime": 8,
+        }
+        created = client.post("/api/v1/meal-plan/templates", json=payload, headers=headers)
+        assert created.status_code == 200
+        row = created.json()
+        assert row["templateName"] == "School Week"
+        assert row["dayOfWeek"] == "monday"
+        assert row["isEditable"] is True
+
+        listed = client.get("/api/v1/meal-plan/templates", headers=headers)
+        assert listed.status_code == 200
+        assert any(item["id"] == row["id"] for item in listed.json())
+
+        patched = client.patch(
+            f"/api/v1/meal-plan/templates/{row['id']}",
+            json={"mealName": "Peanut Butter Oats", "calories": 360},
+            headers=headers,
+        )
+        assert patched.status_code == 200
+        assert patched.json()["mealName"] == "Peanut Butter Oats"
+
+        applied = client.post(
+            "/api/v1/meal-plan/apply-template",
+            json={"templateName": "School Week", "memberId": 1},
+            headers=headers,
+        )
+        assert applied.status_code == 200
+        assert any(meal["mealName"] == "Peanut Butter Oats" for meal in applied.json())
+
+        deleted = client.delete(f"/api/v1/meal-plan/templates/{row['id']}", headers=headers)
+        assert deleted.status_code == 204
+        relisted = client.get("/api/v1/meal-plan/templates", headers=headers).json()
+        assert all(item["id"] != row["id"] for item in relisted)
+
+
 # --- Recipes ---
 
 
@@ -444,8 +600,32 @@ def test_assistant_recommendations() -> None:
         headers = auth_headers(client)
         r = client.post("/api/v1/assistant/recommendations", json={"query": "What should I cook?"}, headers=headers)
         assert r.status_code == 200
-        assert "answer" in r.json()
-        assert "insights" in r.json()
+        data = r.json()
+        assert "answer" in data
+        assert "insights" in data
+        assert data["insights"]
+        assert {insight["severity"] for insight in data["insights"]} <= {"critical", "warning", "info"}
+        assert all("route" in insight for insight in data["insights"])
+
+
+def test_assistant_gap_and_specific_queries() -> None:
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+        gaps = client.post(
+            "/api/v1/assistant/recommendations",
+            json={"query": "What gaps or alerts did we miss today?"},
+            headers=headers,
+        )
+        assert gaps.status_code == 200
+        assert "attention" in gaps.json()["answer"].lower() or "no critical" in gaps.json()["answer"].lower()
+
+        member = client.post(
+            "/api/v1/assistant/recommendations",
+            json={"query": "What about Meera?"},
+            headers=headers,
+        )
+        assert member.status_code == 200
+        assert "meera" in member.json()["answer"].lower()
 
 
 # --- Cache Stats ---
@@ -1551,6 +1731,47 @@ def test_device_list() -> None:
         assert "lastUsedAt" in d
 
 
+def test_device_policy_can_be_updated_by_parent() -> None:
+    """Parent can raise/lower device capacity, but not below current active devices."""
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+        policy = client.get("/api/v1/auth/devices/policy", headers=headers)
+        assert policy.status_code == 200
+        current = policy.json()
+        assert current["maxDevices"] >= current["activeDeviceCount"]
+
+        raised_limit = min(20, max(current["activeDeviceCount"] + 1, current["maxDevices"]))
+        updated = client.patch(
+            "/api/v1/auth/devices/policy",
+            json={"maxDevices": raised_limit},
+            headers=headers,
+        )
+        assert updated.status_code == 200
+        assert updated.json()["maxDevices"] == raised_limit
+
+        rejected = client.patch(
+            "/api/v1/auth/devices/policy",
+            json={"maxDevices": max(0, current["activeDeviceCount"] - 1)},
+            headers=headers,
+        )
+        assert rejected.status_code in {400, 422}
+
+        client.patch(
+            "/api/v1/auth/devices/policy",
+            json={"maxDevices": current["maxDevices"]},
+            headers=headers,
+        )
+
+
+def test_device_policy_requires_family_management_permission() -> None:
+    """Read is allowed for signed-in users; update is restricted to family managers."""
+    with TestClient(app) as client:
+        child_headers = auth_headers(client, "ava")
+        assert client.get("/api/v1/auth/devices/policy", headers=child_headers).status_code == 200
+        r = client.patch("/api/v1/auth/devices/policy", json={"maxDevices": 6}, headers=child_headers)
+        assert r.status_code == 403
+
+
 def test_device_update_name() -> None:
     """Rename a device."""
     with TestClient(app) as client:
@@ -1714,6 +1935,82 @@ def test_max_devices_per_user_limit() -> None:
             ava.max_devices = original_max
             db.commit()
             db.close()
+
+
+def test_same_browser_device_id_rotation_reuses_existing_device_at_limit() -> None:
+    """A changed client-side device ID from the same browser should not create duplicate devices."""
+    unique = uuid4().hex[:8]
+    user_agent = f"FamilyHubBrowser/{unique}"
+    first_device_id = f"stable-browser-{unique}"
+    rotated_device_id = f"rotated-browser-{unique}"
+
+    db = SessionLocal()
+    ava = db.query(User).filter_by(username="ava").one()
+    original_max = ava.max_devices
+    try:
+      with TestClient(app) as client:
+          first = client.post(
+              "/api/v1/auth/login",
+              json={
+                  "username": "ava",
+                  "password": "familyhub",
+                  "deviceId": first_device_id,
+                  "deviceName": "Ava Laptop",
+                  "deviceType": "browser",
+              },
+              headers={"user-agent": user_agent},
+          )
+          assert first.status_code == 200
+
+          db.expire_all()
+          active_count = (
+              db.query(Device)
+              .filter(Device.user_id == ava.id, Device.is_active.is_(True), Device.is_revoked.is_(False))
+              .count()
+          )
+          ava.max_devices = active_count
+          db.commit()
+
+          rotated = client.post(
+              "/api/v1/auth/login",
+              json={
+                  "username": "ava",
+                  "password": "familyhub",
+                  "deviceId": rotated_device_id,
+                  "deviceName": "Ava Laptop",
+                  "deviceType": "desktop",
+                  "platform": "Linux x86_64",
+              },
+              headers={"user-agent": user_agent},
+          )
+          assert rotated.status_code == 200
+          assert decode_token(rotated.json()["accessToken"])["device_id"] == first_device_id
+
+          db.expire_all()
+          after_count = (
+              db.query(Device)
+              .filter(Device.user_id == ava.id, Device.is_active.is_(True), Device.is_revoked.is_(False))
+              .count()
+          )
+          assert after_count == active_count
+
+          truly_new = client.post(
+              "/api/v1/auth/login",
+              json={
+                  "username": "ava",
+                  "password": "familyhub",
+                  "deviceId": f"new-browser-{unique}",
+                  "deviceName": "Different Laptop",
+                  "deviceType": "desktop",
+                  "platform": "Linux x86_64",
+              },
+              headers={"user-agent": f"DifferentBrowser/{unique}"},
+          )
+          assert truly_new.status_code == 403
+    finally:
+        ava.max_devices = original_max
+        db.commit()
+        db.close()
 
 
 def test_shopping_report_pdf_download() -> None:

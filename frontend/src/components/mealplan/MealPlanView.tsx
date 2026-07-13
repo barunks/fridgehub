@@ -1,13 +1,17 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
-import { BookOpen, CalendarCheck2, ChefHat, ClipboardCheck, Clock3, Edit3, Flame, Gauge, Plus, Save, Timer, Trash2, Users } from 'lucide-react'
+import { BookOpen, CalendarCheck2, ChefHat, ClipboardCheck, Clock3, Edit3, Flame, Gauge, Plus, RefreshCw, Save, Timer, Trash2, Users } from 'lucide-react'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { FormField, inputClass } from '@/components/ui/FormField'
 import type { FamilyHubStore } from '@/hooks/useFamilyHub'
-import type { MealPlanItem, MealType } from '@/types/familyHub'
+import { api } from '@/services/api'
+import type { MealPlanItem, MealTemplateRow, MealTemplateRowInput, MealType, MealUpdateInput, WeekDay } from '@/types/familyHub'
 import { cn } from '@/utils/style'
+
+type MealPageTab = 'plan' | 'templates'
+type TemplateApplyTarget = 'family' | 'all' | 'member'
 
 const mealColumns: { key: MealType; label: string }[] = [
   { key: 'breakfast', label: 'Breakfast' },
@@ -17,23 +21,95 @@ const mealColumns: { key: MealType; label: string }[] = [
 ]
 
 const dayOrder = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+const dayOptions: { key: WeekDay; label: string }[] = [
+  { key: 'monday', label: 'Monday' },
+  { key: 'tuesday', label: 'Tuesday' },
+  { key: 'wednesday', label: 'Wednesday' },
+  { key: 'thursday', label: 'Thursday' },
+  { key: 'friday', label: 'Friday' },
+  { key: 'saturday', label: 'Saturday' },
+  { key: 'sunday', label: 'Sunday' },
+]
+
+const defaultTemplateName = 'Default Weekly Meal Plan'
+const defaultMealDraft = {
+  mealName: '',
+  description: '',
+  calories: 0,
+  prepTime: 0,
+  assignedTo: '',
+  dietaryFlags: '',
+  recipeId: '',
+}
+
+const defaultTemplateDraft = (): MealTemplateRowInput => ({
+  templateName: defaultTemplateName,
+  dayOfWeek: 'monday',
+  mealType: 'breakfast',
+  mealName: '',
+  description: '',
+  calories: 300,
+  prepTime: 15,
+  recipeId: null,
+})
 
 export const MealPlanView = ({ store }: { store: FamilyHubStore }) => {
-  const { state, updateMeal, applyWeeklyTemplate, addRecipe, updateRecipe, deleteRecipe, loadRecipePage, loadMemberMeals, memberMeals, memberMealsLoading } = store
+  const { state, updateMeal, applyWeeklyTemplate, applyWeeklyTemplateForAll, addRecipe, updateRecipe, deleteRecipe, loadRecipePage, loadMemberMeals, memberMeals, memberMealsLoading } = store
   const canManageMeals = store.can('manage_meals')
   const canManageRecipes = store.can('manage_recipes')
   const page = store.pagination.recipes
   const recipes = store.paged.recipes ?? state.recipes
+  const [activeTab, setActiveTab] = useState<MealPageTab>('plan')
   const [selectedMemberId, setSelectedMemberId] = useState<number | null>(null)
   const [selectedMealId, setSelectedMealId] = useState<number>(state.meals[0]?.id ?? 0)
+  const [templates, setTemplates] = useState<MealTemplateRow[]>([])
+  const [templatesLoading, setTemplatesLoading] = useState(false)
+  const [selectedTemplateName, setSelectedTemplateName] = useState(defaultTemplateName)
+  const [templateTarget, setTemplateTarget] = useState<TemplateApplyTarget>('family')
+  const [templateMemberId, setTemplateMemberId] = useState<string>(() => String(state.members[0]?.id ?? ''))
+  const [templateDraft, setTemplateDraft] = useState<MealTemplateRowInput>(defaultTemplateDraft)
+  const [editingTemplateId, setEditingTemplateId] = useState<number | null>(null)
+  const [templateFeedback, setTemplateFeedback] = useState<string | null>(null)
+  const [mealDraft, setMealDraft] = useState(defaultMealDraft)
   const [showAddRecipe, setShowAddRecipe] = useState(false)
   const [recipeDraft, setRecipeDraft] = useState({ recipeName: '', description: '', ingredients: '', prepTime: 10, cookTime: 15, servings: 4, difficulty: 'easy' as 'easy' | 'medium' | 'hard', cuisine: '', dietaryTags: '' })
   const [editingRecipeId, setEditingRecipeId] = useState<number | null>(null)
   const [recipeEdit, setRecipeEdit] = useState({ recipeName: '', description: '', cuisine: '' })
 
+  const loadTemplates = useCallback(() => {
+    setTemplatesLoading(true)
+    api
+      .listMealTemplates()
+      .then((rows) => {
+        setTemplates(rows)
+        if (rows.length > 0) {
+          setSelectedTemplateName((current) => (rows.some((row) => row.templateName === current) ? current : rows[0].templateName))
+          setTemplateDraft((current) => ({
+            ...current,
+            templateName: rows.some((row) => row.templateName === current.templateName) ? current.templateName : rows[0].templateName,
+          }))
+        }
+      })
+      .catch((error: unknown) => setTemplateFeedback(error instanceof Error ? error.message : 'Unable to load meal templates'))
+      .finally(() => setTemplatesLoading(false))
+  }, [])
+
   useEffect(() => {
     loadRecipePage(0)
   }, [loadRecipePage])
+
+  useEffect(() => {
+    loadTemplates()
+  }, [loadTemplates])
+
+  useEffect(() => {
+    if (!templateMemberId && state.members.length > 0) {
+      setTemplateMemberId(String(state.members[0].id))
+    }
+    if (templateMemberId && !state.members.some((member) => String(member.id) === templateMemberId)) {
+      setTemplateMemberId(String(state.members[0]?.id ?? ''))
+    }
+  }, [state.members, templateMemberId])
 
   useEffect(() => {
     loadMemberMeals(selectedMemberId)
@@ -41,6 +117,13 @@ export const MealPlanView = ({ store }: { store: FamilyHubStore }) => {
 
   // Active meals: member-filtered or all family meals
   const activeMeals = selectedMemberId !== null && memberMeals ? memberMeals : state.meals
+
+  useEffect(() => {
+    if (activeMeals.length > 0 && !activeMeals.some((meal) => meal.id === selectedMealId)) {
+      setSelectedMealId(activeMeals[0].id)
+    }
+  }, [activeMeals, selectedMealId])
+
   const activeMealsByDay = useMemo(() => {
     return activeMeals.reduce<Record<string, MealPlanItem[]>>((acc, meal) => {
       acc[meal.dayOfWeek] = [...(acc[meal.dayOfWeek] ?? []), meal]
@@ -49,7 +132,14 @@ export const MealPlanView = ({ store }: { store: FamilyHubStore }) => {
   }, [activeMeals])
 
   const selectedMeal = activeMeals.find((meal) => meal.id === selectedMealId)
-  const [draftName, setDraftName] = useState(selectedMeal?.mealName ?? '')
+  const templateNames = useMemo(() => {
+    const names = Array.from(new Set(templates.map((row) => row.templateName))).sort((a, b) => a.localeCompare(b))
+    return names.length > 0 ? names : [defaultTemplateName]
+  }, [templates])
+  const filteredTemplates = useMemo(
+    () => templates.filter((row) => row.templateName === selectedTemplateName),
+    [selectedTemplateName, templates],
+  )
 
   const mealStats = useMemo(() => {
     const averagePrep = Math.round(
@@ -65,27 +155,139 @@ export const MealPlanView = ({ store }: { store: FamilyHubStore }) => {
     ? state.recipes.find((recipe) => recipe.id === selectedMeal.recipeId)
     : undefined
 
+  useEffect(() => {
+    if (!selectedMeal) {
+      setMealDraft(defaultMealDraft)
+      return
+    }
+    setMealDraft({
+      mealName: selectedMeal.mealName,
+      description: selectedMeal.description,
+      calories: selectedMeal.calories,
+      prepTime: selectedMeal.prepTime,
+      assignedTo: selectedMeal.assignedTo ? String(selectedMeal.assignedTo) : '',
+      dietaryFlags: (selectedMeal.dietaryFlags ?? []).join(', '),
+      recipeId: selectedMeal.recipeId ? String(selectedMeal.recipeId) : '',
+    })
+  }, [selectedMeal])
+
   const selectMeal = (meal: MealPlanItem) => {
     setSelectedMealId(meal.id)
-    setDraftName(meal.mealName)
   }
 
   const handleSave = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    if (selectedMeal && draftName.trim()) {
-      updateMeal(selectedMeal.id, draftName.trim())
+    if (selectedMeal && mealDraft.mealName.trim()) {
+      const payload: MealUpdateInput = {
+        mealName: mealDraft.mealName.trim(),
+        description: mealDraft.description.trim(),
+        calories: Math.max(0, Number(mealDraft.calories) || 0),
+        prepTime: Math.max(0, Number(mealDraft.prepTime) || 0),
+        assignedTo: mealDraft.assignedTo ? Number(mealDraft.assignedTo) : null,
+        dietaryFlags: mealDraft.dietaryFlags.split(',').map((flag) => flag.trim()).filter(Boolean),
+        recipeId: mealDraft.recipeId ? Number(mealDraft.recipeId) : null,
+      }
+      updateMeal(selectedMeal.id, payload)
     }
+  }
+
+  const resetTemplateForm = (templateName = selectedTemplateName) => {
+    setEditingTemplateId(null)
+    setTemplateDraft({ ...defaultTemplateDraft(), templateName })
+  }
+
+  const handleTemplateSave = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!canManageMeals || !templateDraft.mealName.trim() || !templateDraft.templateName.trim()) {
+      return
+    }
+    const payload: MealTemplateRowInput = {
+      ...templateDraft,
+      templateName: templateDraft.templateName.trim(),
+      mealName: templateDraft.mealName.trim(),
+      description: templateDraft.description?.trim() ?? '',
+      calories: Math.max(0, Number(templateDraft.calories) || 0),
+      prepTime: Math.max(0, Number(templateDraft.prepTime) || 0),
+      recipeId: templateDraft.recipeId || null,
+    }
+    const request = editingTemplateId
+      ? api.updateMealTemplateRow(editingTemplateId, payload)
+      : api.createMealTemplateRow(payload)
+    request
+      .then((row) => {
+        setTemplateFeedback(editingTemplateId ? 'Template row updated' : 'Template row saved')
+        setSelectedTemplateName(row.templateName)
+        resetTemplateForm(row.templateName)
+        loadTemplates()
+      })
+      .catch((error: unknown) => setTemplateFeedback(error instanceof Error ? error.message : 'Template row save failed'))
+  }
+
+  const editTemplateRow = (row: MealTemplateRow) => {
+    setEditingTemplateId(row.id)
+    setTemplateDraft({
+      templateName: row.templateName,
+      dayOfWeek: row.dayOfWeek,
+      mealType: row.mealType,
+      mealName: row.mealName,
+      description: row.description,
+      calories: row.calories,
+      prepTime: row.prepTime,
+      recipeId: row.recipeId ?? null,
+    })
+  }
+
+  const deleteTemplateRow = (row: MealTemplateRow) => {
+    if (!row.isEditable || !window.confirm(`Delete ${row.dayOfWeek} ${row.mealType} from ${row.templateName}?`)) {
+      return
+    }
+    api
+      .deleteMealTemplateRow(row.id)
+      .then(() => {
+        setTemplateFeedback('Template row deleted')
+        if (editingTemplateId === row.id) resetTemplateForm(row.templateName)
+        loadTemplates()
+      })
+      .catch((error: unknown) => setTemplateFeedback(error instanceof Error ? error.message : 'Template row delete failed'))
+  }
+
+  const templateTargetLabel = useMemo(() => {
+    if (templateTarget === 'all') return 'all family members'
+    if (templateTarget === 'member') {
+      return state.members.find((member) => String(member.id) === templateMemberId)?.name ?? 'selected member'
+    }
+    return 'the shared family plan'
+  }, [state.members, templateMemberId, templateTarget])
+
+  const applyTemplateToTarget = async () => {
+    if (templateTarget === 'member' && !templateMemberId) {
+      setTemplateFeedback('Choose a family member before applying this template.')
+      return
+    }
+    if (!window.confirm(`Apply ${selectedTemplateName} to ${templateTargetLabel}?`)) {
+      return
+    }
+    if (templateTarget === 'all') {
+      await applyWeeklyTemplateForAll(selectedTemplateName)
+    } else if (templateTarget === 'member') {
+      await applyWeeklyTemplate(Number(templateMemberId), selectedTemplateName)
+    } else {
+      await applyWeeklyTemplate(null, selectedTemplateName)
+    }
+    if (selectedMemberId !== null && (templateTarget === 'all' || String(selectedMemberId) === templateMemberId)) {
+      loadMemberMeals(selectedMemberId)
+    }
+    setTemplateFeedback(`Applied ${selectedTemplateName} to ${templateTargetLabel}.`)
   }
 
   return (
     <div className="grid gap-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-2xl font-bold tracking-tight text-slate-900">Weekly Meal Plan</h2>
-          <p className="mt-1 text-sm text-slate-400">Template-driven meals, recipes, and nutrition</p>
+          <h2 className="text-2xl font-bold text-slate-900">Weekly Meal Plan</h2>
+          <p className="mt-1 text-sm text-slate-400">Meals, member plans, and weekly templates</p>
         </div>
-        <div className="flex flex-wrap items-center gap-3">
-          {/* Member selector */}
+        {activeTab === 'plan' && (
           <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm">
             <Users className="size-4 text-slate-400" />
             <select
@@ -99,21 +301,30 @@ export const MealPlanView = ({ store }: { store: FamilyHubStore }) => {
               ))}
             </select>
           </div>
-          <Button
-            disabled={!canManageMeals}
-            onClick={() => {
-              const target = selectedMemberId !== null ? state.members.find((m) => m.id === selectedMemberId)?.name : 'the family'
-              if (window.confirm(`Apply the weekly meal template for ${target}?`)) {
-                applyWeeklyTemplate(selectedMemberId)
-              }
-            }}
-          >
-            <ClipboardCheck className="size-4" aria-hidden="true" />
-            Apply template{selectedMemberId !== null ? ` for ${state.members.find((m) => m.id === selectedMemberId)?.name ?? 'member'}` : ''}
-          </Button>
-        </div>
+        )}
       </div>
 
+      <div className="flex w-fit gap-1 rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
+        {[
+          { key: 'plan' as const, label: 'Current Plan' },
+          { key: 'templates' as const, label: 'Weekly Templates' },
+        ].map((tab) => (
+          <button
+            className={cn(
+              'min-h-10 rounded-lg px-4 text-sm font-semibold transition',
+              activeTab === tab.key ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900',
+            )}
+            key={tab.key}
+            onClick={() => setActiveTab(tab.key)}
+            type="button"
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {activeTab === 'plan' && (
+        <>
       <Card variant="accent" className="overflow-hidden">
         <CardContent className="grid gap-5 p-6 lg:grid-cols-[1fr_auto]">
           <div className="grid gap-4">
@@ -227,33 +438,77 @@ export const MealPlanView = ({ store }: { store: FamilyHubStore }) => {
                     <FormField label="Meal name">
                       <textarea
                         className={cn(inputClass, 'min-h-24 resize-none')}
-                        onChange={(event) => setDraftName(event.target.value)}
-                        value={draftName}
+                        onChange={(event) => setMealDraft((current) => ({ ...current, mealName: event.target.value }))}
+                        value={mealDraft.mealName}
+                      />
+                    </FormField>
+                    <FormField label="Description">
+                      <textarea
+                        className={cn(inputClass, 'min-h-20 resize-none')}
+                        onChange={(event) => setMealDraft((current) => ({ ...current, description: event.target.value }))}
+                        value={mealDraft.description}
                       />
                     </FormField>
                     <div className="grid grid-cols-2 gap-3">
-                      <div className="rounded-xl bg-slate-50/80 p-3.5">
-                        <p className="flex items-center gap-1.5 text-[11px] text-slate-400">
-                          <Flame className="size-3.5 text-amber-500" aria-hidden="true" />
-                          Calories
-                        </p>
-                        <p className="text-lg font-bold text-slate-900">{selectedMeal.calories}</p>
-                      </div>
-                      <div className="rounded-xl bg-slate-50/80 p-3.5">
-                        <p className="flex items-center gap-1.5 text-[11px] text-slate-400">
-                          <Timer className="size-3.5 text-indigo-500" aria-hidden="true" />
-                          Prep time
-                        </p>
-                        <p className="text-lg font-bold text-slate-900">{selectedMeal.prepTime}m</p>
-                      </div>
+                      <FormField label="Calories">
+                        <div className="relative">
+                          <Flame className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-amber-500" aria-hidden="true" />
+                          <input
+                            className={cn(inputClass, 'pl-8')}
+                            min={0}
+                            onChange={(event) => setMealDraft((current) => ({ ...current, calories: Number(event.target.value) }))}
+                            type="number"
+                            value={mealDraft.calories}
+                          />
+                        </div>
+                      </FormField>
+                      <FormField label="Prep time">
+                        <div className="relative">
+                          <Timer className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-indigo-500" aria-hidden="true" />
+                          <input
+                            className={cn(inputClass, 'pl-8')}
+                            min={0}
+                            onChange={(event) => setMealDraft((current) => ({ ...current, prepTime: Number(event.target.value) }))}
+                            type="number"
+                            value={mealDraft.prepTime}
+                          />
+                        </div>
+                      </FormField>
                     </div>
-                    {selectedMeal.dietaryFlags && selectedMeal.dietaryFlags.length > 0 && (
-                      <div className="flex flex-wrap gap-2">
-                        {selectedMeal.dietaryFlags.map((flag) => (
-                          <Badge key={flag} tone="teal">{flag}</Badge>
-                        ))}
-                      </div>
-                    )}
+                    <div className="grid grid-cols-2 gap-3">
+                      <FormField label="Assigned to">
+                        <select
+                          className={inputClass}
+                          onChange={(event) => setMealDraft((current) => ({ ...current, assignedTo: event.target.value }))}
+                          value={mealDraft.assignedTo}
+                        >
+                          <option value="">Family</option>
+                          {state.members.map((member) => (
+                            <option key={member.id} value={member.id}>{member.name}</option>
+                          ))}
+                        </select>
+                      </FormField>
+                      <FormField label="Recipe">
+                        <select
+                          className={inputClass}
+                          onChange={(event) => setMealDraft((current) => ({ ...current, recipeId: event.target.value }))}
+                          value={mealDraft.recipeId}
+                        >
+                          <option value="">No recipe</option>
+                          {state.recipes.map((recipe) => (
+                            <option key={recipe.id} value={recipe.id}>{recipe.recipeName}</option>
+                          ))}
+                        </select>
+                      </FormField>
+                    </div>
+                    <FormField label="Dietary flags">
+                      <input
+                        className={inputClass}
+                        onChange={(event) => setMealDraft((current) => ({ ...current, dietaryFlags: event.target.value }))}
+                        placeholder="vegetarian, low-sugar"
+                        value={mealDraft.dietaryFlags}
+                      />
+                    </FormField>
                     {selectedRecipe && (
                       <div className="rounded-2xl border border-emerald-100 bg-emerald-50/50 p-4">
                         <div className="flex items-start justify-between gap-3">
@@ -483,6 +738,251 @@ export const MealPlanView = ({ store }: { store: FamilyHubStore }) => {
           </Card>
         </aside>
       </div>
+        </>
+      )}
+
+      {activeTab === 'templates' && (
+        <div className="grid gap-5">
+          <Card>
+            <CardHeader>
+              <CardTitle>Apply Weekly Template</CardTitle>
+              <p className="mt-1 text-xs text-slate-400">Choose a named template and where it should be applied.</p>
+            </CardHeader>
+            <CardContent className="grid gap-4 lg:grid-cols-[minmax(220px,1fr)_minmax(260px,1.3fr)_auto] lg:items-end">
+              <FormField label="Template">
+                <select
+                  className={inputClass}
+                  value={selectedTemplateName}
+                  onChange={(event) => {
+                    setSelectedTemplateName(event.target.value)
+                    setTemplateDraft((current) => ({ ...current, templateName: event.target.value }))
+                  }}
+                >
+                  {templateNames.map((name) => (
+                    <option key={name} value={name}>{name}</option>
+                  ))}
+                </select>
+              </FormField>
+              <div className="grid gap-3 sm:grid-cols-[1fr_1fr]">
+                <FormField label="Apply to">
+                  <select
+                    className={inputClass}
+                    value={templateTarget}
+                    onChange={(event) => setTemplateTarget(event.target.value as TemplateApplyTarget)}
+                  >
+                    <option value="family">Shared family plan</option>
+                    <option value="member">One family member</option>
+                    <option value="all">All active members</option>
+                  </select>
+                </FormField>
+                <FormField label="Family member" className={templateTarget === 'member' ? '' : 'opacity-60'}>
+                  <select
+                    className={inputClass}
+                    disabled={templateTarget !== 'member'}
+                    value={templateMemberId}
+                    onChange={(event) => setTemplateMemberId(event.target.value)}
+                  >
+                    {state.members.map((member) => (
+                      <option key={member.id} value={member.id}>{member.name}</option>
+                    ))}
+                  </select>
+                </FormField>
+              </div>
+              <Button disabled={!canManageMeals} onClick={applyTemplateToTarget}>
+                <ClipboardCheck className="size-4" aria-hidden="true" />
+                Apply template
+              </Button>
+            </CardContent>
+          </Card>
+      <Card className="overflow-hidden">
+        <CardHeader className="flex flex-row items-center justify-between gap-3">
+          <div>
+            <CardTitle>Weekly Template</CardTitle>
+            <p className="mt-1 text-xs text-slate-400">{filteredTemplates.length} rows in {selectedTemplateName}{templatesLoading ? ' - Loading...' : ''}</p>
+          </div>
+          <Button onClick={loadTemplates} type="button" variant="secondary">
+            <RefreshCw className={cn('size-4', templatesLoading && 'animate-spin')} aria-hidden="true" />
+            Refresh
+          </Button>
+        </CardHeader>
+        <CardContent className="grid gap-5">
+          {templateFeedback && (
+            <div className="rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm font-medium text-indigo-700">
+              {templateFeedback}
+            </div>
+          )}
+
+          <form className="grid gap-3 rounded-xl border border-slate-100 bg-slate-50/70 p-4" data-testid="meal-template-form" onSubmit={handleTemplateSave}>
+            <fieldset className="m-0 grid gap-3 border-0 p-0" disabled={!canManageMeals}>
+              <div className="grid gap-3 lg:grid-cols-[1.2fr_0.8fr_0.8fr_1.5fr]">
+                <FormField label="Template">
+                  <input
+                    className={inputClass}
+                    list="meal-template-names"
+                    onChange={(event) => setTemplateDraft((current) => ({ ...current, templateName: event.target.value }))}
+                    value={templateDraft.templateName}
+                  />
+                  <datalist id="meal-template-names">
+                    {templateNames.map((name) => (
+                      <option key={name} value={name} />
+                    ))}
+                  </datalist>
+                </FormField>
+                <FormField label="Day">
+                  <select
+                    className={inputClass}
+                    onChange={(event) => setTemplateDraft((current) => ({ ...current, dayOfWeek: event.target.value as WeekDay }))}
+                    value={templateDraft.dayOfWeek}
+                  >
+                    {dayOptions.map((day) => (
+                      <option key={day.key} value={day.key}>{day.label}</option>
+                    ))}
+                  </select>
+                </FormField>
+                <FormField label="Meal type">
+                  <select
+                    className={inputClass}
+                    onChange={(event) => setTemplateDraft((current) => ({ ...current, mealType: event.target.value as MealType }))}
+                    value={templateDraft.mealType}
+                  >
+                    {mealColumns.map((mealType) => (
+                      <option key={mealType.key} value={mealType.key}>{mealType.label}</option>
+                    ))}
+                  </select>
+                </FormField>
+                <FormField label="Meal name">
+                  <input
+                    className={inputClass}
+                    onChange={(event) => setTemplateDraft((current) => ({ ...current, mealName: event.target.value }))}
+                    value={templateDraft.mealName}
+                  />
+                </FormField>
+              </div>
+              <div className="grid gap-3 lg:grid-cols-[1fr_1fr_1.5fr_2fr_auto]">
+                <FormField label="Calories">
+                  <input
+                    className={inputClass}
+                    min={0}
+                    onChange={(event) => setTemplateDraft((current) => ({ ...current, calories: Number(event.target.value) }))}
+                    type="number"
+                    value={templateDraft.calories ?? 0}
+                  />
+                </FormField>
+                <FormField label="Prep time">
+                  <input
+                    className={inputClass}
+                    min={0}
+                    onChange={(event) => setTemplateDraft((current) => ({ ...current, prepTime: Number(event.target.value) }))}
+                    type="number"
+                    value={templateDraft.prepTime ?? 0}
+                  />
+                </FormField>
+                <FormField label="Recipe">
+                  <select
+                    className={inputClass}
+                    onChange={(event) => setTemplateDraft((current) => ({ ...current, recipeId: event.target.value ? Number(event.target.value) : null }))}
+                    value={templateDraft.recipeId ?? ''}
+                  >
+                    <option value="">No recipe</option>
+                    {state.recipes.map((recipe) => (
+                      <option key={recipe.id} value={recipe.id}>{recipe.recipeName}</option>
+                    ))}
+                  </select>
+                </FormField>
+                <FormField label="Description">
+                  <input
+                    className={inputClass}
+                    onChange={(event) => setTemplateDraft((current) => ({ ...current, description: event.target.value }))}
+                    value={templateDraft.description ?? ''}
+                  />
+                </FormField>
+                <div className="flex items-end gap-2">
+                  <Button type="submit">
+                    <Save className="size-4" aria-hidden="true" />
+                    {editingTemplateId ? 'Update' : 'Add'}
+                  </Button>
+                  {editingTemplateId && (
+                    <Button onClick={() => resetTemplateForm()} type="button" variant="secondary">
+                      Cancel
+                    </Button>
+                  )}
+                </div>
+              </div>
+            </fieldset>
+          </form>
+
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[920px] text-left text-sm">
+              <thead className="border-b border-slate-100 bg-slate-50 text-[11px] uppercase tracking-wider text-slate-400">
+                <tr>
+                  <th className="px-4 py-3">Day</th>
+                  <th className="px-4 py-3">Meal</th>
+                  <th className="px-4 py-3">Name</th>
+                  <th className="px-4 py-3">Calories</th>
+                  <th className="px-4 py-3">Prep</th>
+                  <th className="px-4 py-3">Recipe</th>
+                  <th className="px-4 py-3">Source</th>
+                  <th className="px-4 py-3 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-50">
+                {filteredTemplates.map((row) => {
+                  const recipe = row.recipeId ? state.recipes.find((item) => item.id === row.recipeId) : undefined
+                  const dayLabel = dayOptions.find((day) => day.key === row.dayOfWeek)?.label ?? row.dayOfWeek
+                  const mealLabel = mealColumns.find((mealType) => mealType.key === row.mealType)?.label ?? row.mealType
+                  return (
+                    <tr className="transition-colors hover:bg-slate-50/60" key={row.id}>
+                      <td className="px-4 py-3 font-semibold text-slate-700">{dayLabel}</td>
+                      <td className="px-4 py-3 text-slate-500">{mealLabel}</td>
+                      <td className="px-4 py-3">
+                        <p className="font-semibold text-slate-900">{row.mealName}</p>
+                        {row.description && <p className="mt-1 max-w-md truncate text-xs text-slate-400">{row.description}</p>}
+                      </td>
+                      <td className="px-4 py-3 text-slate-500">{row.calories}</td>
+                      <td className="px-4 py-3 text-slate-500">{row.prepTime}m</td>
+                      <td className="px-4 py-3 text-slate-500">{recipe?.recipeName ?? 'None'}</td>
+                      <td className="px-4 py-3">
+                        <Badge tone={row.isGlobal ? 'amber' : 'green'}>{row.isGlobal ? 'Global' : 'Family'}</Badge>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex justify-end gap-1">
+                          <button
+                            className="rounded-lg p-2 text-slate-400 transition hover:bg-white hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-40"
+                            disabled={!row.isEditable || !canManageMeals}
+                            onClick={() => editTemplateRow(row)}
+                            title="Edit template row"
+                            type="button"
+                          >
+                            <Edit3 className="size-4" aria-hidden="true" />
+                          </button>
+                          <button
+                            className="rounded-lg p-2 text-slate-400 transition hover:bg-rose-50 hover:text-rose-500 disabled:cursor-not-allowed disabled:opacity-40"
+                            disabled={!row.isEditable || !canManageMeals}
+                            onClick={() => deleteTemplateRow(row)}
+                            title="Delete template row"
+                            type="button"
+                          >
+                            <Trash2 className="size-4" aria-hidden="true" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
+                {filteredTemplates.length === 0 && (
+                  <tr>
+                    <td className="px-4 py-8 text-center text-sm text-slate-400" colSpan={8}>
+                      No rows for this template.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </CardContent>
+      </Card>
+        </div>
+      )}
     </div>
   )
 }

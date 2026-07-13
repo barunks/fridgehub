@@ -8,7 +8,7 @@ import { DashboardView } from '@/components/dashboard/DashboardView'
 import { FamilyView } from '@/components/family/FamilyView'
 import { GroceryView } from '@/components/grocery/GroceryView'
 import { HistoryView } from '@/components/history/HistoryView'
-import { ImplementationView } from '@/components/implementation/ImplementationView'
+import { DemoView } from '@/components/demo/DemoView'
 import { AppShell } from '@/components/layout/AppShell'
 import { MealPlanView } from '@/components/mealplan/MealPlanView'
 import { TasksView } from '@/components/tasks/TasksView'
@@ -39,7 +39,14 @@ const App = () => {
     if (auth.isDeviceBlocked) {
       return <DeviceBlocked onRetry={auth.retryFromBlocked} />
     }
-    return <LoginPage error={auth.authError} onLogin={auth.login} />
+    return (
+      <LoginPage
+        error={auth.authError}
+        onBootstrapSignup={auth.bootstrapSignup}
+        onInviteSignup={auth.inviteSignup}
+        onLogin={auth.login}
+      />
+    )
   }
 
   if (!store.state.family.id) {
@@ -85,16 +92,7 @@ const App = () => {
           }
           path={viewPaths.history}
         />
-        <Route
-          element={
-            store.can('view_implementation') ? (
-              <ImplementationView store={store} />
-            ) : (
-              <Navigate replace to={viewPaths.dashboard} />
-            )
-          }
-          path={viewPaths.implementation}
-        />
+        <Route element={<DemoView store={store} />} path={viewPaths.demo} />
         <Route element={<Navigate replace to={viewPaths.dashboard} />} path="*" />
       </Routes>
     </AppShell>

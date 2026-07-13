@@ -17,21 +17,19 @@ test.describe('Device Management', () => {
     await signIn(page, '/command-center')
     await page.getByRole('button', { name: /Security/i }).click()
     await expect(page.getByText(/Registered Devices/i)).toBeVisible()
-    await expect(page.getByRole('button', { name: /Refresh/i })).toBeVisible()
+    await expect(page.getByRole('button', { name: /Refresh registered devices/i })).toBeVisible()
   })
 
   test('device list shows at least one device after login', async ({ page }) => {
     await signIn(page, '/command-center')
     await page.getByRole('button', { name: /Security/i }).click()
-    // After login, at least the current device should appear
-    await expect(page.getByText(/browser/i).first()).toBeVisible({ timeout: 5000 })
+    await expect(page.getByText(/Last used/i).first()).toBeVisible({ timeout: 5000 })
   })
 
   test('can toggle device trust status', async ({ page }) => {
     await signIn(page, '/command-center')
     await page.getByRole('button', { name: /Security/i }).click()
-    // Wait for devices to load
-    await expect(page.getByText(/browser/i).first()).toBeVisible({ timeout: 5000 })
+    await expect(page.getByText(/Last used/i).first()).toBeVisible({ timeout: 5000 })
     // Click the trust toggle button (Key icon)
     const trustButton = page.getByTitle(/Mark trusted|Remove trust/i).first()
     await trustButton.click()

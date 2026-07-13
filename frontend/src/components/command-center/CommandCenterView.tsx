@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import QRCode from 'qrcode'
 import {
   Bot,
   CalendarDays,
   ChefHat,
+  Copy,
   ClipboardCheck,
   ClipboardList,
   Eye,
@@ -11,6 +13,7 @@ import {
   Pencil,
   Phone,
   Plus,
+  QrCode,
   RefreshCw,
   ShoppingBasket,
   Sparkles,
@@ -25,7 +28,7 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { FormField, inputClass } from '@/components/ui/FormField'
 import type { FamilyHubStore } from '@/hooks/useFamilyHub'
 import { api } from '@/services/api'
-import type { AssistantInsight, DeviceInfo, MealPlanItem, MealType } from '@/types/familyHub'
+import type { AssistantInsight, DeviceInfo, DevicePolicy, MealPlanItem, MealTemplateRow, MealType, SignupInvite } from '@/types/familyHub'
 import { cn } from '@/utils/style'
 
 type Tab = 'members' | 'contacts' | 'grocery-types' | 'meal-plans' | 'recipes' | 'tasks' | 'insights' | 'security'
@@ -50,13 +53,23 @@ export const CommandCenterView = ({ store }: Props) => {
 
   return (
     <div className="grid gap-6">
-      <div className="flex items-center gap-3">
-        <div className="flex size-10 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 text-white shadow-lg shadow-indigo-500/25">
-          <Sparkles className="size-5" />
+      {/* Hero banner */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-800 via-slate-900 to-indigo-900 px-6 py-8 text-white shadow-xl shadow-slate-500/20 sm:px-8">
+        <div className="pointer-events-none absolute inset-0 overflow-hidden">
+          <div className="absolute -right-16 -top-16 size-64 rounded-full bg-indigo-500/10 blur-2xl animate-[moonFloat_7s_ease-in-out_infinite]" />
+          <div className="absolute -bottom-20 -left-20 size-72 rounded-full bg-purple-500/[0.08] blur-3xl animate-[moonFloat_9s_ease-in-out_infinite_2s]" />
+          <div className="absolute left-[15%] top-[25%] size-2 rounded-full bg-amber-300/60 animate-[starTwinkle_2s_ease-in-out_infinite]" />
+          <div className="absolute left-[60%] top-[60%] size-1.5 rounded-full bg-indigo-300/50 animate-[starTwinkle_2.8s_ease-in-out_infinite_1s]" />
+          <div className="absolute left-[85%] top-[20%] size-2 rounded-full bg-teal-300/40 animate-[starTwinkle_3s_ease-in-out_infinite_0.5s]" />
         </div>
-        <div>
-          <h1 className="text-xl font-bold tracking-tight text-slate-900">Household Command Center</h1>
-          <p className="text-xs text-slate-500">Manage all family resources in one place</p>
+        <div className="relative flex items-center gap-4">
+          <div className="flex size-12 items-center justify-center rounded-2xl bg-white/10 shadow-lg backdrop-blur-sm">
+            <Sparkles className="size-6" aria-hidden="true" />
+          </div>
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">Household Command Center</h1>
+            <p className="mt-0.5 text-sm text-slate-300">Manage all family resources in one place</p>
+          </div>
         </div>
       </div>
 
@@ -462,17 +475,38 @@ const InsightsPanel = ({ store }: Props) => {
 /* ─── Meal Plans Panel ─── */
 const mealTypes: MealType[] = ['breakfast', 'lunch', 'snacks', 'dinner']
 const dayOrder = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+type TemplateApplyTarget = 'family' | 'all' | 'member'
 
 const MealPlansPanel = ({ store }: Props) => {
   const { state, applyWeeklyTemplate, applyWeeklyTemplateForAll, loadMemberMeals, memberMeals, memberMealsLoading, updateMeal } = store
   const [selectedMemberId, setSelectedMemberId] = useState<number | null>(null)
-  const [generating, setGenerating] = useState<number | 'all' | null>(null)
+  const [generating, setGenerating] = useState<number | 'all' | 'family' | 'target' | null>(null)
   const [editingMealId, setEditingMealId] = useState<number | null>(null)
   const [editName, setEditName] = useState('')
+  const [templates, setTemplates] = useState<MealTemplateRow[]>([])
+  const [selectedTemplateName, setSelectedTemplateName] = useState('Default Weekly Meal Plan')
+  const [templateTarget, setTemplateTarget] = useState<TemplateApplyTarget>('all')
+  const [templateMemberId, setTemplateMemberId] = useState<string>(() => String(state.members[0]?.id ?? ''))
 
   useEffect(() => {
     if (selectedMemberId !== null) loadMemberMeals(selectedMemberId)
   }, [selectedMemberId, loadMemberMeals])
+
+  useEffect(() => {
+    api.listMealTemplates().then((rows) => {
+      setTemplates(rows)
+      if (rows.length > 0) {
+        setSelectedTemplateName((current) => (rows.some((row) => row.templateName === current) ? current : rows[0].templateName))
+      }
+    }).catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    if (!templateMemberId && state.members.length > 0) setTemplateMemberId(String(state.members[0].id))
+    if (templateMemberId && !state.members.some((member) => String(member.id) === templateMemberId)) {
+      setTemplateMemberId(String(state.members[0]?.id ?? ''))
+    }
+  }, [state.members, templateMemberId])
 
   const activeMeals: MealPlanItem[] = selectedMemberId !== null && memberMeals ? memberMeals : state.meals
   const mealsByDay = useMemo(() => {
@@ -482,9 +516,14 @@ const MealPlansPanel = ({ store }: Props) => {
     }, {})
   }, [activeMeals])
 
+  const templateNames = useMemo(() => {
+    const names = Array.from(new Set(templates.map((row) => row.templateName))).sort((a, b) => a.localeCompare(b))
+    return names.length > 0 ? names : ['Default Weekly Meal Plan']
+  }, [templates])
+
   const generateForMember = async (memberId: number) => {
     setGenerating(memberId)
-    await applyWeeklyTemplate(memberId)
+    await applyWeeklyTemplate(memberId, selectedTemplateName)
     if (selectedMemberId === memberId) {
       loadMemberMeals(memberId)
     }
@@ -493,8 +532,23 @@ const MealPlansPanel = ({ store }: Props) => {
 
   const generateForAll = async () => {
     setGenerating('all')
-    await applyWeeklyTemplateForAll()
+    await applyWeeklyTemplateForAll(selectedTemplateName)
     if (selectedMemberId !== null) loadMemberMeals(selectedMemberId)
+    setGenerating(null)
+  }
+
+  const applyTarget = async () => {
+    if (templateTarget === 'member' && !templateMemberId) {
+      return
+    }
+    setGenerating('target')
+    if (templateTarget === 'all') {
+      await generateForAll()
+    } else if (templateTarget === 'member' && templateMemberId) {
+      await generateForMember(Number(templateMemberId))
+    } else {
+      await applyWeeklyTemplate(null, selectedTemplateName)
+    }
     setGenerating(null)
   }
 
@@ -510,19 +564,39 @@ const MealPlansPanel = ({ store }: Props) => {
 
   return (
     <div className="grid gap-5">
-      {/* Header with bulk action */}
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
+        <CardHeader>
           <div>
             <CardTitle>Per-Member Meal Plans</CardTitle>
-            <p className="mt-1 text-xs text-slate-500">Generate from family template, then customize per individual</p>
+            <p className="mt-1 text-xs text-slate-500">Apply a named weekly template to the shared family plan, all members, or one member.</p>
           </div>
-          <Button onClick={generateForAll} disabled={generating !== null}>
-            <ClipboardCheck className="size-4" />
-            {generating === 'all' ? 'Generating...' : 'Generate for all members'}
-          </Button>
         </CardHeader>
-        <CardContent>
+        <CardContent className="grid gap-5">
+          <div className="grid gap-3 lg:grid-cols-[minmax(180px,1fr)_minmax(220px,1.2fr)_auto] lg:items-end">
+            <FormField label="Template">
+              <select className={inputClass} value={selectedTemplateName} onChange={(event) => setSelectedTemplateName(event.target.value)}>
+                {templateNames.map((name) => <option key={name} value={name}>{name}</option>)}
+              </select>
+            </FormField>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <FormField label="Apply to">
+                <select className={inputClass} value={templateTarget} onChange={(event) => setTemplateTarget(event.target.value as TemplateApplyTarget)}>
+                  <option value="family">Shared family plan</option>
+                  <option value="all">All active members</option>
+                  <option value="member">One family member</option>
+                </select>
+              </FormField>
+              <FormField label="Family member" className={templateTarget === 'member' ? '' : 'opacity-60'}>
+                <select className={inputClass} disabled={templateTarget !== 'member'} value={templateMemberId} onChange={(event) => setTemplateMemberId(event.target.value)}>
+                  {state.members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}
+                </select>
+              </FormField>
+            </div>
+            <Button onClick={applyTarget} disabled={generating !== null}>
+              <ClipboardCheck className="size-4" />
+              {generating ? 'Applying...' : 'Apply template'}
+            </Button>
+          </div>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {state.members.map((m) => {
               const count = memberMealCount(m.id)
@@ -639,14 +713,74 @@ const SecurityPanel = ({ store: _store }: Props) => {
   const [status, setStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
   const [loading, setLoading] = useState(false)
   const [devices, setDevices] = useState<DeviceInfo[]>([])
+  const [devicePolicy, setDevicePolicy] = useState<DevicePolicy | null>(null)
+  const [deviceLimitDraft, setDeviceLimitDraft] = useState(5)
+  const [registrationQr, setRegistrationQr] = useState('')
   const [devicesLoading, setDevicesLoading] = useState(false)
+  const [invites, setInvites] = useState<SignupInvite[]>([])
+  const [invitesLoading, setInvitesLoading] = useState(false)
+  const [inviteForm, setInviteForm] = useState({
+    email: '',
+    role: 'member',
+    expiresInDays: 7,
+    maxUses: 1,
+  })
+  const [latestInviteLink, setLatestInviteLink] = useState('')
+  const [latestInviteQr, setLatestInviteQr] = useState('')
 
   const loadDevices = useCallback(() => {
     setDevicesLoading(true)
-    api.listDevices().then(setDevices).catch(() => {}).finally(() => setDevicesLoading(false))
+    Promise.all([api.listDevices(), api.getDevicePolicy()])
+      .then(([deviceRows, policy]) => {
+        setDevices(deviceRows)
+        setDevicePolicy(policy)
+        setDeviceLimitDraft(policy.maxDevices)
+      })
+      .catch(() => {})
+      .finally(() => setDevicesLoading(false))
   }, [])
 
-  useEffect(() => { loadDevices() }, [loadDevices])
+  const loadInvites = useCallback(() => {
+    setInvitesLoading(true)
+    api.listSignupInvites().then(setInvites).catch(() => {}).finally(() => setInvitesLoading(false))
+  }, [])
+
+  useEffect(() => { loadDevices(); loadInvites() }, [loadDevices, loadInvites])
+
+  useEffect(() => {
+    const link = `${window.location.origin}/`
+    QRCode.toDataURL(link, { margin: 1, width: 180 }).then(setRegistrationQr).catch(() => {})
+  }, [])
+
+  const inviteLinkFromToken = (token: string) => `${window.location.origin}/?invite=${encodeURIComponent(token)}`
+
+  const handleCreateInvite = () => {
+    setInvitesLoading(true)
+    setLatestInviteLink('')
+    setLatestInviteQr('')
+    api
+      .createSignupInvite({
+        email: inviteForm.email.trim() || undefined,
+        role: inviteForm.role,
+        expiresInDays: inviteForm.expiresInDays,
+        maxUses: inviteForm.maxUses,
+      })
+      .then(async (invite) => {
+        await loadInvites()
+        if (invite.inviteToken) {
+          const link = inviteLinkFromToken(invite.inviteToken)
+          setLatestInviteLink(link)
+          setLatestInviteQr(await QRCode.toDataURL(link, { margin: 1, width: 180 }))
+        }
+        setInviteForm((current) => ({ ...current, email: '' }))
+      })
+      .catch((err: unknown) => setStatus({ type: 'error', message: err instanceof Error ? err.message : 'Failed to create invite' }))
+      .finally(() => setInvitesLoading(false))
+  }
+
+  const handleRevokeInvite = (inviteId: number) => {
+    api.revokeSignupInvite(inviteId).then(loadInvites).catch(() => {})
+  }
 
   const handleChangePassword = () => {
     if (!currentPassword || !newPassword) return
@@ -679,6 +813,17 @@ const SecurityPanel = ({ store: _store }: Props) => {
 
   const handleToggleTrust = (deviceId: number, isTrusted: boolean) => {
     api.updateDevice(deviceId, { isTrusted: !isTrusted }).then(loadDevices).catch(() => {})
+  }
+
+  const handleUpdateDeviceLimit = () => {
+    api
+      .updateDevicePolicy(deviceLimitDraft)
+      .then((policy) => {
+        setDevicePolicy(policy)
+        setDeviceLimitDraft(policy.maxDevices)
+        setStatus({ type: 'success', message: 'Device limit updated' })
+      })
+      .catch((err: unknown) => setStatus({ type: 'error', message: err instanceof Error ? err.message : 'Failed to update device limit' }))
   }
 
   const ToggleIcon = showPassword ? EyeOff : Eye
@@ -716,11 +861,204 @@ const SecurityPanel = ({ store: _store }: Props) => {
         </CardContent>
       </Card>
 
+      {/* Signup Invites */}
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <div>
+            <CardTitle>Signup Invites</CardTitle>
+            <p className="mt-1 text-xs text-slate-500">Create short-lived invite links that require device registration during signup</p>
+          </div>
+          <Button aria-label="Refresh signup invites" variant="outline" onClick={loadInvites} disabled={invitesLoading}>
+            <RefreshCw className={cn('size-4', invitesLoading && 'animate-spin')} /> Refresh
+          </Button>
+        </CardHeader>
+        <CardContent className="grid gap-4">
+          <div className="grid gap-3 lg:grid-cols-[minmax(180px,1fr)_140px_120px_120px_auto]">
+            <FormField label="Email">
+              <input
+                className={inputClass}
+                onChange={(event) => setInviteForm((current) => ({ ...current, email: event.target.value }))}
+                placeholder="Optional"
+                type="email"
+                value={inviteForm.email}
+              />
+            </FormField>
+            <FormField label="Role">
+              <select
+                className={inputClass}
+                onChange={(event) => setInviteForm((current) => ({ ...current, role: event.target.value }))}
+                value={inviteForm.role}
+              >
+                <option value="member">Member</option>
+                <option value="child">Child</option>
+                <option value="parent">Parent</option>
+                <option value="admin">Admin</option>
+              </select>
+            </FormField>
+            <FormField label="Days">
+              <input
+                className={inputClass}
+                max={30}
+                min={1}
+                onChange={(event) => setInviteForm((current) => ({ ...current, expiresInDays: Number(event.target.value) }))}
+                type="number"
+                value={inviteForm.expiresInDays}
+              />
+            </FormField>
+            <FormField label="Uses">
+              <input
+                className={inputClass}
+                max={10}
+                min={1}
+                onChange={(event) => setInviteForm((current) => ({ ...current, maxUses: Number(event.target.value) }))}
+                type="number"
+                value={inviteForm.maxUses}
+              />
+            </FormField>
+            <div className="flex items-end">
+              <Button className="w-full" onClick={handleCreateInvite} disabled={invitesLoading}>
+                <Plus className="size-4" />
+                Create
+              </Button>
+            </div>
+          </div>
+
+          {latestInviteLink && (
+            <div className="grid gap-4 rounded-xl border border-indigo-100 bg-indigo-50/60 p-4 md:grid-cols-[190px_1fr]">
+              <div className="flex items-center justify-center rounded-xl bg-white p-3">
+                {latestInviteQr ? (
+                  <img alt="Signup invite QR code" className="size-[180px]" src={latestInviteQr} />
+                ) : (
+                  <QrCode className="size-16 text-indigo-200" />
+                )}
+              </div>
+              <div className="grid content-center gap-3">
+                <p className="text-sm font-semibold text-slate-900">Invite link ready</p>
+                <input className={inputClass} readOnly value={latestInviteLink} />
+                <div className="flex flex-wrap gap-2">
+                  <Button onClick={() => navigator.clipboard?.writeText(latestInviteLink)} variant="secondary">
+                    <Copy className="size-4" />
+                    Copy link
+                  </Button>
+                  <Button onClick={() => window.open(latestInviteLink, '_blank', 'noopener,noreferrer')} variant="outline">
+                    <QrCode className="size-4" />
+                    Open
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div className="overflow-x-auto rounded-xl border border-slate-100">
+            <table className="w-full min-w-[680px] text-left">
+              <thead>
+                <tr className="bg-slate-50 text-[11px] font-bold uppercase text-slate-500">
+                  <th className="px-4 py-3">Invite</th>
+                  <th className="px-4 py-3">Role</th>
+                  <th className="px-4 py-3">Usage</th>
+                  <th className="px-4 py-3">Expires</th>
+                  <th className="px-4 py-3 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {invites.length === 0 ? (
+                  <tr>
+                    <td className="px-4 py-8 text-center text-sm text-slate-400" colSpan={5}>
+                      No signup invites have been created.
+                    </td>
+                  </tr>
+                ) : (
+                  invites.map((invite) => {
+                    const isExpired = !invite.isActive
+                    return (
+                    <tr className={cn('border-t border-slate-100', isExpired ? 'bg-slate-50/60' : 'bg-white')} key={invite.id}>
+                      <td className={cn('px-4 py-3 text-sm', isExpired ? 'text-slate-400' : 'text-slate-700')}>{invite.email || 'Open invite'}</td>
+                      <td className="px-4 py-3"><Badge tone={isExpired ? 'slate' : 'indigo'}>{invite.role}</Badge></td>
+                      <td className={cn('px-4 py-3 text-sm', isExpired ? 'text-slate-400' : 'text-slate-600')}>{invite.usedCount} / {invite.maxUses}</td>
+                      <td className="px-4 py-3 text-sm">
+                        {isExpired ? (
+                          <span className="text-slate-400">{new Date(invite.expiresAt).toLocaleDateString()}</span>
+                        ) : (
+                          <span className={new Date(invite.expiresAt) < new Date(Date.now() + 86400000) ? 'text-amber-600 font-medium' : 'text-slate-600'}>
+                            {new Date(invite.expiresAt).toLocaleDateString()}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        {invite.isActive ? (
+                          <Button className="min-h-9 px-3 py-1.5 text-xs" onClick={() => handleRevokeInvite(invite.id)} variant="danger">
+                            Revoke
+                          </Button>
+                        ) : (
+                          <Badge tone="slate">{invite.usedCount >= invite.maxUses ? 'Used' : 'Expired'}</Badge>
+                        )}
+                      </td>
+                    </tr>
+                    )
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Device Registration</CardTitle>
+          <p className="mt-1 text-xs text-slate-500">Use this panel to add another phone, tablet, or desktop for this account.</p>
+        </CardHeader>
+        <CardContent className="grid gap-4 lg:grid-cols-[180px_minmax(0,1fr)]">
+          <div className="grid place-items-center rounded-xl border border-slate-100 bg-slate-50 p-4">
+            {registrationQr ? (
+              <img alt="Device registration QR code" className="size-36 rounded-lg bg-white p-2" src={registrationQr} />
+            ) : (
+              <QrCode className="size-12 text-slate-300" />
+            )}
+          </div>
+          <div className="grid content-start gap-4">
+            <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
+              <FormField label="Max devices">
+                <input
+                  className={inputClass}
+                  max={20}
+                  min={Math.max(1, devicePolicy?.activeDeviceCount ?? 1)}
+                  onChange={(event) => setDeviceLimitDraft(Number(event.target.value))}
+                  type="number"
+                  value={deviceLimitDraft}
+                />
+              </FormField>
+              <Button onClick={handleUpdateDeviceLimit} variant="secondary">
+                Save limit
+              </Button>
+            </div>
+            <div className="rounded-xl border border-slate-100 bg-white p-4">
+              <p className="text-sm font-semibold text-slate-900">
+                {devicePolicy?.activeDeviceCount ?? devices.length} of {devicePolicy?.maxDevices ?? deviceLimitDraft} devices registered
+              </p>
+              <p className="mt-1 text-xs leading-5 text-slate-500">
+                Open FamilyHub on another device or scan this QR code, then sign in with the same account. The device is registered automatically after sign-in.
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Button onClick={() => navigator.clipboard?.writeText(`${window.location.origin}/`)} variant="secondary">
+                  <Copy className="size-4" />
+                  Copy sign-in link
+                </Button>
+                <Button onClick={() => window.open(`${window.location.origin}/`, '_blank', 'noopener,noreferrer')} variant="outline">
+                  <QrCode className="size-4" />
+                  Open
+                </Button>
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       {/* Registered Devices */}
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle>Registered Devices</CardTitle>
-          <Button variant="outline" onClick={loadDevices} disabled={devicesLoading}>
+          <Button aria-label="Refresh registered devices" variant="outline" onClick={loadDevices} disabled={devicesLoading}>
             <RefreshCw className={cn('size-4', devicesLoading && 'animate-spin')} /> Refresh
           </Button>
         </CardHeader>

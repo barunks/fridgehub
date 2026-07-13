@@ -7,6 +7,7 @@ import type {
   GroceryItem,
   GroceryItemUpdateInput,
   MealPlanItem,
+  MealUpdateInput,
   NewGroceryItemInput,
   NewShoppingItemInput,
   NewTaskInput,
@@ -187,6 +188,7 @@ export const useFamilyHub = (
     const recipePageSnapshot = recipePageItems
     const notificationPageSnapshot = notificationPageItems
     const auditLogSnapshot = auditLogs
+    const memberMealsSnapshot = memberMeals
     setState((current) => {
       snapshot = current
       return update(current)
@@ -199,6 +201,7 @@ export const useFamilyHub = (
       setRecipePageItems(recipePageSnapshot)
       setNotificationPageItems(notificationPageSnapshot)
       setAuditLogs(auditLogSnapshot)
+      setMemberMeals(memberMealsSnapshot)
     })
   }
 
@@ -810,21 +813,24 @@ export const useFamilyHub = (
     )
   }
 
-  const updateMeal = (mealId: number, mealName: string) => {
+  const updateMeal = (mealId: number, input: MealUpdateInput | string) => {
     if (!guardPermission('manage_meals')) {
       return
     }
+    const payload: MealUpdateInput = typeof input === 'string' ? { mealName: input } : input
+    const applyUpdate = (meal: MealPlanItem): MealPlanItem => (meal.id === mealId ? { ...meal, ...payload } : meal)
     mutateWithRollback(
       (current) => ({
         ...current,
-        meals: current.meals.map((meal) => (meal.id === mealId ? { ...meal, mealName } : meal)),
+        meals: current.meals.map(applyUpdate),
       }),
-      api.updateMeal(mealId, mealName),
+      api.updateMeal(mealId, payload),
       'Meal updated',
+      () => setMemberMeals((current) => (current ? current.map(applyUpdate) : current)),
     )
   }
 
-  const applyWeeklyTemplate = (memberId?: number | null) => {
+  const applyWeeklyTemplate = (memberId?: number | null, templateName?: string | null) => {
     if (!guardPermission('manage_meals')) {
       return Promise.resolve()
     }
@@ -841,12 +847,25 @@ export const useFamilyHub = (
           ...current.notifications,
         ],
       }),
-      api.applyMealTemplate(memberId),
+      api.applyMealTemplate(memberId, templateName).then((meals) => {
+        if (memberId !== null && memberId !== undefined) {
+          setMemberMeals(meals)
+        }
+        setState((current) => {
+          if (memberId === null || memberId === undefined) {
+            return { ...current, meals }
+          }
+          return {
+            ...current,
+            meals: current.meals.filter((meal) => meal.assignedTo !== memberId).concat(meals),
+          }
+        })
+      }),
       'Meal template applied',
     )
   }
 
-  const applyWeeklyTemplateForAll = () => {
+  const applyWeeklyTemplateForAll = (templateName?: string | null) => {
     if (!guardPermission('manage_meals')) {
       return Promise.resolve()
     }
@@ -863,7 +882,17 @@ export const useFamilyHub = (
           ...current.notifications,
         ],
       }),
-      api.applyMealTemplateAll(),
+      api.applyMealTemplateAll(templateName).then((meals) => {
+        setState((current) => ({
+          ...current,
+          meals,
+        }))
+        setMemberMeals((current) => {
+          if (!current || current.length === 0) return current
+          const memberId = current[0]?.assignedTo
+          return memberId ? meals.filter((meal) => meal.assignedTo === memberId) : current
+        })
+      }),
       'Meal templates applied',
     )
   }
@@ -1163,12 +1192,12 @@ export const useFamilyHub = (
 
   const askAssistant = (query: string) => {
     if (!guardPermission('use_assistant')) {
-      return
+      return Promise.resolve()
     }
     const trimmed = query.trim()
 
     if (!trimmed) {
-      return
+      return Promise.resolve()
     }
 
     setState((current) => {
@@ -1187,7 +1216,7 @@ export const useFamilyHub = (
         ],
       }
     })
-    void api
+    return api
       .askAssistant(trimmed)
       .then((response) => {
         setState((current) => ({
@@ -1210,6 +1239,7 @@ export const useFamilyHub = (
       })
       .catch((error: unknown) => {
         setFeedback({ type: 'error', message: error instanceof Error ? error.message : 'Assistant request failed' })
+        throw error
       })
   }
 

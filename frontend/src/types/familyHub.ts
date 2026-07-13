@@ -9,7 +9,7 @@ export type ViewKey =
   | 'analytics'
   | 'assistant'
   | 'history'
-  | 'implementation'
+  | 'demo'
   | 'command-center'
 
 export type Priority = 'low' | 'medium' | 'high'
@@ -17,6 +17,7 @@ export type TaskStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled'
 export type RecurrenceType = 'none' | 'daily' | 'weekly' | 'monthly' | 'yearly'
 export type Frequency = 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'semi_annually' | 'yearly'
 export type MealType = 'breakfast' | 'lunch' | 'snacks' | 'dinner'
+export type WeekDay = 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday'
 export type Permission =
   | 'view_dashboard'
   | 'view_tasks'
@@ -25,7 +26,7 @@ export type Permission =
   | 'view_family'
   | 'view_analytics'
   | 'use_assistant'
-  | 'view_implementation'
+  | 'view_demo'
   | 'view_audit'
   | 'view_cache_stats'
   | 'manage_tasks'
@@ -148,10 +149,47 @@ export interface MealPlanItem {
   description: string
   calories: number
   prepTime: number
-  recipeId?: number
+  recipeId?: number | null
   colorClass: string
   assignedTo?: number | null
   dietaryFlags?: string[]
+}
+
+export interface MealUpdateInput {
+  mealName?: string
+  description?: string
+  calories?: number
+  prepTime?: number
+  assignedTo?: number | null
+  dietaryFlags?: string[]
+  recipeId?: number | null
+}
+
+export interface MealTemplateRow {
+  id: number
+  templateName: string
+  dayOfWeek: WeekDay
+  mealType: MealType
+  mealName: string
+  description: string
+  calories: number
+  prepTime: number
+  recipeId?: number | null
+  isGlobal: boolean
+  isEditable: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export interface MealTemplateRowInput {
+  templateName: string
+  dayOfWeek: WeekDay
+  mealType: MealType
+  mealName: string
+  description?: string
+  calories?: number
+  prepTime?: number
+  recipeId?: number | null
 }
 
 export interface Recipe {
@@ -198,6 +236,8 @@ export interface AssistantInsight {
   type: 'schedule' | 'grocery' | 'meal' | 'task' | 'family'
   confidence: number
   action?: string
+  severity?: 'critical' | 'warning' | 'info'
+  route?: string | null
 }
 
 export interface AssistantMessage {
@@ -316,4 +356,68 @@ export interface DeviceInfo {
   isTrusted: boolean
   registeredAt: string
   lastUsedAt: string
+}
+
+export interface DevicePolicy {
+  maxDevices: number
+  activeDeviceCount: number
+}
+
+export type SignupDeviceType = 'phone' | 'tablet' | 'desktop' | 'browser' | 'other'
+
+export interface SignupDeviceInput {
+  deviceId: string
+  deviceName: string
+  deviceType: SignupDeviceType
+  platform?: string | null
+}
+
+export interface SignupStatus {
+  bootstrapAllowed: boolean
+}
+
+export interface SignupInvite {
+  id: number
+  inviteToken?: string | null
+  email?: string | null
+  role: string
+  permissions: Permission[]
+  maxUses: number
+  usedCount: number
+  expiresAt: string
+  createdAt: string
+  isActive: boolean
+}
+
+export interface SignupInvitePreview {
+  familyName: string
+  email?: string | null
+  role: string
+  expiresAt: string
+}
+
+export interface SignupInviteCreateInput {
+  email?: string
+  role: string
+  permissions?: Permission[]
+  expiresInDays: number
+  maxUses: number
+}
+
+export interface BootstrapSignupInput extends SignupDeviceInput {
+  familyName: string
+  homeBase: string
+  timezone: string
+  fullName: string
+  email: string
+  username: string
+  password: string
+}
+
+export interface InviteSignupInput extends SignupDeviceInput {
+  inviteToken: string
+  fullName: string
+  email: string
+  username: string
+  password: string
 }

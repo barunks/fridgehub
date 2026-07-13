@@ -525,23 +525,38 @@ export const GroceryView = ({ store }: { store: FamilyHubStore }) => {
 
   return (
     <div className="grid gap-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-2xl font-bold tracking-tight text-slate-900">Grocery Management</h2>
-          <p className="mt-1 text-sm text-slate-400">Editable master list, shopping places, purchase cycles, and shop sub-tables</p>
+      {/* Hero banner */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-rose-500 via-pink-600 to-fuchsia-600 px-6 py-8 text-white shadow-xl shadow-rose-400/20 sm:px-8">
+        <div className="pointer-events-none absolute inset-0 overflow-hidden">
+          <div className="absolute -right-16 -top-16 size-64 rounded-full bg-white/[0.06] blur-2xl animate-[moonFloat_7s_ease-in-out_infinite]" />
+          <div className="absolute -bottom-20 -left-20 size-72 rounded-full bg-amber-300/[0.07] blur-3xl animate-[moonFloat_9s_ease-in-out_infinite_2s]" />
+          <div className="absolute left-[25%] top-[30%] size-2 rounded-full bg-amber-200/70 animate-[starTwinkle_2s_ease-in-out_infinite]" />
+          <div className="absolute left-[70%] top-[50%] size-1.5 rounded-full bg-white/50 animate-[starTwinkle_2.8s_ease-in-out_infinite_1s]" />
         </div>
-        <Button
-          disabled={!canManageGroceries}
-          onClick={() => {
-            if (window.confirm('Regenerate grocery cycles from the current master list?')) {
-              regenerateGroceryCycles()
-            }
-          }}
-          variant="secondary"
-        >
-          <RefreshCw className="size-4" aria-hidden="true" />
-          Regenerate cycles
-        </Button>
+        <div className="relative flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-4">
+            <div className="flex size-12 items-center justify-center rounded-2xl bg-white/15 shadow-lg backdrop-blur-sm">
+              <ShoppingBasket className="size-6" aria-hidden="true" />
+            </div>
+            <div>
+              <h2 className="text-2xl font-bold tracking-tight">Grocery Management</h2>
+              <p className="mt-0.5 text-sm text-rose-100">Master list, shopping places, purchase cycles, and shop sub-tables</p>
+            </div>
+          </div>
+          <Button
+            className="border-white/30 bg-white/15 text-white shadow-lg backdrop-blur-sm hover:bg-white/25"
+            disabled={!canManageGroceries}
+            onClick={() => {
+              if (window.confirm('Regenerate grocery cycles from the current master list?')) {
+                regenerateGroceryCycles()
+              }
+            }}
+            variant="secondary"
+          >
+            <RefreshCw className="size-4" aria-hidden="true" />
+            Regenerate cycles
+          </Button>
+        </div>
       </div>
 
       <div className="grid gap-3 sm:grid-cols-4">

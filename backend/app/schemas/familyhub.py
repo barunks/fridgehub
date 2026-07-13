@@ -9,6 +9,14 @@ TaskStatus = Literal["pending", "in_progress", "completed", "cancelled"]
 RecurrenceType = Literal["none", "daily", "weekly", "monthly", "yearly"]
 Frequency = Literal["daily", "weekly", "monthly", "quarterly", "semi_annually", "yearly"]
 MealType = Literal["breakfast", "lunch", "snacks", "dinner"]
+WeekDay = Literal["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+
+
+def normalize_week_day(value: str) -> str:
+    normalized = value.strip().lower()
+    if normalized not in ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"):
+        raise ValueError("dayOfWeek must be monday, tuesday, wednesday, thursday, friday, saturday, or sunday")
+    return normalized
 
 
 class CamelModel(BaseModel):
@@ -55,6 +63,15 @@ class LoginRequest(CamelModel):
     familyId: int | None = None
     deviceId: str | None = None
     deviceName: str | None = None
+    deviceType: str | None = None
+    platform: str | None = None
+
+
+class DeviceRegistrationRequest(CamelModel):
+    deviceId: str = Field(min_length=8, max_length=100)
+    deviceName: str = Field(min_length=1, max_length=255)
+    deviceType: Literal["phone", "tablet", "desktop", "browser", "other"] = "browser"
+    platform: str | None = Field(default=None, max_length=100)
 
 
 def validate_password_strength(value: str) -> str:
@@ -72,6 +89,66 @@ class ChangePasswordRequest(CamelModel):
     @field_validator("newPassword")
     @classmethod
     def validate_new_password(cls, value: str) -> str:
+        return validate_password_strength(value)
+
+
+class SignupStatusOut(CamelModel):
+    bootstrapAllowed: bool
+
+
+class SignupInviteCreate(CamelModel):
+    email: str | None = Field(default=None, max_length=255)
+    role: str = Field(default="member", min_length=1, max_length=50)
+    permissions: list[str] | None = None
+    expiresInDays: int = Field(default=7, ge=1, le=30)
+    maxUses: int = Field(default=1, ge=1, le=10)
+
+
+class SignupInviteOut(CamelModel):
+    id: int
+    inviteToken: str | None = None
+    email: str | None = None
+    role: str
+    permissions: list[str]
+    maxUses: int
+    usedCount: int
+    expiresAt: datetime
+    createdAt: datetime
+    isActive: bool
+
+
+class SignupInvitePreviewOut(CamelModel):
+    familyName: str
+    email: str | None = None
+    role: str
+    expiresAt: datetime
+
+
+class BootstrapSignupRequest(DeviceRegistrationRequest):
+    familyName: str = Field(min_length=1, max_length=255)
+    homeBase: str = Field(default="Singapore", min_length=1, max_length=255)
+    timezone: str = Field(default="Asia/Singapore", min_length=1, max_length=64)
+    fullName: str = Field(min_length=1, max_length=255)
+    email: str = Field(min_length=3, max_length=255)
+    username: str = Field(min_length=2, max_length=100)
+    password: str = Field(min_length=8, max_length=128)
+
+    @field_validator("password")
+    @classmethod
+    def validate_bootstrap_password(cls, value: str) -> str:
+        return validate_password_strength(value)
+
+
+class InviteSignupRequest(DeviceRegistrationRequest):
+    inviteToken: str = Field(min_length=16)
+    fullName: str = Field(min_length=1, max_length=255)
+    email: str = Field(min_length=3, max_length=255)
+    username: str = Field(min_length=2, max_length=100)
+    password: str = Field(min_length=8, max_length=128)
+
+    @field_validator("password")
+    @classmethod
+    def validate_signup_password(cls, value: str) -> str:
         return validate_password_strength(value)
 
 
@@ -320,18 +397,69 @@ class MealPlanItemOut(CamelModel):
 
 
 class MealUpdate(CamelModel):
-    mealName: str | None = None
-    description: str | None = None
-    calories: int | None = None
-    prepTime: int | None = None
+    mealName: str | None = Field(default=None, min_length=1, max_length=255)
+    description: str | None = Field(default=None, max_length=2000)
+    calories: int | None = Field(default=None, ge=0, le=5000)
+    prepTime: int | None = Field(default=None, ge=0, le=1440)
     assignedTo: int | None = None
-    dietaryFlags: list[str] | None = None
+    dietaryFlags: list[str] | None = Field(default=None, max_length=12)
+    recipeId: int | None = None
 
 
 class ApplyTemplateRequest(CamelModel):
-    templateName: str | None = None
+    templateName: str | None = Field(default=None, min_length=1, max_length=255)
     memberId: int | None = None
     allMembers: bool = False
+
+
+class MealTemplateRowOut(CamelModel):
+    id: int
+    templateName: str
+    dayOfWeek: WeekDay
+    mealType: MealType
+    mealName: str
+    description: str
+    calories: int
+    prepTime: int
+    recipeId: int | None = None
+    isGlobal: bool
+    isEditable: bool
+    createdAt: datetime
+    updatedAt: datetime
+
+
+class MealTemplateRowCreate(CamelModel):
+    templateName: str = Field(min_length=1, max_length=255)
+    dayOfWeek: WeekDay
+    mealType: MealType
+    mealName: str = Field(min_length=1, max_length=255)
+    description: str = Field(default="", max_length=2000)
+    calories: int = Field(default=0, ge=0, le=5000)
+    prepTime: int = Field(default=0, ge=0, le=1440)
+    recipeId: int | None = None
+
+    @field_validator("dayOfWeek", mode="before")
+    @classmethod
+    def _normalize_day(cls, value: str) -> str:
+        return normalize_week_day(str(value))
+
+
+class MealTemplateRowUpdate(CamelModel):
+    templateName: str | None = Field(default=None, min_length=1, max_length=255)
+    dayOfWeek: WeekDay | None = None
+    mealType: MealType | None = None
+    mealName: str | None = Field(default=None, min_length=1, max_length=255)
+    description: str | None = Field(default=None, max_length=2000)
+    calories: int | None = Field(default=None, ge=0, le=5000)
+    prepTime: int | None = Field(default=None, ge=0, le=1440)
+    recipeId: int | None = None
+
+    @field_validator("dayOfWeek", mode="before")
+    @classmethod
+    def _normalize_day(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return normalize_week_day(str(value))
 
 
 class RecipeOut(CamelModel):
@@ -433,6 +561,15 @@ class DeviceUpdate(CamelModel):
     isTrusted: bool | None = None
 
 
+class DevicePolicyOut(CamelModel):
+    maxDevices: int
+    activeDeviceCount: int
+
+
+class DevicePolicyUpdate(CamelModel):
+    maxDevices: int = Field(ge=1, le=20)
+
+
 class AssistantInsightOut(CamelModel):
     id: str
     title: str
@@ -440,6 +577,8 @@ class AssistantInsightOut(CamelModel):
     type: Literal["schedule", "grocery", "meal", "task", "family"]
     confidence: int
     action: str | None = None
+    severity: Literal["critical", "warning", "info"] = "info"
+    route: str | None = None
 
 
 class AssistantMessageOut(CamelModel):
@@ -450,7 +589,15 @@ class AssistantMessageOut(CamelModel):
 
 
 class AssistantRequest(CamelModel):
-    query: str = Field(min_length=1)
+    query: str = Field(min_length=1, max_length=500)
+
+    @field_validator("query")
+    @classmethod
+    def validate_query(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("Query cannot be blank")
+        return stripped
 
 
 class AssistantResponse(CamelModel):

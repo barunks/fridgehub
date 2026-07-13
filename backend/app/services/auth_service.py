@@ -1,3 +1,5 @@
+import hashlib
+import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -7,10 +9,13 @@ from sqlalchemy.orm import Session
 from app.core.cache import cache
 from app.core.config import settings
 from app.core.dependencies import CurrentUser, token_revocation_key
-from app.core.permissions import effective_permissions
-from app.core.security import create_access_token, create_refresh_token, decode_token, verify_password
-from app.models import Device, DeviceSession, FamilyMember, User
+from app.core.permissions import effective_permissions, normalize_permission
+from app.core.security import create_access_token, create_refresh_token, decode_token, hash_password, verify_password
+from app.models import Device, DeviceSession, Family, FamilyInvite, FamilyMember, GroceryListType, User
+from app.schemas.familyhub import BootstrapSignupRequest, InviteSignupRequest, SignupInviteCreate
 from app.services.audit_service import write_audit_log
+from app.services.family_service import invalidate_entity, invalidate_family_cache
+from app.utils.sanitize import sanitize_text
 
 
 def _active_memberships(db: Session, user_id: int) -> list[FamilyMember]:
@@ -67,12 +72,46 @@ def _device_identifier(device_id: str | None, user_agent: str | None, ip_address
     return str(uuid.uuid5(uuid.NAMESPACE_URL, fingerprint))
 
 
+def _matching_device(
+    db: Session,
+    user: User,
+    device_name: str | None,
+    device_type: str | None,
+    platform: str | None,
+    user_agent: str | None,
+) -> Device | None:
+    if not user_agent or not (device_name or device_type or platform):
+        return None
+
+    normalized_name = sanitize_text(device_name) if device_name else None
+    normalized_type = sanitize_text(device_type) if device_type else None
+    normalized_platform = sanitize_text(platform) if platform else None
+    candidates = (
+        db.query(Device)
+        .filter(Device.user_id == user.id, Device.is_active.is_(True), Device.is_revoked.is_(False))
+        .order_by(Device.last_used_at.desc(), Device.id.desc())
+        .all()
+    )
+    for candidate in candidates:
+        candidate_agents = {candidate.user_agent, candidate.last_user_agent}
+        if user_agent not in candidate_agents:
+            continue
+        same_name = not normalized_name or not candidate.device_name or candidate.device_name == normalized_name
+        same_type = not normalized_type or candidate.device_type in (normalized_type, "browser")
+        same_platform = not normalized_platform or not candidate.platform or candidate.platform == normalized_platform
+        if same_name and same_type and same_platform:
+            return candidate
+    return None
+
+
 def _register_device(
     db: Session,
     user: User,
     family_id: int,
     device_id: str | None,
     device_name: str | None,
+    device_type: str | None,
+    platform: str | None,
     user_agent: str | None,
     ip_address: str | None,
 ) -> str:
@@ -87,6 +126,9 @@ def _register_device(
     )
     if device and device.is_revoked:
         raise HTTPException(status_code=403, detail="This device has been revoked. Contact a family admin.")
+    if not device:
+        device = _matching_device(db, user, device_name, device_type, platform, user_agent)
+
     if not device:
         # Enforce max devices per user (stored on user row, default 5)
         active_device_count = (
@@ -104,7 +146,8 @@ def _register_device(
             family_id=family_id,
             device_id=device_id,
             device_name=device_name,
-            device_type="browser",
+            device_type=sanitize_text(device_type or "browser"),
+            platform=sanitize_text(platform) if platform else None,
             user_agent=user_agent,
             ip_address=ip_address,
         )
@@ -125,8 +168,338 @@ def _register_device(
         device.last_ip = ip_address
         device.last_used_at = datetime.now(timezone.utc)
         device.family_id = family_id
+        device.device_type = sanitize_text(device_type or device.device_type)
+        device.platform = sanitize_text(platform) if platform else device.platform
     db.flush()
-    return device_id
+    return device.device_id
+
+
+def _clean_permissions(values: list[str] | None) -> list[str]:
+    cleaned: list[str] = []
+    for value in values or []:
+        permission = normalize_permission(str(value))
+        if permission and permission not in cleaned:
+            cleaned.append(permission)
+    return cleaned
+
+
+def _token_hash(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _invite_token() -> str:
+    return secrets.token_urlsafe(32)
+
+
+def _invite_is_available(invite: FamilyInvite) -> bool:
+    expires_at = invite.expires_at
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    return invite.is_active and invite.used_count < invite.max_uses and expires_at > datetime.now(timezone.utc)
+
+
+def _serialize_invite(invite: FamilyInvite, token: str | None = None) -> dict[str, object]:
+    return {
+        "id": invite.id,
+        "inviteToken": token,
+        "email": invite.email,
+        "role": invite.role,
+        "permissions": invite.permissions or [],
+        "maxUses": invite.max_uses,
+        "usedCount": invite.used_count,
+        "expiresAt": invite.expires_at,
+        "createdAt": invite.created_at,
+        "isActive": invite.is_active and _invite_is_available(invite),
+    }
+
+
+def _require_unique_user(db: Session, email: str, username: str) -> None:
+    if db.query(User).filter((User.email == email) | (User.username == username)).first():
+        raise HTTPException(status_code=409, detail="Email or username already exists")
+
+
+def _create_default_grocery_places(db: Session, family_id: int, user_id: int) -> None:
+    defaults = (
+        ("Wet Market", "Fresh produce, fish, greens, and herbs", "bg-rose-500"),
+        ("Super Market", "Packaged groceries and household supplies", "bg-teal-500"),
+        ("Murugan", "Indian pantry staples and spices", "bg-sky-500"),
+        ("NTUC", "Weekly supermarket run", "bg-amber-500"),
+    )
+    db.add_all(
+        [
+            GroceryListType(
+                list_name=name,
+                list_type="standard",
+                description=description,
+                color_class=color,
+                family_id=family_id,
+                created_by=user_id,
+            )
+            for name, description, color in defaults
+        ]
+    )
+
+
+_DEFAULT_MEAL_TEMPLATE = {
+    "monday": {"breakfast": "Walnut Oatmeal and Yogurt", "lunch": "Pesto Turkey Sandwich", "snacks": "Salmon with Brown Rice", "dinner": "Fresh Fruit and Espresso"},
+    "tuesday": {"breakfast": "Greek Yogurt with Berries", "lunch": "Pasta with Salmon Salad", "snacks": "Veggie Burger and Corn", "dinner": "Carrots and Cheese"},
+    "wednesday": {"breakfast": "Egg English Muffin", "lunch": "Couscous Lentil Salad", "snacks": "Turkey Stir-fry with Quinoa", "dinner": "Mango Cottage Cheese"},
+    "thursday": {"breakfast": "Cottage Cheese and Tomato", "lunch": "Tuna and Bulgur Salad", "snacks": "Grilled Chicken and Potato", "dinner": "Banana and Popcorn"},
+    "friday": {"breakfast": "Breakfast Muffin Crostini", "lunch": "Tuna Pasta Salad", "snacks": "Steak and Sweet Potato", "dinner": "Yogurt and Strawberries"},
+    "saturday": {"breakfast": "Cereal with Blueberries", "lunch": "Turkey and Avocado Roll", "snacks": "Chicken and Beet Salad", "dinner": "Apricots and Ice Cream"},
+    "sunday": {"breakfast": "Eggs with Mushrooms and Bacon", "lunch": "Broccoli-Cheese Potato", "snacks": "Pork with Pasta", "dinner": "Pear Celery and Grapes"},
+}
+
+
+def _create_default_meal_template(db: Session, family_id: int, user_id: int) -> None:
+    from app.models import MealPlanTemplate
+
+    meal_order = ["breakfast", "lunch", "snacks", "dinner"]
+    for day_index, (day, meals) in enumerate(_DEFAULT_MEAL_TEMPLATE.items()):
+        for meal_index, meal_type in enumerate(meal_order):
+            db.add(
+                MealPlanTemplate(
+                    template_name="Default Weekly Meal Plan",
+                    day_of_week=day,
+                    meal_type=meal_type,
+                    meal_name=meals[meal_type],
+                    description=f"{day.title()} {meal_type}",
+                    calories=260 + day_index * 25 + meal_index * 40,
+                    prep_time=10 + meal_index * 8,
+                    family_id=family_id,
+                    template_scope=f"family:{family_id}",
+                    is_global=False,
+                    created_by=user_id,
+                )
+            )
+
+
+def signup_status(db: Session) -> dict[str, bool]:
+    active_users = db.query(User).filter(User.is_active.is_(True)).count()
+    active_families = db.query(Family).filter(Family.is_active.is_(True)).count()
+    return {"bootstrapAllowed": active_users == 0 and active_families == 0}
+
+
+def create_signup_invite(
+    db: Session,
+    payload: SignupInviteCreate,
+    family_id: int,
+    user_id: int,
+) -> dict[str, object]:
+    token = _invite_token()
+    invite = FamilyInvite(
+        family_id=family_id,
+        invited_by=user_id,
+        token_hash=_token_hash(token),
+        email=sanitize_text(payload.email.lower()) if payload.email else None,
+        role=sanitize_text(payload.role),
+        permissions=_clean_permissions(payload.permissions),
+        max_uses=payload.maxUses,
+        used_count=0,
+        expires_at=datetime.now(timezone.utc) + timedelta(days=payload.expiresInDays),
+    )
+    db.add(invite)
+    db.flush()
+    write_audit_log(
+        db,
+        user_id=user_id,
+        family_id=family_id,
+        action="signup_invite_created",
+        entity_type="family_invite",
+        entity_id=invite.id,
+        changes={"email": invite.email, "role": invite.role, "max_uses": invite.max_uses},
+    )
+    db.commit()
+    db.refresh(invite)
+    return _serialize_invite(invite, token)
+
+
+def list_signup_invites(db: Session, family_id: int) -> list[dict[str, object]]:
+    invites = (
+        db.query(FamilyInvite)
+        .filter(FamilyInvite.family_id == family_id)
+        .order_by(FamilyInvite.created_at.desc())
+        .all()
+    )
+    return [_serialize_invite(invite) for invite in invites]
+
+
+def revoke_signup_invite(db: Session, invite_id: int, family_id: int, user_id: int) -> None:
+    invite = db.query(FamilyInvite).filter(FamilyInvite.id == invite_id, FamilyInvite.family_id == family_id).first()
+    if not invite:
+        raise HTTPException(status_code=404, detail="Invite not found")
+    invite.is_active = False
+    write_audit_log(
+        db,
+        user_id=user_id,
+        family_id=family_id,
+        action="signup_invite_revoked",
+        entity_type="family_invite",
+        entity_id=invite.id,
+    )
+    db.commit()
+
+
+def preview_signup_invite(db: Session, token: str) -> dict[str, object]:
+    invite = db.query(FamilyInvite).filter(FamilyInvite.token_hash == _token_hash(token)).first()
+    if not invite or not _invite_is_available(invite):
+        raise HTTPException(status_code=404, detail="Invite is invalid or expired")
+    family = db.get(Family, invite.family_id)
+    if not family or not family.is_active:
+        raise HTTPException(status_code=404, detail="Invite is invalid or expired")
+    return {
+        "familyName": family.family_name,
+        "email": invite.email,
+        "role": invite.role,
+        "expiresAt": invite.expires_at,
+    }
+
+
+def bootstrap_signup(
+    db: Session,
+    payload: BootstrapSignupRequest,
+    user_agent: str | None = None,
+    ip_address: str | None = None,
+) -> dict[str, str]:
+    if not signup_status(db)["bootstrapAllowed"]:
+        raise HTTPException(status_code=409, detail="FamilyHub is already initialized. Ask an admin for an invite.")
+
+    email = sanitize_text(payload.email.lower())
+    username = sanitize_text(payload.username)
+    _require_unique_user(db, email, username)
+
+    user = User(
+        email=email,
+        username=username,
+        password_hash=hash_password(payload.password),
+        full_name=sanitize_text(payload.fullName),
+        family_role="admin",
+    )
+    db.add(user)
+    db.flush()
+
+    family = Family(
+        family_name=sanitize_text(payload.familyName),
+        home_base=sanitize_text(payload.homeBase),
+        timezone=sanitize_text(payload.timezone),
+        created_by=user.id,
+    )
+    db.add(family)
+    db.flush()
+
+    member = FamilyMember(
+        family_id=family.id,
+        user_id=user.id,
+        role="admin",
+        initial=sanitize_text(payload.fullName[:1].upper() or "?"),
+        color_class="bg-indigo-500",
+        status="Family admin",
+        permissions=[],
+    )
+    db.add(member)
+    db.flush()
+    _create_default_grocery_places(db, family.id, user.id)
+    _create_default_meal_template(db, family.id, user.id)
+
+    registered_device_id = _register_device(
+        db,
+        user,
+        family.id,
+        payload.deviceId,
+        payload.deviceName,
+        payload.deviceType,
+        payload.platform,
+        user_agent,
+        ip_address,
+    )
+    tokens = _issue_tokens(user, member, {"device_id": registered_device_id})
+    _record_session(db, user, family.id, registered_device_id, tokens, user_agent, ip_address)
+    write_audit_log(
+        db,
+        user_id=user.id,
+        family_id=family.id,
+        action="family_bootstrap_signup",
+        entity_type="family",
+        entity_id=family.id,
+        changes={"username": user.username, "device_id": registered_device_id},
+    )
+    db.commit()
+    invalidate_family_cache(family.id)
+    return tokens
+
+
+def signup_with_invite(
+    db: Session,
+    payload: InviteSignupRequest,
+    user_agent: str | None = None,
+    ip_address: str | None = None,
+) -> dict[str, str]:
+    invite = db.query(FamilyInvite).filter(FamilyInvite.token_hash == _token_hash(payload.inviteToken)).with_for_update().first()
+    if not invite or not _invite_is_available(invite):
+        raise HTTPException(status_code=404, detail="Invite is invalid or expired")
+
+    email = sanitize_text(payload.email.lower())
+    if invite.email and invite.email.lower() != email:
+        raise HTTPException(status_code=403, detail="This invite is assigned to a different email address")
+    username = sanitize_text(payload.username)
+    _require_unique_user(db, email, username)
+
+    family = db.get(Family, invite.family_id)
+    if not family or not family.is_active:
+        raise HTTPException(status_code=404, detail="Invite is invalid or expired")
+
+    user = User(
+        email=email,
+        username=username,
+        password_hash=hash_password(payload.password),
+        full_name=sanitize_text(payload.fullName),
+        family_role=sanitize_text(invite.role),
+    )
+    db.add(user)
+    db.flush()
+    member = FamilyMember(
+        family_id=family.id,
+        user_id=user.id,
+        role=sanitize_text(invite.role),
+        initial=sanitize_text(payload.fullName[:1].upper() or "?"),
+        color_class="bg-slate-500",
+        status="Active",
+        permissions=invite.permissions or [],
+    )
+    db.add(member)
+    db.flush()
+
+    invite.used_count += 1
+    invite.last_used_at = datetime.now(timezone.utc)
+    if invite.used_count >= invite.max_uses:
+        invite.is_active = False
+
+    registered_device_id = _register_device(
+        db,
+        user,
+        family.id,
+        payload.deviceId,
+        payload.deviceName,
+        payload.deviceType,
+        payload.platform,
+        user_agent,
+        ip_address,
+    )
+    tokens = _issue_tokens(user, member, {"device_id": registered_device_id})
+    _record_session(db, user, family.id, registered_device_id, tokens, user_agent, ip_address)
+    write_audit_log(
+        db,
+        user_id=user.id,
+        family_id=family.id,
+        action="signup_invite_accepted",
+        entity_type="family_member",
+        entity_id=member.user_id,
+        changes={"invite_id": invite.id, "username": user.username, "role": member.role, "device_id": registered_device_id},
+    )
+    db.commit()
+    invalidate_entity("members", family.id)
+    invalidate_entity("family", family.id)
+    return tokens
 
 
 def _record_session(
@@ -175,6 +548,8 @@ def login(
     family_id: int | None = None,
     device_id: str | None = None,
     device_name: str | None = None,
+    device_type: str | None = None,
+    platform: str | None = None,
     user_agent: str | None = None,
     ip_address: str | None = None,
 ) -> dict[str, str]:
@@ -183,7 +558,17 @@ def login(
         raise HTTPException(status_code=401, detail="Invalid username or password")
 
     membership = _select_membership(db, user, family_id)
-    registered_device_id = _register_device(db, user, membership.family_id, device_id, device_name, user_agent, ip_address)
+    registered_device_id = _register_device(
+        db,
+        user,
+        membership.family_id,
+        device_id,
+        device_name,
+        device_type,
+        platform,
+        user_agent,
+        ip_address,
+    )
     extra_context: dict[str, object] = {}
     if registered_device_id:
         extra_context["device_id"] = registered_device_id

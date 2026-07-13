@@ -37,7 +37,7 @@ export const DeviceManagement = () => {
     <Card>
       <CardHeader className="flex flex-row items-center justify-between">
         <CardTitle>Registered Devices</CardTitle>
-        <Button variant="outline" onClick={loadDevices} disabled={loading}>
+        <Button aria-label="Refresh registered devices" variant="outline" onClick={loadDevices} disabled={loading}>
           <RefreshCw className={cn('size-4', loading && 'animate-spin')} /> Refresh
         </Button>
       </CardHeader>

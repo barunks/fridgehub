@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     seed_on_startup: bool = True
     run_migrations_on_startup: bool = True
     login_rate_limit_per_minute: int = 10
+    require_device_id_on_login: bool = False
     allow_memory_cache_in_production: bool = False
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")

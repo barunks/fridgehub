@@ -8,10 +8,25 @@ from app.core.database import get_db
 from app.core.dependencies import CurrentUser, get_current_user, require_permission, token_revocation_key
 from app.core.permissions import Permission
 from app.models import Device, DeviceSession
-from app.schemas.familyhub import DeviceOut, DeviceUpdate, ErrorResponse
+from app.schemas.familyhub import DeviceOut, DevicePolicyOut, DevicePolicyUpdate, DeviceUpdate, ErrorResponse
 from app.services.audit_service import write_audit_log
 
 router = APIRouter()
+
+
+def _active_device_count(db: Session, user_id: int) -> int:
+    return (
+        db.query(Device)
+        .filter(Device.user_id == user_id, Device.is_active.is_(True), Device.is_revoked.is_(False))
+        .count()
+    )
+
+
+def _device_policy(db: Session, current_user: CurrentUser) -> dict:
+    return {
+        "maxDevices": current_user.user.max_devices,
+        "activeDeviceCount": _active_device_count(db, current_user.user_id),
+    }
 
 
 def _serialize_device(device: Device) -> dict:
@@ -28,6 +43,37 @@ def _serialize_device(device: Device) -> dict:
         "registeredAt": device.registered_at,
         "lastUsedAt": device.last_used_at,
     }
+
+
+@router.get("/policy", response_model=DevicePolicyOut)
+def get_device_policy(
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    return _device_policy(db, current_user)
+
+
+@router.patch("/policy", response_model=DevicePolicyOut, responses={403: {"model": ErrorResponse}})
+def update_device_policy(
+    payload: DevicePolicyUpdate,
+    current_user: CurrentUser = Depends(require_permission(Permission.MANAGE_FAMILY)),
+    db: Session = Depends(get_db),
+) -> dict:
+    active_count = _active_device_count(db, current_user.user_id)
+    if payload.maxDevices < active_count:
+        raise HTTPException(status_code=400, detail="Max devices cannot be lower than active registered devices")
+    current_user.user.max_devices = payload.maxDevices
+    write_audit_log(
+        db,
+        user_id=current_user.user_id,
+        family_id=current_user.family_id,
+        action="device_policy_updated",
+        entity_type="device_policy",
+        entity_id=current_user.user_id,
+        changes={"max_devices": payload.maxDevices},
+    )
+    db.commit()
+    return _device_policy(db, current_user)
 
 
 @router.get("", response_model=list[DeviceOut])

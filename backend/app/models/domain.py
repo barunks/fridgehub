@@ -130,6 +130,27 @@ class FamilyMember(Base):
     user: Mapped["User"] = relationship(back_populates="family_memberships")
 
 
+class FamilyInvite(Base, TimestampMixin, ActiveMixin):
+    __tablename__ = "family_invites"
+    __table_args__ = (
+        Index("idx_family_invites_token_hash", "token_hash", unique=True),
+        Index("idx_family_invites_family", "family_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    uuid: Mapped[str] = mapped_column(String(36), default=uuid_string, unique=True, nullable=False)
+    family_id: Mapped[int] = mapped_column(ForeignKey("families.id", ondelete="CASCADE"), nullable=False)
+    invited_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    email: Mapped[str | None] = mapped_column(String(255))
+    role: Mapped[str] = mapped_column(String(50), default="member", nullable=False)
+    permissions: Mapped[list[str] | None] = mapped_column(JSON)
+    max_uses: Mapped[int] = mapped_column(default=1, nullable=False)
+    used_count: Mapped[int] = mapped_column(default=0, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+
 class GroceryType(Base):
     __tablename__ = "grocery_types"
 

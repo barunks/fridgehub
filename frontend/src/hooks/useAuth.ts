@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, clearAccessToken, parseAccessToken, setAccessToken } from '@/services/api'
-import type { Permission } from '@/types/familyHub'
+import type { BootstrapSignupInput, InviteSignupInput, Permission, SignupDeviceInput } from '@/types/familyHub'
 
 export const useAuth = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(() => !!api.getAccessToken())
@@ -31,17 +31,43 @@ export const useAuth = () => {
     setCapabilities([])
   }, [])
 
-  const login = useCallback(async (user: string, password: string) => {
+  const login = useCallback(async (user: string, password: string, device?: Partial<SignupDeviceInput>) => {
     setAuthError(null)
     setIsDeviceBlocked(false)
     try {
-      const tokens = await api.loginUser(user, password)
+      const tokens = await api.loginUser(user, password, device)
       applyToken(tokens.accessToken)
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Login failed'
       if (message.toLowerCase().includes('revoked')) {
         setIsDeviceBlocked(true)
       }
+      setAuthError(message)
+      throw error
+    }
+  }, [applyToken])
+
+  const bootstrapSignup = useCallback(async (payload: BootstrapSignupInput) => {
+    setAuthError(null)
+    setIsDeviceBlocked(false)
+    try {
+      const tokens = await api.bootstrapSignup(payload)
+      applyToken(tokens.accessToken)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Signup failed'
+      setAuthError(message)
+      throw error
+    }
+  }, [applyToken])
+
+  const inviteSignup = useCallback(async (payload: InviteSignupInput) => {
+    setAuthError(null)
+    setIsDeviceBlocked(false)
+    try {
+      const tokens = await api.signupWithInvite(payload)
+      applyToken(tokens.accessToken)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Signup failed'
       setAuthError(message)
       throw error
     }
@@ -108,6 +134,8 @@ export const useAuth = () => {
     capabilities,
     isParent: capabilities.includes('manage_family'),
     login,
+    bootstrapSignup,
+    inviteSignup,
     logout,
     retryFromBlocked,
   }

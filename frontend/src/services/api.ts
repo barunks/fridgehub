@@ -1,13 +1,18 @@
 import type {
   AssistantInsight,
   AuditLogEntry,
+  BootstrapSignupInput,
   DeviceInfo,
+  DevicePolicy,
   FamilyHubState,
   FrequencyType,
   GroceryItemUpdateInput,
   GroceryItem,
   GroceryType,
   MealPlanItem,
+  MealTemplateRow,
+  MealTemplateRowInput,
+  MealUpdateInput,
   NewGroceryItemInput,
   NewShoppingItemInput,
   NewTaskInput,
@@ -16,6 +21,13 @@ import type {
   Recipe,
   ShoppingCycleItem,
   ShoppingItemUpdateInput,
+  SignupDeviceInput,
+  SignupDeviceType,
+  SignupInvite,
+  SignupInviteCreateInput,
+  SignupInvitePreview,
+  SignupStatus,
+  InviteSignupInput,
   Task,
 } from '@/types/familyHub'
 
@@ -52,46 +64,51 @@ export interface AccessTokenPayload {
 }
 
 const DEVICE_ID_KEY = 'familyhub-device-id'
+const DEVICE_COOKIE_KEY = 'familyhub_device_id'
 
-const computeDeviceFingerprint = async (): Promise<string> => {
-  const components = [
-    navigator.platform || '',
-    `${screen.width}x${screen.height}x${screen.colorDepth}`,
-    navigator.hardwareConcurrency || 0,
-    (navigator as unknown as { deviceMemory?: number }).deviceMemory || 0,
-    Intl.DateTimeFormat().resolvedOptions().timeZone || '',
-    navigator.maxTouchPoints || 0,
-    navigator.languages?.join(',') || navigator.language || '',
-  ]
-  // GPU renderer adds strong uniqueness per physical device
-  try {
-    const canvas = document.createElement('canvas')
-    const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl')
-    if (gl && gl instanceof WebGLRenderingContext) {
-      const ext = gl.getExtension('WEBGL_debug_renderer_info')
-      if (ext) {
-        components.push(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) || '')
-      }
-    }
-  } catch { /* GPU info unavailable */ }
-
-  const raw = components.join('|')
-  const encoded = new TextEncoder().encode(raw)
-  const hash = await crypto.subtle.digest('SHA-256', encoded)
-  const bytes = new Uint8Array(hash)
-  return Array.from(bytes.slice(0, 16)).map(b => b.toString(16).padStart(2, '0')).join('')
+const readDeviceCookie = () => {
+  if (typeof document === 'undefined') return null
+  const match = document.cookie.match(new RegExp(`(?:^|; )${DEVICE_COOKIE_KEY}=([^;]*)`))
+  return match ? decodeURIComponent(match[1]) : null
 }
 
-const getDeviceId = async (): Promise<string> => {
+const writeDeviceCookie = (deviceId: string) => {
+  if (typeof document === 'undefined') return
+  document.cookie = `${DEVICE_COOKIE_KEY}=${encodeURIComponent(deviceId)}; Max-Age=34560000; Path=/; SameSite=Lax`
+}
+
+const storeDeviceId = (deviceId: string) => {
+  if (typeof window !== 'undefined') {
+    window.localStorage.setItem(DEVICE_ID_KEY, deviceId)
+  }
+  writeDeviceCookie(deviceId)
+}
+
+export const getDeviceId = async (): Promise<string> => {
   if (typeof window === 'undefined') return 'server'
   const cached = window.localStorage.getItem(DEVICE_ID_KEY)
-  if (cached) return cached
-  const fingerprint = await computeDeviceFingerprint()
-  window.localStorage.setItem(DEVICE_ID_KEY, fingerprint)
-  return fingerprint
+  if (cached) {
+    writeDeviceCookie(cached)
+    return cached
+  }
+  const cookieDeviceId = readDeviceCookie()
+  if (cookieDeviceId) {
+    storeDeviceId(cookieDeviceId)
+    return cookieDeviceId
+  }
+  const deviceId = crypto.randomUUID ? crypto.randomUUID() : `device-${Date.now()}-${Math.random().toString(16).slice(2)}`
+  storeDeviceId(deviceId)
+  return deviceId
 }
 
-const getDeviceName = (): string => {
+const syncDeviceIdFromToken = (token: string) => {
+  const payload = parseAccessToken(token)
+  if (payload?.device_id) {
+    storeDeviceId(payload.device_id)
+  }
+}
+
+export const getDeviceName = (): string => {
   if (typeof window === 'undefined') return 'server'
   const ua = navigator.userAgent
   if (/iPad/i.test(ua)) return 'iPad'
@@ -103,6 +120,27 @@ const getDeviceName = (): string => {
   if (/Linux/i.test(ua)) return 'Linux PC'
   return 'Browser'
 }
+
+export const getDeviceType = (): SignupDeviceType => {
+  if (typeof window === 'undefined') return 'browser'
+  const ua = navigator.userAgent
+  if (/iPad|Android(?!.*Mobile)|Tablet/i.test(ua)) return 'tablet'
+  if (/iPhone|Android.*Mobile/i.test(ua)) return 'phone'
+  if (/Macintosh|Windows|Linux/i.test(ua)) return 'desktop'
+  return 'browser'
+}
+
+export const getPlatformName = (): string => {
+  if (typeof navigator === 'undefined') return 'server'
+  return navigator.platform || getDeviceName()
+}
+
+export const getCurrentDeviceInput = async (deviceName?: string, deviceType?: SignupDeviceType): Promise<SignupDeviceInput> => ({
+  deviceId: await getDeviceId(),
+  deviceName: deviceName?.trim() || getDeviceName(),
+  deviceType: deviceType || getDeviceType(),
+  platform: getPlatformName(),
+})
 
 export const parseAccessToken = (token: string | null = accessToken): AccessTokenPayload | null => {
   if (!token) return null
@@ -141,18 +179,74 @@ const readError = async (response: Response) => {
   return body?.error?.detail || body?.detail || validationMessage || response.statusText || 'Request failed'
 }
 
-export const loginUser = async (username: string, password: string) => {
+const requestPublic = async <T>(path: string, init?: RequestInit): Promise<T> => {
+  const headers = new Headers(init?.headers)
+  if (!headers.has('Content-Type') && init?.body) {
+    headers.set('Content-Type', 'application/json')
+  }
+  const response = await fetch(apiUrl(path), {
+    ...init,
+    credentials: 'include',
+    headers,
+  })
+  if (!response.ok) {
+    throw new Error(await readError(response))
+  }
+  if (response.status === 204) return undefined as T
+  return response.json() as Promise<T>
+}
+
+export const loginUser = async (username: string, password: string, device?: Partial<SignupDeviceInput>) => {
+  const currentDevice = await getCurrentDeviceInput(device?.deviceName, device?.deviceType)
   const response = await fetch(apiUrl('/api/v1/auth/login'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'include',
-    body: JSON.stringify({ username, password, deviceId: await getDeviceId(), deviceName: getDeviceName() }),
+    body: JSON.stringify({ username, password, ...currentDevice, ...device }),
   })
   if (!response.ok) {
     throw new Error(await readError(response))
   }
   const tokens = (await response.json()) as TokenResponse
   setAccessToken(tokens.accessToken)
+  syncDeviceIdFromToken(tokens.accessToken)
+  return tokens
+}
+
+export const getSignupStatus = () => requestPublic<SignupStatus>('/api/v1/auth/signup/status')
+
+export const previewSignupInvite = (inviteToken: string) =>
+  requestPublic<SignupInvitePreview>(`/api/v1/auth/invites/${encodeURIComponent(inviteToken)}`)
+
+export const bootstrapSignup = async (payload: BootstrapSignupInput) => {
+  const response = await fetch(apiUrl('/api/v1/auth/signup/bootstrap'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify(payload),
+  })
+  if (!response.ok) {
+    throw new Error(await readError(response))
+  }
+  const tokens = (await response.json()) as TokenResponse
+  setAccessToken(tokens.accessToken)
+  syncDeviceIdFromToken(tokens.accessToken)
+  return tokens
+}
+
+export const signupWithInvite = async (payload: InviteSignupInput) => {
+  const response = await fetch(apiUrl('/api/v1/auth/signup'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify(payload),
+  })
+  if (!response.ok) {
+    throw new Error(await readError(response))
+  }
+  const tokens = (await response.json()) as TokenResponse
+  setAccessToken(tokens.accessToken)
+  syncDeviceIdFromToken(tokens.accessToken)
   return tokens
 }
 
@@ -168,6 +262,7 @@ export const refreshAccessToken = async () => {
   }
   const tokens = (await response.json()) as TokenResponse
   setAccessToken(tokens.accessToken)
+  syncDeviceIdFromToken(tokens.accessToken)
   return tokens.accessToken
 }
 
@@ -243,6 +338,15 @@ export const api = {
   refreshAccessToken,
   getAccessToken,
   parseAccessToken,
+  getDeviceId,
+  getDeviceName,
+  getDeviceType,
+  getPlatformName,
+  getCurrentDeviceInput,
+  getSignupStatus,
+  previewSignupInvite,
+  bootstrapSignup,
+  signupWithInvite,
   bootstrap: () => request<FamilyHubState>('/api/v1/family/bootstrap'),
   listGroceryItems: (params: { limit?: number; offset?: number; listTypeId?: number | 'all' } = {}) =>
     request<GroceryItem[]>(
@@ -345,22 +449,37 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify(payload),
     }),
-  updateMeal: (mealId: number, mealName: string) =>
-    request(`/api/v1/meal-plan/${mealId}`, {
+  updateMeal: (mealId: number, payload: MealUpdateInput) =>
+    request<MealPlanItem>(`/api/v1/meal-plan/${mealId}`, {
       method: 'PATCH',
-      body: JSON.stringify({ mealName }),
+      body: JSON.stringify(payload),
     }),
   getWeeklyMeals: (memberId?: number | null) =>
     request<MealPlanItem[]>(`/api/v1/meal-plan/week${queryString({ member_id: memberId })}`),
-  applyMealTemplate: (memberId?: number | null) =>
-    request('/api/v1/meal-plan/apply-template', {
+  applyMealTemplate: (memberId?: number | null, templateName?: string | null) =>
+    request<MealPlanItem[]>('/api/v1/meal-plan/apply-template', {
       method: 'POST',
-      body: JSON.stringify({ memberId }),
+      body: JSON.stringify({ memberId, templateName: templateName || undefined }),
     }),
-  applyMealTemplateAll: () =>
-    request('/api/v1/meal-plan/apply-template', {
+  applyMealTemplateAll: (templateName?: string | null) =>
+    request<MealPlanItem[]>('/api/v1/meal-plan/apply-template', {
       method: 'POST',
-      body: JSON.stringify({ allMembers: true }),
+      body: JSON.stringify({ allMembers: true, templateName: templateName || undefined }),
+    }),
+  listMealTemplates: () => request<MealTemplateRow[]>('/api/v1/meal-plan/templates'),
+  createMealTemplateRow: (payload: MealTemplateRowInput) =>
+    request<MealTemplateRow>('/api/v1/meal-plan/templates', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  updateMealTemplateRow: (templateId: number, payload: Partial<MealTemplateRowInput>) =>
+    request<MealTemplateRow>(`/api/v1/meal-plan/templates/${templateId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    }),
+  deleteMealTemplateRow: (templateId: number) =>
+    request(`/api/v1/meal-plan/templates/${templateId}`, {
+      method: 'DELETE',
     }),
   markNotificationRead: (notificationId: number) =>
     request(`/api/v1/notifications/${notificationId}/read`, {
@@ -455,6 +574,12 @@ export const api = {
     URL.revokeObjectURL(url)
   },
   // Device management
+  getDevicePolicy: () => request<DevicePolicy>('/api/v1/auth/devices/policy'),
+  updateDevicePolicy: (maxDevices: number) =>
+    request<DevicePolicy>('/api/v1/auth/devices/policy', {
+      method: 'PATCH',
+      body: JSON.stringify({ maxDevices }),
+    }),
   listDevices: () => request<DeviceInfo[]>('/api/v1/auth/devices'),
   updateDevice: (deviceId: number, payload: { deviceName?: string; isTrusted?: boolean }) =>
     request<DeviceInfo>(`/api/v1/auth/devices/${deviceId}`, {
@@ -465,6 +590,14 @@ export const api = {
     request(`/api/v1/auth/devices/${deviceId}`, { method: 'DELETE' }),
   revokeDeviceSessions: (deviceId: number) =>
     request<{ revoked: number }>(`/api/v1/auth/devices/${deviceId}/revoke-sessions`, { method: 'POST' }),
+  listSignupInvites: () => request<SignupInvite[]>('/api/v1/auth/invites'),
+  createSignupInvite: (payload: SignupInviteCreateInput) =>
+    request<SignupInvite>('/api/v1/auth/invites', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  revokeSignupInvite: (inviteId: number) =>
+    request(`/api/v1/auth/invites/${inviteId}`, { method: 'DELETE' }),
   createRecipe: (payload: Record<string, unknown>) =>
     request('/api/v1/meal-plan/recipes', {
       method: 'POST',

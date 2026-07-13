@@ -61,12 +61,28 @@ export const FamilyView = ({ store }: { store: FamilyHubStore }) => {
 
   return (
     <div className="grid gap-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-2xl font-bold tracking-tight text-slate-900">Family Workspace</h2>
-          <p className="mt-1 text-sm text-slate-400">Members, announcements, contacts, and activity</p>
+      {/* Hero banner */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-blue-600 via-cyan-600 to-teal-500 px-6 py-8 text-white shadow-xl shadow-blue-400/20 sm:px-8">
+        <div className="pointer-events-none absolute inset-0 overflow-hidden">
+          <div className="absolute -right-16 -top-16 size-64 rounded-full bg-white/[0.06] blur-2xl animate-[moonFloat_7s_ease-in-out_infinite]" />
+          <div className="absolute -bottom-20 -left-20 size-72 rounded-full bg-amber-300/[0.07] blur-3xl animate-[moonFloat_9s_ease-in-out_infinite_2s]" />
+          <div className="absolute left-[18%] top-[22%] size-2 rounded-full bg-amber-200/70 animate-[starTwinkle_2s_ease-in-out_infinite]" />
+          <div className="absolute left-[75%] top-[55%] size-1.5 rounded-full bg-white/50 animate-[starTwinkle_2.8s_ease-in-out_infinite_1s]" />
         </div>
-        <Badge tone="green">{state.members.length} active members</Badge>
+        <div className="relative flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-4">
+            <div className="flex size-12 items-center justify-center rounded-2xl bg-white/15 shadow-lg backdrop-blur-sm">
+              <Users className="size-6" aria-hidden="true" />
+            </div>
+            <div>
+              <h2 className="text-2xl font-bold tracking-tight">Family Workspace</h2>
+              <p className="mt-0.5 text-sm text-blue-100">Members, announcements, contacts, and activity</p>
+            </div>
+          </div>
+          <div className="rounded-full border border-white/20 bg-white/10 px-3.5 py-1.5 text-xs font-semibold backdrop-blur-sm">
+            {state.members.length} active members
+          </div>
+        </div>
       </div>
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">

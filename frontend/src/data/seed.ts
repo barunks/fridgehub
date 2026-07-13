@@ -35,7 +35,7 @@ const parentCapabilities: Permission[] = [
   'view_family',
   'view_analytics',
   'use_assistant',
-  'view_implementation',
+  'view_demo',
   'view_audit',
   'view_cache_stats',
   'manage_tasks',
@@ -553,6 +553,8 @@ const assistantInsights: AssistantInsight[] = [
     type: 'schedule',
     confidence: 91,
     action: 'Open tasks',
+    severity: 'warning',
+    route: '/tasks',
   },
   {
     id: 'expiry-watch',
@@ -561,6 +563,8 @@ const assistantInsights: AssistantInsight[] = [
     type: 'grocery',
     confidence: 88,
     action: 'Review groceries',
+    severity: 'warning',
+    route: '/groceries',
   },
 ]
 

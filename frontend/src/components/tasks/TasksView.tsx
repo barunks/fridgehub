@@ -18,6 +18,7 @@ import {
   CalendarPlus,
   CheckCircle2,
   Circle,
+  ClipboardList,
   Clock3,
   GripVertical,
   ListFilter,
@@ -391,20 +392,33 @@ export const TasksView = ({ store }: { store: FamilyHubStore }) => {
 
   return (
     <div className="grid gap-6">
-      {/* Header with stats */}
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-bold tracking-tight text-slate-900">Tasks & Reminders</h2>
-          <p className="mt-1 text-sm text-slate-400">Manage assignments, track progress, and stay on schedule</p>
+      {/* Hero banner */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-emerald-600 via-teal-600 to-cyan-600 px-6 py-8 text-white shadow-xl shadow-emerald-400/20 sm:px-8">
+        <div className="pointer-events-none absolute inset-0 overflow-hidden">
+          <div className="absolute -right-16 -top-16 size-64 rounded-full bg-white/[0.06] blur-2xl animate-[moonFloat_7s_ease-in-out_infinite]" />
+          <div className="absolute -bottom-20 -left-20 size-72 rounded-full bg-amber-300/[0.07] blur-3xl animate-[moonFloat_9s_ease-in-out_infinite_2s]" />
+          <div className="absolute left-[20%] top-[25%] size-2 rounded-full bg-amber-300/70 animate-[starTwinkle_2s_ease-in-out_infinite]" />
+          <div className="absolute left-[65%] top-[60%] size-1.5 rounded-full bg-white/50 animate-[starTwinkle_2.8s_ease-in-out_infinite_1s]" />
         </div>
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2 rounded-xl border border-indigo-100 bg-indigo-50/60 px-3.5 py-2">
-            <div className="size-2 rounded-full bg-indigo-500 animate-pulse" />
-            <span className="text-xs font-semibold text-indigo-700">{totalActive} active</span>
+        <div className="relative flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-4">
+            <div className="flex size-12 items-center justify-center rounded-2xl bg-white/15 shadow-lg backdrop-blur-sm">
+              <ClipboardList className="size-6" aria-hidden="true" />
+            </div>
+            <div>
+              <h2 className="text-2xl font-bold tracking-tight">Tasks & Reminders</h2>
+              <p className="mt-0.5 text-sm text-emerald-100">Manage assignments, track progress, and stay on schedule</p>
+            </div>
           </div>
-          <div className="flex items-center gap-2 rounded-xl border border-emerald-100 bg-emerald-50/60 px-3.5 py-2">
-            <CheckCircle2 className="size-3.5 text-emerald-600" />
-            <span className="text-xs font-semibold text-emerald-700">{totalCompleted} done</span>
+          <div className="flex flex-wrap gap-2">
+            <div className="flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-3.5 py-1.5 backdrop-blur-sm">
+              <div className="size-2 rounded-full bg-amber-300 animate-[starTwinkle_2s_ease-in-out_infinite]" />
+              <span className="text-xs font-semibold text-white/90">{totalActive} active</span>
+            </div>
+            <div className="flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-3.5 py-1.5 backdrop-blur-sm">
+              <CheckCircle2 className="size-3.5 text-emerald-200" />
+              <span className="text-xs font-semibold text-white/90">{totalCompleted} done</span>
+            </div>
           </div>
         </div>
       </div>

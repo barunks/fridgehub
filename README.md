@@ -107,7 +107,7 @@ Frontend route map:
 /command-center   Household Command Center — unified admin for all CRUD workflows
 /assistant        Family assistant chat
 /history          Audit log viewer
-/implementation   Build and deployment readiness
+/demo              Application guide, tutorials, FAQ, and how-to reference
 ```
 
 ## Household Command Center
@@ -123,7 +123,78 @@ The `/command-center` route (parent-only) provides a unified admin workspace wit
 | Recipes | Full list with real-time filter, create, delete |
 | Tasks | Status filter, checkbox toggle, delete |
 | Insights | Live AI assistant insights from `/api/v1/assistant/insights` |
-| Security | Change password with validation, device management (list, rename, trust, revoke) |
+| Security | Change password with validation, device management (list, rename, trust, revoke), signup invites with QR |
+
+## Signup & Onboarding
+
+FamilyHub does not allow open anonymous signup. Every user must belong to a family, and every session is tied to a registered device.
+
+### Three Signup Flows
+
+| Flow | When | Endpoint |
+|------|------|----------|
+| Bootstrap | App has no users/families yet | `POST /api/v1/auth/signup/bootstrap` |
+| Invite-based | Admin creates invite, new user joins | `POST /api/v1/auth/signup` |
+| Existing user new device | User logs in from a new device | `POST /api/v1/auth/login` |
+
+### Bootstrap (First Family Setup)
+
+Available only when the database has zero active users and families. Creates:
+- Admin user account
+- Family record
+- First family membership (admin role)
+- Default grocery shopping places (Wet Market, Super Market, Murugan, NTUC)
+- Default weekly meal plan template (28 meals across 7 days × 4 meal types)
+- First registered device + session
+
+Check availability: `GET /api/v1/auth/signup/status` → `{"bootstrapAllowed": true/false}`
+
+### Invite-Based Signup
+
+1. Admin creates invite: `POST /api/v1/auth/invites` with role, permissions, expiry (1–30 days), max uses (1–10)
+2. Backend returns a one-time visible `inviteToken` (stored as SHA-256 hash)
+3. Admin shares the invite link or QR code
+4. New user opens `/?invite=<token>` or pastes the token
+5. Frontend previews the invite: `GET /api/v1/auth/invites/<token>` → family name, role, expiry
+6. User fills name/email/username/password + mandatory device registration
+7. `POST /api/v1/auth/signup` validates token, creates user + membership + device, returns tokens
+8. Invite `used_count` increments; auto-deactivates when `max_uses` reached
+
+Security properties:
+- Invite tokens are 32 bytes of `secrets.token_urlsafe` (192 bits entropy)
+- Stored as SHA-256 hash — raw token is shown only once at creation
+- Email-pinned invites reject signups from other email addresses
+- Row-level locking (`SELECT ... FOR UPDATE`) prevents race conditions
+- Expired or fully-used invites return 404
+
+### QR Code Support
+
+The Command Center → Security tab generates QR codes for invite links:
+- QR contains only the invite URL: `https://app.example.com/?invite=<token>`
+- Token is short-lived (configurable 1–30 days) and single/limited-use
+- No passwords, user IDs, or permanent secrets are embedded in the QR
+- Fallback: copyable invite link for non-camera scenarios
+
+### Rate Limiting
+
+All auth mutation endpoints are rate-limited per IP:
+- `POST /api/v1/auth/login` — `LOGIN_RATE_LIMIT_PER_MINUTE` (default: 10)
+- `POST /api/v1/auth/signup` — same limit
+- `POST /api/v1/auth/signup/bootstrap` — same limit
+
+Uses Redis `INCR` with TTL window; falls back to in-memory sliding window.
+
+### Device Registration on Login
+
+Device registration is mandatory on all signup flows (`deviceId`, `deviceName`, `deviceType` are required fields on `BootstrapSignupRequest` and `InviteSignupRequest`).
+
+For the login endpoint, `deviceId` is optional by default for backward compatibility with API tools (curl, Postman). In production, set `REQUIRE_DEVICE_ID_ON_LOGIN=true` to enforce mandatory device registration on every login. When enabled, login without `deviceId` returns HTTP 400.
+
+Device ID strategy:
+- Frontend generates a stable random UUID via `crypto.randomUUID()` on first use
+- Stored in `localStorage` under `familyhub-device-id`
+- No browser fingerprinting — avoids privacy concerns and instability across browser updates
+- API clients without a device ID get a derived UUID from `uuid5(user_agent|ip)` as fallback
 
 ## Device Registration & Access Control
 

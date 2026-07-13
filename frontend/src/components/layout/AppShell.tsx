@@ -10,7 +10,6 @@ import {
   Moon,
   Phone,
   Search,
-  Settings2,
   Shield,
   Sun,
   Sunrise,
@@ -226,11 +225,6 @@ export const AppShell = ({ activeView, onLogout, onNavigate, onToggleTheme, stor
                   Ask AI
                 </Button>
               )}
-              {store.can('view_implementation') && (
-                <Button className="hidden sm:inline-flex" iconOnly variant="icon" onClick={() => onNavigate('implementation')} title="Build">
-                  <Settings2 className="size-4" aria-hidden="true" />
-                </Button>
-              )}
               {username && (
                 <Button className="hidden sm:inline-flex" variant="ghost" onClick={onLogout} title="Sign out">
                   <LogOut className="size-4" aria-hidden="true" />
@@ -363,16 +357,6 @@ export const AppShell = ({ activeView, onLogout, onNavigate, onToggleTheme, stor
 
       {/* Mobile top-right avatars */}
       <div className="fixed right-4 top-3 z-30 flex items-center gap-1.5 lg:hidden">
-        {store.can('view_implementation') && (
-          <button
-            className="flex size-8 items-center justify-center rounded-full border border-slate-200/80 bg-white/90 text-slate-500 shadow-sm backdrop-blur-sm transition-all hover:scale-105"
-            onClick={() => onNavigate('implementation')}
-            title="Build"
-            type="button"
-          >
-            <Settings2 className="size-3.5" aria-hidden="true" />
-          </button>
-        )}
         {state.members.slice(0, 3).map((member) => (
           <Avatar
             className="size-7 border-2 border-white text-[10px] shadow-sm"

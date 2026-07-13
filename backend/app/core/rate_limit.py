@@ -12,6 +12,13 @@ from app.core.database import SessionLocal
 from app.services.audit_service import write_security_audit_log
 
 
+_RATE_LIMITED_PATHS = {
+    "/api/v1/auth/login",
+    "/api/v1/auth/signup",
+    "/api/v1/auth/signup/bootstrap",
+}
+
+
 class LoginRateLimitMiddleware(BaseHTTPMiddleware):
     def __init__(self, app, limit_per_minute: int | None = None) -> None:
         super().__init__(app)
@@ -20,16 +27,16 @@ class LoginRateLimitMiddleware(BaseHTTPMiddleware):
         self.attempts: dict[str, deque[float]] = defaultdict(deque)
 
     async def dispatch(self, request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
-        if request.url.path != "/api/v1/auth/login" or request.method != "POST":
+        if request.method != "POST" or request.url.path not in _RATE_LIMITED_PATHS:
             return await call_next(request)
 
         client_ip = request.client.host if request.client else "unknown"
         key = f"{client_ip}:{request.url.path}"
-        shared_key = f"familyhub:rate-limit:login:{key}"
+        shared_key = f"familyhub:rate-limit:auth:{key}"
         try:
             if cache.increment_window(shared_key, self.window_seconds) > self.limit:
                 self._audit_rate_limit(request)
-                return JSONResponse(status_code=429, content={"error": {"detail": "Too many login attempts", "code": "rate_limited"}})
+                return JSONResponse(status_code=429, content={"error": {"detail": "Too many attempts. Try again later.", "code": "rate_limited"}})
             return await call_next(request)
         except Exception:
             pass
@@ -40,7 +47,7 @@ class LoginRateLimitMiddleware(BaseHTTPMiddleware):
             bucket.popleft()
         if len(bucket) >= self.limit:
             self._audit_rate_limit(request)
-            return JSONResponse(status_code=429, content={"error": {"detail": "Too many login attempts", "code": "rate_limited"}})
+            return JSONResponse(status_code=429, content={"error": {"detail": "Too many attempts. Try again later.", "code": "rate_limited"}})
         bucket.append(now)
         return await call_next(request)
 

@@ -2,12 +2,37 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.core.dependencies import CurrentUser, get_current_user
+from app.core.dependencies import CurrentUser, get_current_user, require_permission
 from app.core.database import get_db
+from app.core.permissions import Permission
 from app.core.security import decode_token
-from app.schemas.familyhub import ChangePasswordRequest, ErrorResponse, LoginRequest, RefreshRequest, TokenResponse
+from app.schemas.familyhub import (
+    BootstrapSignupRequest,
+    ChangePasswordRequest,
+    ErrorResponse,
+    InviteSignupRequest,
+    LoginRequest,
+    RefreshRequest,
+    SignupInviteCreate,
+    SignupInviteOut,
+    SignupInvitePreviewOut,
+    SignupStatusOut,
+    TokenResponse,
+)
 from app.services.audit_service import write_security_audit_log
-from app.services.auth_service import change_password, login, logout_by_token, refresh
+from app.services.auth_service import (
+    bootstrap_signup,
+    change_password,
+    create_signup_invite,
+    list_signup_invites,
+    login,
+    logout_by_token,
+    preview_signup_invite,
+    refresh,
+    revoke_signup_invite,
+    signup_status,
+    signup_with_invite,
+)
 
 router = APIRouter()
 
@@ -72,6 +97,8 @@ def login_endpoint(
     response: Response,
     db: Session = Depends(get_db),
 ) -> dict[str, str | None]:
+    if settings.require_device_id_on_login and not payload.deviceId:
+        raise HTTPException(status_code=400, detail="Device registration is required. Provide deviceId, deviceName, and deviceType.")
     try:
         tokens = login(
             db,
@@ -80,6 +107,8 @@ def login_endpoint(
             payload.familyId,
             payload.deviceId,
             payload.deviceName,
+            payload.deviceType,
+            payload.platform,
             request.headers.get("user-agent"),
             request.client.host if request.client else None,
         )
@@ -103,6 +132,86 @@ def login_endpoint(
         entity_id=context["user_id"],
     )
     db.commit()
+    _set_refresh_cookie(response, tokens["refreshToken"])
+    return _public_token_response(tokens)
+
+
+@router.get("/signup/status", response_model=SignupStatusOut)
+def signup_status_endpoint(db: Session = Depends(get_db)) -> dict[str, bool]:
+    return signup_status(db)
+
+
+@router.post(
+    "/signup/bootstrap",
+    response_model=TokenResponse,
+    response_model_exclude_none=True,
+    responses={409: {"model": ErrorResponse}},
+)
+def bootstrap_signup_endpoint(
+    payload: BootstrapSignupRequest,
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+) -> dict[str, str | None]:
+    tokens = bootstrap_signup(
+        db,
+        payload,
+        request.headers.get("user-agent"),
+        request.client.host if request.client else None,
+    )
+    _set_refresh_cookie(response, tokens["refreshToken"])
+    return _public_token_response(tokens)
+
+
+@router.get("/invites", response_model=list[SignupInviteOut])
+def list_invites_endpoint(
+    current_user: CurrentUser = Depends(require_permission(Permission.MANAGE_FAMILY)),
+    db: Session = Depends(get_db),
+) -> list[dict[str, object]]:
+    return list_signup_invites(db, current_user.family_id)
+
+
+@router.post("/invites", response_model=SignupInviteOut, status_code=201)
+def create_invite_endpoint(
+    payload: SignupInviteCreate,
+    current_user: CurrentUser = Depends(require_permission(Permission.MANAGE_FAMILY)),
+    db: Session = Depends(get_db),
+) -> dict[str, object]:
+    return create_signup_invite(db, payload, current_user.family_id, current_user.user_id)
+
+
+@router.delete("/invites/{invite_id}", status_code=204, responses={404: {"model": ErrorResponse}})
+def revoke_invite_endpoint(
+    invite_id: int,
+    current_user: CurrentUser = Depends(require_permission(Permission.MANAGE_FAMILY)),
+    db: Session = Depends(get_db),
+) -> None:
+    revoke_signup_invite(db, invite_id, current_user.family_id, current_user.user_id)
+
+
+@router.get("/invites/{invite_token}", response_model=SignupInvitePreviewOut, responses={404: {"model": ErrorResponse}})
+def preview_invite_endpoint(invite_token: str, db: Session = Depends(get_db)) -> dict[str, object]:
+    return preview_signup_invite(db, invite_token)
+
+
+@router.post(
+    "/signup",
+    response_model=TokenResponse,
+    response_model_exclude_none=True,
+    responses={403: {"model": ErrorResponse}, 404: {"model": ErrorResponse}, 409: {"model": ErrorResponse}},
+)
+def signup_endpoint(
+    payload: InviteSignupRequest,
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+) -> dict[str, str | None]:
+    tokens = signup_with_invite(
+        db,
+        payload,
+        request.headers.get("user-agent"),
+        request.client.host if request.client else None,
+    )
     _set_refresh_cookie(response, tokens["refreshToken"])
     return _public_token_response(tokens)
 

@@ -3,10 +3,10 @@ import {
   Bot,
   CalendarDays,
   ClipboardList,
+  GraduationCap,
   History,
   Home,
   LayoutGrid,
-  Settings2,
   ShoppingBasket,
   Users,
 } from 'lucide-react'
@@ -22,7 +22,7 @@ export const viewPaths: Record<ViewKey, string> = {
   assistant: '/assistant',
   'command-center': '/command-center',
   history: '/history',
-  implementation: '/implementation',
+  demo: '/demo',
 }
 
 export const navItems: NavItem[] = [
@@ -35,7 +35,7 @@ export const navItems: NavItem[] = [
   { key: 'command-center', label: 'Admin', icon: LayoutGrid, path: viewPaths['command-center'], requiredPermission: 'manage_family' },
   { key: 'assistant', label: 'Ask AI', icon: Bot, path: viewPaths.assistant, requiredPermission: 'use_assistant' },
   { key: 'history', label: 'History', icon: History, path: viewPaths.history, requiredPermission: 'view_audit' },
-  { key: 'implementation', label: 'Build', icon: Settings2, path: viewPaths.implementation, requiredPermission: 'view_implementation' },
+  { key: 'demo', label: 'Demo', icon: GraduationCap, path: viewPaths.demo },
 ]
 
 export const viewForPath = (pathname: string): ViewKey => {
