@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
@@ -123,7 +123,7 @@ def _register_device(
         device.device_name = device_name or device.device_name
         device.last_user_agent = user_agent
         device.last_ip = ip_address
-        device.last_used_at = datetime.utcnow()
+        device.last_used_at = datetime.now(timezone.utc)
         device.family_id = family_id
     db.flush()
     return device_id
@@ -161,7 +161,7 @@ def _record_session(
             family_id=family_id,
             jti=str(jti),
             token_type=token_type,
-            expires_at=datetime.utcfromtimestamp(exp),
+            expires_at=datetime.fromtimestamp(exp, tz=timezone.utc),
             ip_address=ip_address,
             user_agent=user_agent,
         )
@@ -235,7 +235,7 @@ def refresh(
     if device.is_revoked:
         raise HTTPException(status_code=403, detail="This device has been revoked")
 
-    device.last_used_at = datetime.utcnow()
+    device.last_used_at = datetime.now(timezone.utc)
 
     selected_family_id = family_id
     if selected_family_id is None and payload.get("family_id") and str(payload.get("family_id")).isdigit():

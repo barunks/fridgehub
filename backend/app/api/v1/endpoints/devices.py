@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -84,7 +84,7 @@ def revoke_device(
     sessions = db.query(DeviceSession).filter(DeviceSession.device_id == device.id, DeviceSession.is_active.is_(True)).all()
     for session in sessions:
         session.is_active = False
-        session.revoked_at = datetime.utcnow()
+        session.revoked_at = datetime.now(timezone.utc)
         cache.set(token_revocation_key(session.jti), True, ttl_seconds=7 * 24 * 60 * 60)
 
     write_audit_log(db, user_id=current_user.user_id, family_id=current_user.family_id, action="device_revoked", entity_type="device", entity_id=device.id)
@@ -105,7 +105,7 @@ def revoke_device_sessions(
     count = 0
     for session in sessions:
         session.is_active = False
-        session.revoked_at = datetime.utcnow()
+        session.revoked_at = datetime.now(timezone.utc)
         cache.set(token_revocation_key(session.jti), True, ttl_seconds=7 * 24 * 60 * 60)
         count += 1
 
