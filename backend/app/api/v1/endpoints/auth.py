@@ -121,7 +121,13 @@ def refresh_endpoint(
         raise HTTPException(status_code=401, detail="Refresh token required")
     old_context = _token_audit_context(refresh_token)
     try:
-        tokens = refresh(db, refresh_token, payload.familyId if payload else None)
+        tokens = refresh(
+            db,
+            refresh_token,
+            payload.familyId if payload else None,
+            request.headers.get("user-agent"),
+            request.client.host if request.client else None,
+        )
     except HTTPException as exc:
         write_security_audit_log(
             db,

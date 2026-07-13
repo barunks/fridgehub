@@ -2,6 +2,7 @@ from datetime import UTC, datetime, timedelta
 
 from app.core.database import SessionLocal
 from app.models import FamilyMember, Task
+from app.services.family_service import invalidate_entity
 from app.services.notification_service import create_notification
 from app.tasks.celery_app import celery_app
 
@@ -26,6 +27,8 @@ def scan_due_reminders() -> dict[str, int]:
             )
             .all()
         )
+        family_ids: set[int] = set()
+        notification_count = 0
         for task in tasks:
             recipient = task.assigned_to or task.created_by
             if not recipient:
@@ -41,7 +44,11 @@ def scan_due_reminders() -> dict[str, int]:
                 message=task.description or "A family reminder is due soon.",
                 type_="task",
             )
+            family_ids.add(task.family_id)
+            notification_count += 1
         db.commit()
-        return {"notifications": len(tasks)}
+        for family_id in family_ids:
+            invalidate_entity("notifications", family_id)
+        return {"notifications": notification_count}
     finally:
         db.close()

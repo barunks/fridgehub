@@ -487,7 +487,8 @@ def seed_demo_data(db: Session) -> None:
                     calories=260 + day_index * 25 + meal_index * 40,
                     prep_time=10 + meal_index * 8,
                     family_id=family.id,
-                    is_global=True,
+                    template_scope=f"family:{family.id}",
+                    is_global=False,
                     created_by=users[0].id,
                 )
             )
@@ -503,6 +504,7 @@ def seed_demo_data(db: Session) -> None:
                     prep_time=10 + meal_index * 8,
                     color_class=DAY_COLORS[day_name],
                     created_by=users[0].id,
+                    meal_plan_scope="family",
                 )
             )
 

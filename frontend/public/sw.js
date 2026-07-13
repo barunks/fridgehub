@@ -2,7 +2,6 @@
 
 const CACHE_NAME = 'familyhub-v1'
 const STATIC_ASSETS = ['/', '/index.html', '/favicon.svg', '/manifest.json']
-const API_CACHE_NAME = 'familyhub-api-v1'
 
 const sw = /** @type {ServiceWorkerGlobalScope} */ (/** @type {unknown} */ (self))
 
@@ -15,7 +14,7 @@ sw.addEventListener('install', (event) => {
 sw.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
-      Promise.all(keys.filter((key) => key !== CACHE_NAME && key !== API_CACHE_NAME).map((key) => caches.delete(key)))
+      Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key)))
     ).then(() => sw.clients.claim())
   )
 })
@@ -27,18 +26,11 @@ sw.addEventListener('fetch', (event) => {
   // Skip non-GET requests
   if (request.method !== 'GET') return
 
-  // API requests: network-first with cache fallback
+  // API requests may contain authenticated family data; never cache them.
   if (url.pathname.startsWith('/api/')) {
     event.respondWith(
       fetch(request)
-        .then((response) => {
-          if (response.ok) {
-            const clone = response.clone()
-            caches.open(API_CACHE_NAME).then((cache) => cache.put(request, clone))
-          }
-          return response
-        })
-        .catch(() => caches.match(request).then((cached) => cached || new Response('{"error":{"detail":"Offline","code":"offline"}}', { status: 503, headers: { 'Content-Type': 'application/json' } })))
+        .catch(() => new Response('{"error":{"detail":"Offline","code":"offline"}}', { status: 503, headers: { 'Content-Type': 'application/json' } }))
     )
     return
   }

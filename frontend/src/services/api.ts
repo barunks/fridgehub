@@ -8,17 +8,29 @@ import type {
   GroceryType,
   MealPlanItem,
   NewGroceryItemInput,
+  NewShoppingItemInput,
   NewTaskInput,
   Notification,
   Permission,
   Recipe,
+  ShoppingCycleItem,
+  ShoppingItemUpdateInput,
   Task,
 } from '@/types/familyHub'
 
 const defaultBaseUrl =
-  typeof window === 'undefined' ? 'http://localhost:8000' : `${window.location.protocol}//${window.location.hostname}:8000`
+  import.meta.env.DEV && typeof window !== 'undefined'
+    ? `${window.location.protocol}//${window.location.hostname}:8000`
+    : ''
 const configuredBaseUrl = import.meta.env.VITE_API_URL || defaultBaseUrl
 const apiBaseUrl = configuredBaseUrl.endsWith('/') ? configuredBaseUrl.slice(0, -1) : configuredBaseUrl
+
+const apiUrl = (path: string) => {
+  if (apiBaseUrl.endsWith('/api') && path.startsWith('/api/')) {
+    return `${apiBaseUrl}${path.slice('/api'.length)}`
+  }
+  return `${apiBaseUrl}${path}`
+}
 
 interface TokenResponse {
   accessToken: string
@@ -39,33 +51,56 @@ export interface AccessTokenPayload {
 }
 
 const DEVICE_ID_KEY = 'familyhub-device-id'
-const DEVICE_NAME_KEY = 'familyhub-device-name'
 
-const createDeviceId = () => {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID()
-  }
-  return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+const computeDeviceFingerprint = async (): Promise<string> => {
+  const components = [
+    navigator.platform || '',
+    `${screen.width}x${screen.height}x${screen.colorDepth}`,
+    navigator.hardwareConcurrency || 0,
+    (navigator as unknown as { deviceMemory?: number }).deviceMemory || 0,
+    Intl.DateTimeFormat().resolvedOptions().timeZone || '',
+    navigator.maxTouchPoints || 0,
+    navigator.languages?.join(',') || navigator.language || '',
+  ]
+  // GPU renderer adds strong uniqueness per physical device
+  try {
+    const canvas = document.createElement('canvas')
+    const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl')
+    if (gl && gl instanceof WebGLRenderingContext) {
+      const ext = gl.getExtension('WEBGL_debug_renderer_info')
+      if (ext) {
+        components.push(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) || '')
+      }
+    }
+  } catch { /* GPU info unavailable */ }
+
+  const raw = components.join('|')
+  const encoded = new TextEncoder().encode(raw)
+  const hash = await crypto.subtle.digest('SHA-256', encoded)
+  const bytes = new Uint8Array(hash)
+  return Array.from(bytes.slice(0, 16)).map(b => b.toString(16).padStart(2, '0')).join('')
 }
 
-const getDeviceId = () => {
-  if (typeof window === 'undefined') return 'browser'
-  let deviceId = window.localStorage.getItem(DEVICE_ID_KEY)
-  if (!deviceId) {
-    deviceId = createDeviceId()
-    window.localStorage.setItem(DEVICE_ID_KEY, deviceId)
-  }
-  return deviceId
+const getDeviceId = async (): Promise<string> => {
+  if (typeof window === 'undefined') return 'server'
+  const cached = window.localStorage.getItem(DEVICE_ID_KEY)
+  if (cached) return cached
+  const fingerprint = await computeDeviceFingerprint()
+  window.localStorage.setItem(DEVICE_ID_KEY, fingerprint)
+  return fingerprint
 }
 
-const getDeviceName = () => {
-  if (typeof window === 'undefined') return 'browser'
-  let deviceName = window.localStorage.getItem(DEVICE_NAME_KEY)
-  if (!deviceName) {
-    deviceName = `Browser: ${navigator.userAgent}`
-    window.localStorage.setItem(DEVICE_NAME_KEY, deviceName)
-  }
-  return deviceName
+const getDeviceName = (): string => {
+  if (typeof window === 'undefined') return 'server'
+  const ua = navigator.userAgent
+  if (/iPad/i.test(ua)) return 'iPad'
+  if (/iPhone/i.test(ua)) return 'iPhone'
+  if (/Android.*Mobile/i.test(ua)) return 'Android Phone'
+  if (/Android/i.test(ua)) return 'Android Tablet'
+  if (/Macintosh/i.test(ua)) return 'Mac'
+  if (/Windows/i.test(ua)) return 'Windows PC'
+  if (/Linux/i.test(ua)) return 'Linux PC'
+  return 'Browser'
 }
 
 export const parseAccessToken = (token: string | null = accessToken): AccessTokenPayload | null => {
@@ -106,11 +141,11 @@ const readError = async (response: Response) => {
 }
 
 export const loginUser = async (username: string, password: string) => {
-  const response = await fetch(`${apiBaseUrl}/api/v1/auth/login`, {
+  const response = await fetch(apiUrl('/api/v1/auth/login'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'include',
-    body: JSON.stringify({ username, password, deviceId: getDeviceId(), deviceName: getDeviceName() }),
+    body: JSON.stringify({ username, password, deviceId: await getDeviceId(), deviceName: getDeviceName() }),
   })
   if (!response.ok) {
     throw new Error(await readError(response))
@@ -121,7 +156,7 @@ export const loginUser = async (username: string, password: string) => {
 }
 
 export const refreshAccessToken = async () => {
-  const response = await fetch(`${apiBaseUrl}/api/v1/auth/refresh`, {
+  const response = await fetch(apiUrl('/api/v1/auth/refresh'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'include',
@@ -137,7 +172,7 @@ export const refreshAccessToken = async () => {
 
 export const logoutUser = async () => {
   const token = accessToken
-  await fetch(`${apiBaseUrl}/api/v1/auth/logout`, {
+  await fetch(apiUrl('/api/v1/auth/logout'), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -160,7 +195,7 @@ const request = async <T>(path: string, init?: RequestInit): Promise<T> => {
   }
   headers.set('Authorization', `Bearer ${token}`)
 
-  const response = await fetch(`${apiBaseUrl}${path}`, {
+  const response = await fetch(apiUrl(path), {
     ...init,
     credentials: 'include',
     headers,
@@ -169,7 +204,7 @@ const request = async <T>(path: string, init?: RequestInit): Promise<T> => {
   if (response.status === 401) {
     const refreshedToken = await refreshAccessToken()
     headers.set('Authorization', `Bearer ${refreshedToken}`)
-    const retry = await fetch(`${apiBaseUrl}${path}`, {
+    const retry = await fetch(apiUrl(path), {
       ...init,
       credentials: 'include',
       headers,
@@ -258,6 +293,26 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify(payload),
     }),
+  listShoppingItems: (params: { listTypeId?: number | 'all' } = {}) =>
+    request<ShoppingCycleItem[]>(
+      `/api/v1/grocery/shopping-items${queryString({
+        list_type_id: params.listTypeId === 'all' ? undefined : params.listTypeId,
+      })}`,
+    ),
+  buildShoppingList: () =>
+    request<ShoppingCycleItem[]>('/api/v1/grocery/shopping-items/build', {
+      method: 'POST',
+    }),
+  createShoppingItem: (payload: NewShoppingItemInput) =>
+    request<ShoppingCycleItem>('/api/v1/grocery/shopping-items', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  updateShoppingItem: (subItemId: number, payload: ShoppingItemUpdateInput) =>
+    request<ShoppingCycleItem>(`/api/v1/grocery/shopping-items/${subItemId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    }),
   regenerateGroceryCycles: () =>
     request('/api/v1/grocery/regenerate-cycles', {
       method: 'POST',
@@ -300,6 +355,11 @@ export const api = {
     request('/api/v1/meal-plan/apply-template', {
       method: 'POST',
       body: JSON.stringify({ memberId }),
+    }),
+  applyMealTemplateAll: () =>
+    request('/api/v1/meal-plan/apply-template', {
+      method: 'POST',
+      body: JSON.stringify({ allMembers: true }),
     }),
   markNotificationRead: (notificationId: number) =>
     request(`/api/v1/notifications/${notificationId}/read`, {

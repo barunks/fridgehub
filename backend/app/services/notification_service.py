@@ -26,7 +26,6 @@ def create_notification(
     )
     db.add(notification)
     db.flush()
-    invalidate_entity("notifications", family_id)
     return notification
 
 

@@ -74,6 +74,7 @@ def create_task(db: Session, payload: TaskCreate, family_id: int, user_id: int) 
     db.commit()
     db.refresh(task)
     invalidate_entity("tasks", family_id)
+    invalidate_entity("notifications", family_id)
     return serialize_task(task)
 
 

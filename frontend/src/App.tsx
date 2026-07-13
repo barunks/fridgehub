@@ -42,6 +42,10 @@ const App = () => {
     return <LoginPage error={auth.authError} onLogin={auth.login} />
   }
 
+  if (!store.state.family.id) {
+    return <DashboardSkeleton />
+  }
+
   return (
     <AppShell
       activeView={activeView}
@@ -53,50 +57,46 @@ const App = () => {
       username={auth.username}
     >
       <CommandPalette store={store} />
-      {store.isLoading && !store.state.family.id ? (
-        <DashboardSkeleton />
-      ) : (
-        <Routes>
-          <Route element={<DashboardView onNavigate={navigateTo} store={store} />} path={viewPaths.dashboard} />
-          <Route element={<TasksView store={store} />} path={viewPaths.tasks} />
-          <Route element={<GroceryView store={store} />} path={viewPaths.groceries} />
-          <Route element={<MealPlanView store={store} />} path={viewPaths.meals} />
-          <Route element={<FamilyView store={store} />} path={viewPaths.family} />
-          <Route element={<AnalyticsView store={store} />} path={viewPaths.analytics} />
-          <Route element={<AssistantView store={store} />} path={viewPaths.assistant} />
-          <Route
-            element={
-              store.can('manage_family') ? (
-                <CommandCenterView store={store} />
-              ) : (
-                <Navigate replace to={viewPaths.dashboard} />
-              )
-            }
-            path={viewPaths['command-center']}
-          />
-          <Route
-            element={
-              store.can('view_audit') ? (
-                <HistoryView store={store} />
-              ) : (
-                <Navigate replace to={viewPaths.dashboard} />
-              )
-            }
-            path={viewPaths.history}
-          />
-          <Route
-            element={
-              store.can('view_implementation') ? (
-                <ImplementationView store={store} />
-              ) : (
-                <Navigate replace to={viewPaths.dashboard} />
-              )
-            }
-            path={viewPaths.implementation}
-          />
-          <Route element={<Navigate replace to={viewPaths.dashboard} />} path="*" />
-        </Routes>
-      )}
+      <Routes>
+        <Route element={<DashboardView onNavigate={navigateTo} store={store} />} path={viewPaths.dashboard} />
+        <Route element={<TasksView store={store} />} path={viewPaths.tasks} />
+        <Route element={<GroceryView store={store} />} path={viewPaths.groceries} />
+        <Route element={<MealPlanView store={store} />} path={viewPaths.meals} />
+        <Route element={<FamilyView store={store} />} path={viewPaths.family} />
+        <Route element={<AnalyticsView store={store} />} path={viewPaths.analytics} />
+        <Route element={<AssistantView store={store} />} path={viewPaths.assistant} />
+        <Route
+          element={
+            store.can('manage_family') ? (
+              <CommandCenterView store={store} />
+            ) : (
+              <Navigate replace to={viewPaths.dashboard} />
+            )
+          }
+          path={viewPaths['command-center']}
+        />
+        <Route
+          element={
+            store.can('view_audit') ? (
+              <HistoryView store={store} />
+            ) : (
+              <Navigate replace to={viewPaths.dashboard} />
+            )
+          }
+          path={viewPaths.history}
+        />
+        <Route
+          element={
+            store.can('view_implementation') ? (
+              <ImplementationView store={store} />
+            ) : (
+              <Navigate replace to={viewPaths.dashboard} />
+            )
+          }
+          path={viewPaths.implementation}
+        />
+        <Route element={<Navigate replace to={viewPaths.dashboard} />} path="*" />
+      </Routes>
     </AppShell>
   )
 }

@@ -59,12 +59,12 @@ def _issue_tokens(user: User, membership: FamilyMember, extra: dict[str, object]
 
 
 def _device_identifier(device_id: str | None, user_agent: str | None, ip_address: str | None) -> str:
+    """Return the client-provided device fingerprint, or derive one from request metadata."""
     if device_id:
         return device_id
+    # Fallback for clients that don't send a fingerprint (API tools, curl, etc.)
     fingerprint = f"{user_agent or 'unknown'}|{ip_address or 'unknown'}"
-    if user_agent or ip_address:
-        return str(uuid.uuid5(uuid.NAMESPACE_URL, fingerprint))
-    return str(uuid.uuid4())
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, fingerprint))
 
 
 def _register_device(
@@ -193,7 +193,13 @@ def login(
     return tokens
 
 
-def refresh(db: Session, refresh_token: str, family_id: int | None = None) -> dict[str, str]:
+def refresh(
+    db: Session,
+    refresh_token: str,
+    family_id: int | None = None,
+    user_agent: str | None = None,
+    ip_address: str | None = None,
+) -> dict[str, str]:
     try:
         payload = decode_token(refresh_token)
     except ValueError as exc:
@@ -230,7 +236,6 @@ def refresh(db: Session, refresh_token: str, family_id: int | None = None) -> di
         raise HTTPException(status_code=403, detail="This device has been revoked")
 
     device.last_used_at = datetime.utcnow()
-    db.commit()
 
     selected_family_id = family_id
     if selected_family_id is None and payload.get("family_id") and str(payload.get("family_id")).isdigit():
@@ -244,7 +249,10 @@ def refresh(db: Session, refresh_token: str, family_id: int | None = None) -> di
             ttl_seconds=settings.refresh_token_expire_days * 24 * 60 * 60,
         )
 
-    return _issue_tokens(user, membership, {"device_id": device_id})
+    tokens = _issue_tokens(user, membership, {"device_id": device_id})
+    _record_session(db, user, membership.family_id, device_id, tokens, user_agent, ip_address)
+    db.commit()
+    return tokens
 
 
 def logout_subject(db: Session, user_id: int | None, token_jti: str | None = None) -> dict[str, str]:

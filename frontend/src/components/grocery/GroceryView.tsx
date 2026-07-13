@@ -19,7 +19,7 @@ import { Button } from '@/components/ui/Button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { FormField, inputClass } from '@/components/ui/FormField'
 import type { FamilyHubStore } from '@/hooks/useFamilyHub'
-import type { Frequency, NewGroceryItemInput } from '@/types/familyHub'
+import type { Frequency, NewGroceryItemInput, NewShoppingItemInput, ShoppingCycleItem } from '@/types/familyHub'
 import { formatCompactDate } from '@/utils/date'
 import { cn } from '@/utils/style'
 
@@ -39,7 +39,7 @@ const emptyItem: NewGroceryItemInput = {
 type Tab = 'master' | 'shopping'
 
 export const GroceryView = ({ store }: { store: FamilyHubStore }) => {
-  const { state, addGroceryItem, addListType, updateListType, deleteListType, deleteGroceryItem, loadGroceryPage, regenerateGroceryCycles, toggleCurrentStock, toggleGroceryPurchased } = store
+  const { state, addGroceryItem, addListType, updateListType, deleteListType, deleteGroceryItem, loadGroceryPage, buildShoppingList, regenerateGroceryCycles, toggleCurrentStock, toggleGroceryPurchased, updateShoppingItem, addShoppingItem } = store
   const canManageGroceries = store.can('manage_groceries')
   const page = store.pagination.groceryItems
   const pageItems = store.paged.groceryItems ?? state.groceryItems
@@ -48,6 +48,16 @@ export const GroceryView = ({ store }: { store: FamilyHubStore }) => {
   const [frequency, setFrequency] = useState<Frequency | 'all'>('all')
   const [search, setSearch] = useState('')
   const [draft, setDraft] = useState<NewGroceryItemInput>(emptyItem)
+  const [shoppingDraft, setShoppingDraft] = useState<NewShoppingItemInput>({
+    itemName: '',
+    listTypeId: 1,
+    quantity: 1,
+    unit: 'Units',
+    purchaseFrequency: 'weekly',
+    notes: '',
+  })
+  const [purchaseDrafts, setPurchaseDrafts] = useState<Record<number, string>>({})
+  const [requiredDrafts, setRequiredDrafts] = useState<Record<number, string>>({})
   const [newPlace, setNewPlace] = useState({ name: '', description: '', color: 'bg-slate-500' })
   const [showAddPlace, setShowAddPlace] = useState(false)
   const [editingPlaceId, setEditingPlaceId] = useState<number | null>(null)
@@ -56,6 +66,19 @@ export const GroceryView = ({ store }: { store: FamilyHubStore }) => {
   useEffect(() => {
     loadGroceryPage(0, selectedListId)
   }, [loadGroceryPage, selectedListId])
+
+  useEffect(() => {
+    if (tab === 'shopping') {
+      void buildShoppingList()
+    }
+  }, [buildShoppingList, tab])
+
+  useEffect(() => {
+    const firstListId = state.listTypes[0]?.id
+    if (!firstListId) return
+    setDraft((current) => (state.listTypes.some((listType) => listType.id === current.listTypeId) ? current : { ...current, listTypeId: firstListId }))
+    setShoppingDraft((current) => (state.listTypes.some((listType) => listType.id === current.listTypeId) ? current : { ...current, listTypeId: firstListId }))
+  }, [state.listTypes])
 
   const filteredItems = useMemo(() => {
     const normalized = search.toLowerCase().trim()
@@ -75,13 +98,11 @@ export const GroceryView = ({ store }: { store: FamilyHubStore }) => {
     const activeCycles = state.groceryCycles.filter((cycle) => !cycle.isCompleted)
     return activeCycles.map((cycle) => {
       const listType = state.listTypes.find((lt) => lt.id === cycle.listTypeId)
-      const items = state.groceryItems.filter(
-        (item) => item.listTypeId === cycle.listTypeId && item.purchaseFrequency === cycle.frequency,
-      )
-      const purchased = items.filter((item) => item.purchased).length
+      const items = state.shoppingItems.filter((item) => item.cycleId === cycle.id)
+      const purchased = items.filter((item) => item.isPurchased).length
       return { cycle, listType, items, purchased }
     })
-  }, [state.groceryCycles, state.groceryItems, state.listTypes])
+  }, [state.groceryCycles, state.listTypes, state.shoppingItems])
 
   const neededItems = state.groceryItems.filter((item) => item.needsPurchase || !item.currentStock)
   const purchasedItems = state.groceryItems.filter((item) => item.purchased)
@@ -96,7 +117,43 @@ export const GroceryView = ({ store }: { store: FamilyHubStore }) => {
       notes: draft.notes.trim(),
       quantity: Number(draft.quantity) || 1,
     })
-    setDraft(emptyItem)
+    setDraft({ ...emptyItem, listTypeId: state.listTypes[0]?.id ?? emptyItem.listTypeId })
+  }
+
+  const handleShoppingSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!shoppingDraft.itemName.trim()) return
+    addShoppingItem({
+      ...shoppingDraft,
+      itemName: shoppingDraft.itemName.trim(),
+      notes: shoppingDraft.notes.trim(),
+      quantity: Number(shoppingDraft.quantity) || 1,
+    })
+    setShoppingDraft((current) => ({ ...current, itemName: '', quantity: 1, notes: '' }))
+  }
+
+  const commitPurchasedQuantity = (item: ShoppingCycleItem, rawValue: string) => {
+    const parsed = Number(rawValue)
+    if (!Number.isFinite(parsed)) return
+    const purchasedQuantity = Math.min(Math.max(parsed, 0), item.quantity)
+    setPurchaseDrafts((current) => {
+      const next = { ...current }
+      delete next[item.id]
+      return next
+    })
+    updateShoppingItem(item.id, { purchasedQuantity })
+  }
+
+  const commitRequiredQuantity = (item: ShoppingCycleItem, rawValue: string) => {
+    const parsed = Number(rawValue)
+    if (!Number.isFinite(parsed)) return
+    const quantity = Math.max(parsed, 0)
+    setRequiredDrafts((current) => {
+      const next = { ...current }
+      delete next[item.id]
+      return next
+    })
+    updateShoppingItem(item.id, { quantity })
   }
 
   return (
@@ -447,10 +504,8 @@ export const GroceryView = ({ store }: { store: FamilyHubStore }) => {
               <CardContent className="grid gap-3">
                 {state.groceryCycles.map((cycle) => {
                   const listType = state.listTypes.find((list) => list.id === cycle.listTypeId)
-                  const cycleItems = state.groceryItems.filter(
-                    (item) => item.listTypeId === cycle.listTypeId && item.purchaseFrequency === cycle.frequency,
-                  )
-                  const completed = cycleItems.filter((item) => item.purchased).length
+                  const cycleItems = state.shoppingItems.filter((item) => item.cycleId === cycle.id)
+                  const completed = cycleItems.filter((item) => item.isPurchased).length
                   const progress = cycleItems.length === 0 ? 0 : Math.round((completed / cycleItems.length) * 100)
 
                   return (
@@ -587,19 +642,118 @@ export const GroceryView = ({ store }: { store: FamilyHubStore }) => {
 
       {tab === 'shopping' && (
         <div className="grid gap-5">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between gap-3">
+              <div>
+                <CardTitle>Current Shopping Trip</CardTitle>
+                <p className="mt-1 text-xs text-slate-400">
+                  {state.shoppingItems.length} active rows across {shoppingLists.length} list{shoppingLists.length === 1 ? '' : 's'}
+                </p>
+              </div>
+              <Button onClick={() => void buildShoppingList()} variant="secondary">
+                <RefreshCw className="size-4" aria-hidden="true" />
+                Build now
+              </Button>
+            </CardHeader>
+            {canManageGroceries && (
+              <CardContent>
+                <form onSubmit={handleShoppingSubmit}>
+                  <fieldset
+                    className="m-0 grid gap-3 border-0 p-0 lg:grid-cols-[minmax(180px,1.3fr)_minmax(150px,1fr)_130px_110px_130px_minmax(160px,1fr)_auto]"
+                    disabled={state.listTypes.length === 0}
+                  >
+                    <FormField label="Item">
+                      <input
+                        className={inputClass}
+                        onChange={(event) =>
+                          setShoppingDraft((current) => ({ ...current, itemName: event.target.value }))
+                        }
+                        placeholder="Add to this trip"
+                        value={shoppingDraft.itemName}
+                      />
+                    </FormField>
+                    <FormField label="List">
+                      <select
+                        className={inputClass}
+                        onChange={(event) =>
+                          setShoppingDraft((current) => ({ ...current, listTypeId: Number(event.target.value) }))
+                        }
+                        value={shoppingDraft.listTypeId}
+                      >
+                        {state.listTypes.map((listType) => (
+                          <option key={listType.id} value={listType.id}>{listType.listName}</option>
+                        ))}
+                      </select>
+                    </FormField>
+                    <FormField label="Cycle">
+                      <select
+                        className={inputClass}
+                        onChange={(event) =>
+                          setShoppingDraft((current) => ({ ...current, purchaseFrequency: event.target.value as Frequency }))
+                        }
+                        value={shoppingDraft.purchaseFrequency}
+                      >
+                        {frequencyOptions.map((option) => (
+                          <option key={option} value={option}>{option}</option>
+                        ))}
+                      </select>
+                    </FormField>
+                    <FormField label="Qty">
+                      <input
+                        className={inputClass}
+                        min="0.01"
+                        onChange={(event) =>
+                          setShoppingDraft((current) => ({ ...current, quantity: Number(event.target.value) }))
+                        }
+                        step="0.5"
+                        type="number"
+                        value={shoppingDraft.quantity}
+                      />
+                    </FormField>
+                    <FormField label="Unit">
+                      <select
+                        className={inputClass}
+                        onChange={(event) => setShoppingDraft((current) => ({ ...current, unit: event.target.value }))}
+                        value={shoppingDraft.unit}
+                      >
+                        {unitOptions.map((u) => (
+                          <option key={u} value={u}>{u}</option>
+                        ))}
+                      </select>
+                    </FormField>
+                    <FormField label="Notes">
+                      <input
+                        className={inputClass}
+                        onChange={(event) => setShoppingDraft((current) => ({ ...current, notes: event.target.value }))}
+                        placeholder="Brand, size, replacement"
+                        value={shoppingDraft.notes}
+                      />
+                    </FormField>
+                    <div className="flex items-end">
+                      <Button className="w-full" type="submit">
+                        <Plus className="size-4" aria-hidden="true" />
+                        Add
+                      </Button>
+                    </div>
+                  </fieldset>
+                </form>
+              </CardContent>
+            )}
+          </Card>
           {shoppingLists.length === 0 ? (
             <Card>
               <CardContent className="py-16 text-center">
                 <ShoppingCart className="mx-auto size-12 text-slate-200" aria-hidden="true" />
                 <p className="mt-4 text-sm font-semibold text-slate-600">No active shopping lists</p>
                 <p className="mt-1 text-xs text-slate-400">
-                  Click "Regenerate cycles" to create shopping lists from your master list.
+                  Build the current trip from the master list or add a one-off item.
                 </p>
               </CardContent>
             </Card>
           ) : (
-            shoppingLists.map(({ cycle, listType, items, purchased }) => {
+            shoppingLists.map(({ cycle, listType, items, purchased }: { cycle: typeof state.groceryCycles[number]; listType: typeof state.listTypes[number] | undefined; items: ShoppingCycleItem[]; purchased: number }) => {
               const progress = items.length === 0 ? 0 : Math.round((purchased / items.length) * 100)
+              const partial = items.filter((item) => item.purchasedQuantity > 0 && !item.isPurchased).length
               const allDone = purchased === items.length && items.length > 0
 
               return (
@@ -617,6 +771,7 @@ export const GroceryView = ({ store }: { store: FamilyHubStore }) => {
                     </div>
                     <div className="flex items-center gap-2">
                       {allDone && <Badge tone="green">Complete</Badge>}
+                      {partial > 0 && <Badge tone="amber">{partial} partial</Badge>}
                       <Badge tone="teal">{progress}%</Badge>
                     </div>
                   </CardHeader>
@@ -627,37 +782,91 @@ export const GroceryView = ({ store }: { store: FamilyHubStore }) => {
                         style={{ width: `${progress}%` }}
                       />
                     </div>
-                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                    <div className="grid gap-3">
                       {items.map((item) => (
-                        <label
+                        <article
                           className={cn(
-                            'flex cursor-pointer items-start gap-3 rounded-xl border p-4 transition-all duration-200',
-                            item.purchased
+                            'grid gap-3 rounded-xl border p-4 transition-all duration-200 md:grid-cols-[minmax(0,1fr)_260px_auto]',
+                            item.isPurchased
                               ? 'border-emerald-200/60 bg-emerald-50/40'
                               : 'border-slate-100/80 bg-white hover:border-indigo-200 hover:shadow-sm',
                           )}
                           key={item.id}
                         >
-                          <input
-                            checked={item.purchased}
-                            className="mt-0.5 size-5 rounded-md border-slate-300 text-emerald-600"
-                            disabled={!canManageGroceries}
-                            onChange={() => toggleGroceryPurchased(item.id)}
-                            type="checkbox"
-                          />
-                          <div className="min-w-0 flex-1">
-                            <p className={cn('text-sm font-semibold', item.purchased ? 'text-slate-400 line-through' : 'text-slate-900')}>
-                              {item.itemName}
-                            </p>
-                            <p className="text-[11px] text-slate-400">
-                              {item.quantity} {item.unit}
-                            </p>
-                            {item.notes && <p className="mt-1 text-[11px] text-slate-400">{item.notes}</p>}
+                          <div className="flex min-w-0 items-start gap-3">
+                            <input
+                              checked={item.isPurchased}
+                              className="mt-0.5 size-5 rounded-md border-slate-300 text-emerald-600"
+                              disabled={!canManageGroceries}
+                              onChange={() => updateShoppingItem(item.id, { isPurchased: !item.isPurchased })}
+                              type="checkbox"
+                            />
+                            <div className="min-w-0">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <p className={cn('text-sm font-semibold', item.isPurchased ? 'text-slate-400 line-through' : 'text-slate-900')}>
+                                  {item.itemName}
+                                </p>
+                                {item.isAdhoc && <Badge tone="indigo">Added</Badge>}
+                                {item.carriedForward && <Badge tone="amber">Carry</Badge>}
+                              </div>
+                              <p className="mt-1 text-[11px] text-slate-400">
+                                {item.purchasedQuantity} of {item.quantity} {item.unit} bought
+                              </p>
+                              {item.notes && <p className="mt-1 text-[11px] text-slate-400">{item.notes}</p>}
+                            </div>
                           </div>
-                          {item.purchased && (
-                            <CheckCircle2 className="size-5 shrink-0 text-emerald-500" aria-hidden="true" />
-                          )}
-                        </label>
+                          <div className="grid grid-cols-2 gap-2">
+                            <FormField label="Need">
+                              <input
+                                className={inputClass}
+                                disabled={!canManageGroceries}
+                                min="0"
+                                onBlur={(event) => commitRequiredQuantity(item, event.currentTarget.value)}
+                                onChange={(event) =>
+                                  setRequiredDrafts((current) => ({ ...current, [item.id]: event.target.value }))
+                                }
+                                onKeyDown={(event) => {
+                                  if (event.key === 'Enter') {
+                                    event.preventDefault()
+                                    event.currentTarget.blur()
+                                  }
+                                }}
+                                step="0.5"
+                                type="number"
+                                value={requiredDrafts[item.id] ?? String(item.quantity)}
+                              />
+                            </FormField>
+                            <FormField label="Bought">
+                              <input
+                                className={inputClass}
+                                disabled={!canManageGroceries}
+                                max={item.quantity}
+                                min="0"
+                                onBlur={(event) => commitPurchasedQuantity(item, event.currentTarget.value)}
+                                onChange={(event) =>
+                                  setPurchaseDrafts((current) => ({ ...current, [item.id]: event.target.value }))
+                                }
+                                onKeyDown={(event) => {
+                                  if (event.key === 'Enter') {
+                                    event.preventDefault()
+                                    event.currentTarget.blur()
+                                  }
+                                }}
+                                step="0.5"
+                                type="number"
+                                value={purchaseDrafts[item.id] ?? String(item.purchasedQuantity)}
+                              />
+                            </FormField>
+                          </div>
+                          <div className="flex items-center justify-end gap-2">
+                            <Badge tone={item.isPurchased ? 'green' : item.purchasedQuantity > 0 ? 'amber' : 'slate'}>
+                              {item.isPurchased ? 'Done' : item.purchasedQuantity > 0 ? 'Partial' : 'Open'}
+                            </Badge>
+                            {item.isPurchased && (
+                              <CheckCircle2 className="size-5 shrink-0 text-emerald-500" aria-hidden="true" />
+                            )}
+                          </div>
+                        </article>
                       ))}
                     </div>
                   </CardContent>

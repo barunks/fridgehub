@@ -10,6 +10,7 @@ export const LoginPage = ({ onLogin, error }: LoginPageProps) => {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
+  const showDemoCredentials = import.meta.env.DEV && import.meta.env.VITE_SHOW_DEMO_CREDENTIALS === 'true'
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
@@ -85,9 +86,11 @@ export const LoginPage = ({ onLogin, error }: LoginPageProps) => {
           </button>
         </form>
 
-        <p className="mt-7 text-center text-xs text-slate-400">
-          Demo: <span className="font-medium text-slate-500">meera</span> / <span className="font-medium text-slate-500">familyhub</span>
-        </p>
+        {showDemoCredentials && (
+          <p className="mt-7 text-center text-xs text-slate-400">
+            Demo: <span className="font-medium text-slate-500">meera</span> / <span className="font-medium text-slate-500">familyhub</span>
+          </p>
+        )}
       </div>
     </div>
   )

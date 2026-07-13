@@ -2,10 +2,14 @@ import { expect, test } from '@playwright/test'
 
 const signIn = async (page: import('@playwright/test').Page, path = '/') => {
   await page.goto(path)
+  await page.evaluate(() => {
+    localStorage.setItem('familyhub-device-id', 'familyhub-e2e-shared-device')
+    localStorage.setItem('familyhub-device-name', 'Playwright E2E Browser')
+  })
   await page.getByLabel('Username').fill('meera')
   await page.getByLabel('Password').fill('familyhub')
   await page.getByRole('button', { name: /^Sign in$/i }).click()
-  await expect(page.getByRole('heading', { name: /Good (morning|afternoon|evening), Meera/i })).toBeVisible()
+  await expect(page.getByRole('heading', { name: /Good (morning|afternoon|evening|night), Meera/i })).toBeVisible()
 }
 
 test.describe('Device Management', () => {

@@ -1,3 +1,4 @@
+import logging
 from datetime import UTC, datetime
 from decimal import Decimal
 from threading import Lock
@@ -26,9 +27,22 @@ from app.models import (
 from app.services.assistant_rules import generate_insights
 
 _bootstrap_locks: dict[int, Lock] = {}
+logger = logging.getLogger("familyhub.family_service")
 
 # Entity cache key helpers
-ENTITIES = ("members", "list_types", "groceries", "cycles", "tasks", "meals", "recipes", "notifications", "announcements", "contacts")
+ENTITIES = (
+    "members",
+    "list_types",
+    "groceries",
+    "cycles",
+    "shopping_items",
+    "tasks",
+    "meals",
+    "recipes",
+    "notifications",
+    "announcements",
+    "contacts",
+)
 
 
 def _entity_key(entity: str, family_id: int) -> str:
@@ -39,7 +53,10 @@ def _entity_key(entity: str, family_id: int) -> str:
 
 def invalidate_entity(entity: str, family_id: int) -> None:
     """Invalidate a single entity cache for a family."""
-    cache.bump_namespace(f"family:{family_id}:{entity}")
+    try:
+        cache.bump_namespace(f"family:{family_id}:{entity}")
+    except Exception:
+        logger.exception("Failed to invalidate cache entity=%s family_id=%s", entity, family_id)
 
 
 def invalidate_family_cache(family_id: int) -> None:
@@ -130,6 +147,27 @@ def serialize_cycle(cycle: GroceryPurchaseCycle) -> dict[str, Any]:
         "cycleStartDate": cycle.cycle_start_date,
         "cycleEndDate": cycle.cycle_end_date,
         "isCompleted": cycle.is_completed,
+    }
+
+
+def serialize_shopping_item(sub_item: GrocerySubList) -> dict[str, Any]:
+    item = sub_item.item
+    cycle = sub_item.purchase_cycle
+    return {
+        "id": sub_item.id,
+        "cycleId": sub_item.purchase_cycle_id,
+        "itemId": sub_item.item_id,
+        "itemNumber": item.item_number if item else "",
+        "itemName": item.item_name if item else "",
+        "listTypeId": cycle.list_type_id if cycle else item.list_type_id if item else 0,
+        "frequency": cycle.frequency if cycle else item.purchase_frequency if item else "weekly",
+        "quantity": _number(sub_item.quantity),
+        "unit": sub_item.unit or "",
+        "isPurchased": sub_item.is_purchased,
+        "purchasedQuantity": _number(sub_item.purchased_quantity),
+        "notes": sub_item.notes or "",
+        "isAdhoc": sub_item.is_adhoc,
+        "carriedForward": sub_item.carried_forward,
     }
 
 
@@ -228,10 +266,14 @@ def default_assistant_messages() -> list[dict[str, Any]]:
 
 def _fetch_entity(db: Session, entity: str, family_id: int) -> Any:
     """Fetch and cache a single entity for a family."""
-    key = _entity_key(entity, family_id)
-    cached = cache.get(key)
-    if cached is not None:
-        return cached
+    key: str | None = None
+    try:
+        key = _entity_key(entity, family_id)
+        cached = cache.get(key)
+        if cached is not None:
+            return cached
+    except Exception:
+        logger.exception("Failed to read cache entity=%s family_id=%s", entity, family_id)
 
     if entity == "family":
         family = (
@@ -284,12 +326,35 @@ def _fetch_entity(db: Session, entity: str, family_id: int) -> Any:
             .all()
         )
         data = [serialize_cycle(c) for c in cycles]
+    elif entity == "shopping_items":
+        sub_items = (
+            db.query(GrocerySubList)
+            .join(GroceryPurchaseCycle, GrocerySubList.purchase_cycle_id == GroceryPurchaseCycle.id)
+            .join(GroceryItem, GrocerySubList.item_id == GroceryItem.id)
+            .join(GroceryListType, GroceryPurchaseCycle.list_type_id == GroceryListType.id)
+            .filter(
+                GroceryPurchaseCycle.family_id == family_id,
+                GroceryPurchaseCycle.is_completed.is_(False),
+                GroceryListType.is_active.is_(True),
+                GroceryItem.is_active.is_(True),
+            )
+            .options(selectinload(GrocerySubList.item), selectinload(GrocerySubList.purchase_cycle))
+            .order_by(GroceryPurchaseCycle.id, GrocerySubList.id)
+            .all()
+        )
+        data = [serialize_shopping_item(sub_item) for sub_item in sub_items]
     elif entity == "tasks":
         data = [serialize_task(t) for t in db.query(Task).filter_by(family_id=family_id, is_active=True).order_by(Task.due_date).all()]
     elif entity == "meals":
         data = [serialize_meal(m) for m in db.query(MealPlan).filter_by(family_id=family_id, is_active=True).order_by(MealPlan.plan_date, MealPlan.id).all()]
     elif entity == "recipes":
-        data = [serialize_recipe(r) for r in db.query(Recipe).filter(Recipe.family_id.in_([family_id, None]), Recipe.is_active.is_(True)).order_by(Recipe.id).all()]
+        data = [
+            serialize_recipe(r)
+            for r in db.query(Recipe)
+            .filter(((Recipe.family_id == family_id) | (Recipe.family_id.is_(None))), Recipe.is_active.is_(True))
+            .order_by(Recipe.id)
+            .all()
+        ]
     elif entity == "notifications":
         data = [serialize_notification(n) for n in db.query(Notification).filter_by(family_id=family_id).order_by(Notification.created_at.desc()).all()]
     elif entity == "announcements":
@@ -299,7 +364,11 @@ def _fetch_entity(db: Session, entity: str, family_id: int) -> Any:
     else:
         data = []
 
-    cache.set(key, data, ttl_seconds=300)
+    if key:
+        try:
+            cache.set(key, data, ttl_seconds=300)
+        except Exception:
+            logger.exception("Failed to write cache entity=%s family_id=%s", entity, family_id)
     return data
 
 
@@ -312,6 +381,7 @@ def bootstrap_state(db: Session, family_id: int) -> dict[str, Any]:
             "listTypes": _fetch_entity(db, "list_types", family_id),
             "groceryItems": _fetch_entity(db, "groceries", family_id),
             "groceryCycles": _fetch_entity(db, "cycles", family_id),
+            "shoppingItems": _fetch_entity(db, "shopping_items", family_id),
             "tasks": _fetch_entity(db, "tasks", family_id),
             "meals": _fetch_entity(db, "meals", family_id),
             "recipes": _fetch_entity(db, "recipes", family_id),

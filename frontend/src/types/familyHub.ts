@@ -107,6 +107,23 @@ export interface GroceryCycle {
   isCompleted: boolean
 }
 
+export interface ShoppingCycleItem {
+  id: number
+  cycleId: number
+  itemId: number
+  itemNumber: string
+  itemName: string
+  listTypeId: number
+  frequency: Frequency
+  quantity: number
+  unit: string
+  isPurchased: boolean
+  purchasedQuantity: number
+  notes: string
+  isAdhoc: boolean
+  carriedForward: boolean
+}
+
 export interface Task {
   id: number
   title: string
@@ -198,6 +215,7 @@ export interface FamilyHubState {
   listTypes: GroceryListType[]
   groceryItems: GroceryItem[]
   groceryCycles: GroceryCycle[]
+  shoppingItems: ShoppingCycleItem[]
   tasks: Task[]
   meals: MealPlanItem[]
   recipes: Recipe[]
@@ -228,6 +246,23 @@ export interface NewGroceryItemInput {
   purchaseFrequency: Frequency
   currentStock: boolean
   notes: string
+}
+
+export interface NewShoppingItemInput {
+  itemName: string
+  listTypeId: number
+  quantity: number
+  unit: string
+  purchaseFrequency: Frequency
+  notes: string
+}
+
+export interface ShoppingItemUpdateInput {
+  quantity?: number
+  unit?: string
+  isPurchased?: boolean
+  purchasedQuantity?: number
+  notes?: string
 }
 
 export interface NewTaskInput {

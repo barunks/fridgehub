@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { createInitialFamilyHubState } from '@/data/seed'
+import { createEmptyFamilyHubState, createInitialFamilyHubState } from '@/data/seed'
 import { api } from '@/services/api'
 import type {
   AuditLogEntry,
@@ -7,10 +7,13 @@ import type {
   GroceryItem,
   MealPlanItem,
   NewGroceryItemInput,
+  NewShoppingItemInput,
   NewTaskInput,
   Notification,
   Permission,
   Recipe,
+  ShoppingCycleItem,
+  ShoppingItemUpdateInput,
   Task,
 } from '@/types/familyHub'
 import { dateOffsetIso, dateTimeOffsetIso, todayIso } from '@/utils/date'
@@ -68,7 +71,7 @@ export const useFamilyHub = (
   authCapabilities: Permission[] = [],
   authRole: string | null = null,
 ) => {
-  const [state, setState] = useState<FamilyHubState>(createInitialFamilyHubState)
+  const [state, setState] = useState<FamilyHubState>(createEmptyFamilyHubState)
   const [isLoading, setIsLoading] = useState(false)
   const [isBackendUnavailable, setIsBackendUnavailable] = useState(false)
   const [isBrowserOffline, setIsBrowserOffline] = useState(() => (typeof navigator === 'undefined' ? false : !navigator.onLine))
@@ -127,14 +130,14 @@ export const useFamilyHub = (
     return false
   }
 
-  const refreshFromApi = useCallback(() => {
+  const refreshFromApi = useCallback((): Promise<void> => {
     if (!isAuthenticated) {
-      setState(createInitialFamilyHubState())
+      setState(createEmptyFamilyHubState())
       setIsLoading(false)
-      return
+      return Promise.resolve()
     }
     setIsLoading(true)
-    api
+    return api
       .bootstrap()
       .then((payload) => {
         setState(payload)
@@ -152,11 +155,11 @@ export const useFamilyHub = (
 
   const syncApi = (operation: Promise<unknown>, successMessage: string, rollback?: () => void) => {
     setIsLoading(true)
-    operation
+    return operation
       .then(() => {
         setIsBackendUnavailable(false)
         setFeedback({ type: 'success', message: successMessage })
-        refreshFromApi()
+        return refreshFromApi()
       })
       .catch((error: unknown) => {
         rollback?.()
@@ -186,7 +189,7 @@ export const useFamilyHub = (
       return update(current)
     })
     updatePageCaches?.()
-    syncApi(operation, successMessage, () => {
+    return syncApi(operation, successMessage, () => {
       if (snapshot) setState(snapshot)
       setGroceryPageItems(groceryPageSnapshot)
       setTaskPageItems(taskPageSnapshot)
@@ -326,6 +329,26 @@ export const useFamilyHub = (
       .finally(() => setMemberMealsLoading(false))
   }, [])
 
+  const buildShoppingList = useCallback(() => {
+    if (!isAuthenticated) {
+      return Promise.resolve()
+    }
+    setIsLoading(true)
+    return api
+      .buildShoppingList()
+      .then(() => {
+        setIsBackendUnavailable(false)
+        return refreshFromApi()
+      })
+      .catch((error: unknown) => {
+        const msg = error instanceof Error ? error.message : 'Failed to build shopping list'
+        if (msg !== 'AUTH_REQUIRED') {
+          setFeedback({ type: 'error', message: msg })
+        }
+        setIsLoading(false)
+      })
+  }, [isAuthenticated, refreshFromApi])
+
   useEffect(() => {
     refreshFromApi()
   }, [refreshFromApi])
@@ -402,11 +425,22 @@ export const useFamilyHub = (
             }
           : item,
       )
+    const updateShoppingPurchased = (items: ShoppingCycleItem[]) =>
+      items.map((item) =>
+        item.itemId === itemId
+          ? {
+              ...item,
+              isPurchased: purchased,
+              purchasedQuantity: purchased ? item.quantity : 0,
+            }
+          : item,
+      )
 
-    mutateWithRollback(
+    return mutateWithRollback(
       (current) => ({
         ...current,
         groceryItems: updateGroceryPurchased(current.groceryItems),
+        shoppingItems: updateShoppingPurchased(current.shoppingItems),
       }),
       api.updateGroceryItem(itemId, { purchased }),
       'Grocery item updated',
@@ -431,11 +465,22 @@ export const useFamilyHub = (
             }
           : item,
       )
+    const updateShoppingPurchased = (items: ShoppingCycleItem[]) =>
+      items.map((item) =>
+        item.itemId === itemId
+          ? {
+              ...item,
+              isPurchased: currentStock,
+              purchasedQuantity: currentStock ? item.quantity : 0,
+            }
+          : item,
+      )
 
-    mutateWithRollback(
+    return mutateWithRollback(
       (current) => ({
         ...current,
         groceryItems: updateGroceryStock(current.groceryItems),
+        shoppingItems: updateShoppingPurchased(current.shoppingItems),
       }),
       api.updateGroceryItem(itemId, { currentStock }),
       'Stock updated',
@@ -443,14 +488,89 @@ export const useFamilyHub = (
     )
   }
 
+  const updateShoppingItem = (subItemId: number, patch: ShoppingItemUpdateInput) => {
+    if (!guardPermission('manage_groceries')) {
+      return
+    }
+    const target = state.shoppingItems.find((item) => item.id === subItemId)
+    if (!target) {
+      return
+    }
+
+    const updateShoppingItems = (items: ShoppingCycleItem[]) =>
+      items.map((item) => {
+        if (item.id !== subItemId) return item
+
+        const quantity = patch.quantity ?? item.quantity
+        const unit = patch.unit ?? item.unit
+        const notes = patch.notes ?? item.notes
+        let purchasedQuantity = item.purchasedQuantity
+        let isPurchased = item.isPurchased
+
+        if (patch.isPurchased !== undefined) {
+          isPurchased = patch.isPurchased
+          purchasedQuantity = patch.isPurchased ? quantity : 0
+        } else if (patch.purchasedQuantity !== undefined) {
+          purchasedQuantity = Math.min(Math.max(patch.purchasedQuantity, 0), quantity)
+          isPurchased = quantity <= 0 || purchasedQuantity >= quantity
+        } else if (patch.quantity !== undefined) {
+          purchasedQuantity = Math.min(purchasedQuantity, quantity)
+          isPurchased = quantity <= 0 || purchasedQuantity >= quantity
+        }
+
+        return {
+          ...item,
+          quantity,
+          unit,
+          notes,
+          purchasedQuantity,
+          isPurchased,
+        }
+      })
+
+    const updatedTarget = updateShoppingItems([target])[0]
+    const updateGroceryStatus = (items: GroceryItem[]) =>
+      items.map((item) =>
+        item.id === target.itemId
+          ? {
+              ...item,
+              purchased: updatedTarget.isPurchased,
+              currentStock: updatedTarget.isPurchased,
+              needsPurchase: !updatedTarget.isPurchased,
+            }
+          : item,
+      )
+
+    return mutateWithRollback(
+      (current) => ({
+        ...current,
+        shoppingItems: updateShoppingItems(current.shoppingItems),
+        groceryItems: updateGroceryStatus(current.groceryItems),
+      }),
+      api.updateShoppingItem(subItemId, patch),
+      'Shopping item updated',
+      () => setGroceryPageItems((current) => (current ? updateGroceryStatus(current) : current)),
+    )
+  }
+
+  const addShoppingItem = (input: NewShoppingItemInput) => {
+    if (!guardPermission('manage_groceries')) {
+      return
+    }
+    return syncApi(api.createShoppingItem(input), 'Shopping item added')
+  }
+
   const addGroceryItem = (input: NewGroceryItemInput) => {
     if (!guardPermission('manage_groceries')) {
       return
     }
-    mutateWithRollback(
+    return mutateWithRollback(
       (current) => {
         const id = nextId(current.groceryItems)
         const itemNumber = `GRC-${String(id).padStart(4, '0')}`
+        const cycle = current.groceryCycles.find(
+          (candidate) => candidate.listTypeId === input.listTypeId && candidate.frequency === input.purchaseFrequency,
+        )
 
         return {
           ...current,
@@ -473,6 +593,27 @@ export const useFamilyHub = (
               needsPurchase: !input.currentStock,
             },
           ],
+          shoppingItems: cycle
+            ? [
+                ...current.shoppingItems,
+                {
+                  id: nextId(current.shoppingItems),
+                  cycleId: cycle.id,
+                  itemId: id,
+                  itemNumber,
+                  itemName: input.itemName,
+                  listTypeId: input.listTypeId,
+                  frequency: input.purchaseFrequency,
+                  quantity: input.quantity,
+                  unit: input.unit,
+                  isPurchased: input.currentStock,
+                  purchasedQuantity: input.currentStock ? input.quantity : 0,
+                  notes: input.notes,
+                  isAdhoc: false,
+                  carriedForward: false,
+                },
+              ]
+            : current.shoppingItems,
           notifications: [
             createNotification(
               current.notifications,
@@ -493,7 +634,7 @@ export const useFamilyHub = (
     if (!guardPermission('manage_groceries')) {
       return
     }
-    mutateWithRollback(
+    return mutateWithRollback(
       (current) => {
         const cycleKeys = Array.from(
           new Set(current.groceryItems.map((item) => `${item.listTypeId}:${item.purchaseFrequency}`)),
@@ -512,9 +653,35 @@ export const useFamilyHub = (
           }
         })
 
+        const shoppingItems = current.groceryItems.flatMap((item) => {
+          const cycle = cycles.find(
+            (candidate) => candidate.listTypeId === item.listTypeId && candidate.frequency === item.purchaseFrequency,
+          )
+          if (!cycle) return []
+          return [
+            {
+              id: item.id,
+              cycleId: cycle.id,
+              itemId: item.id,
+              itemNumber: item.itemNumber,
+              itemName: item.itemName,
+              listTypeId: item.listTypeId,
+              frequency: item.purchaseFrequency,
+              quantity: item.quantity,
+              unit: item.unit,
+              isPurchased: item.purchased,
+              purchasedQuantity: item.purchased ? item.quantity : 0,
+              notes: item.notes,
+              isAdhoc: false,
+              carriedForward: false,
+            },
+          ]
+        })
+
         return {
           ...current,
           groceryCycles: cycles,
+          shoppingItems,
           notifications: [
             createNotification(
               current.notifications,
@@ -626,9 +793,9 @@ export const useFamilyHub = (
 
   const applyWeeklyTemplate = (memberId?: number | null) => {
     if (!guardPermission('manage_meals')) {
-      return
+      return Promise.resolve()
     }
-    mutateWithRollback(
+    return mutateWithRollback(
       (current) => ({
         ...current,
         notifications: [
@@ -643,6 +810,28 @@ export const useFamilyHub = (
       }),
       api.applyMealTemplate(memberId),
       'Meal template applied',
+    )
+  }
+
+  const applyWeeklyTemplateForAll = () => {
+    if (!guardPermission('manage_meals')) {
+      return Promise.resolve()
+    }
+    return mutateWithRollback(
+      (current) => ({
+        ...current,
+        notifications: [
+          createNotification(
+            current.notifications,
+            'Weekly template applied',
+            'The full breakfast, lunch, snacks, and dinner plan is active for all family members this week.',
+            'meal',
+          ),
+          ...current.notifications,
+        ],
+      }),
+      api.applyMealTemplateAll(),
+      'Meal templates applied',
     )
   }
 
@@ -836,10 +1025,11 @@ export const useFamilyHub = (
     if (!guardPermission('manage_groceries')) {
       return
     }
-    mutateWithRollback(
+    return mutateWithRollback(
       (current) => ({
         ...current,
         groceryItems: current.groceryItems.filter((i) => i.id !== itemId),
+        shoppingItems: current.shoppingItems.filter((i) => i.itemId !== itemId),
       }),
       api.deleteGroceryItem(itemId),
       'Grocery item deleted',
@@ -1030,9 +1220,12 @@ export const useFamilyHub = (
     loadNotificationPage,
     loadAuditLogs,
     loadMemberMeals,
+    buildShoppingList,
     toggleTaskStatus,
     toggleGroceryPurchased,
     toggleCurrentStock,
+    updateShoppingItem,
+    addShoppingItem,
     addGroceryItem,
     addListType,
     regenerateGroceryCycles,
@@ -1040,6 +1233,7 @@ export const useFamilyHub = (
     reassignTask,
     updateMeal,
     applyWeeklyTemplate,
+    applyWeeklyTemplateForAll,
     markNotificationRead,
     markAllNotificationsRead,
     addAnnouncement,

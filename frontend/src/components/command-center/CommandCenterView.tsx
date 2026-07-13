@@ -448,7 +448,7 @@ const InsightsPanel = ({ store }: Props) => {
           <div className="rounded-xl border border-slate-100 bg-white p-4 shadow-sm" key={insight.id}>
             <div className="flex items-center gap-2">
               <Badge tone={typeColor[insight.type] ?? 'slate'}>{insight.type}</Badge>
-              <span className="text-xs text-slate-400">{Math.round(insight.confidence * 100)}% confidence</span>
+              <span className="text-xs text-slate-400">{Math.round(insight.confidence)}% confidence</span>
             </div>
             <p className="mt-2 text-sm font-semibold text-slate-900">{insight.title}</p>
             <p className="mt-1 text-xs leading-5 text-slate-600">{insight.body}</p>
@@ -464,7 +464,7 @@ const mealTypes: MealType[] = ['breakfast', 'lunch', 'snacks', 'dinner']
 const dayOrder = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
 
 const MealPlansPanel = ({ store }: Props) => {
-  const { state, applyWeeklyTemplate, loadMemberMeals, memberMeals, memberMealsLoading, updateMeal } = store
+  const { state, applyWeeklyTemplate, applyWeeklyTemplateForAll, loadMemberMeals, memberMeals, memberMealsLoading, updateMeal } = store
   const [selectedMemberId, setSelectedMemberId] = useState<number | null>(null)
   const [generating, setGenerating] = useState<number | 'all' | null>(null)
   const [editingMealId, setEditingMealId] = useState<number | null>(null)
@@ -482,22 +482,20 @@ const MealPlansPanel = ({ store }: Props) => {
     }, {})
   }, [activeMeals])
 
-  const generateForMember = (memberId: number) => {
+  const generateForMember = async (memberId: number) => {
     setGenerating(memberId)
-    applyWeeklyTemplate(memberId)
-    setTimeout(() => {
+    await applyWeeklyTemplate(memberId)
+    if (selectedMemberId === memberId) {
       loadMemberMeals(memberId)
-      setGenerating(null)
-    }, 1500)
+    }
+    setGenerating(null)
   }
 
-  const generateForAll = () => {
+  const generateForAll = async () => {
     setGenerating('all')
-    state.members.forEach((m) => applyWeeklyTemplate(m.id))
-    setTimeout(() => {
-      if (selectedMemberId !== null) loadMemberMeals(selectedMemberId)
-      setGenerating(null)
-    }, 2000)
+    await applyWeeklyTemplateForAll()
+    if (selectedMemberId !== null) loadMemberMeals(selectedMemberId)
+    setGenerating(null)
   }
 
   const handleSaveMeal = (mealId: number) => {

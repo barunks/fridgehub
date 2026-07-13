@@ -1,6 +1,8 @@
 from datetime import date, datetime, timedelta
 from typing import Any
 
+from app.utils.dates import today_for_timezone
+
 
 def _date_prefix(value: object) -> str:
     if isinstance(value, datetime):
@@ -10,13 +12,18 @@ def _date_prefix(value: object) -> str:
     return str(value)[:10]
 
 
-def _days_until(value: object) -> int:
+def _state_today(state: dict[str, Any]) -> date:
+    family = state.get("family") or {}
+    return today_for_timezone(family.get("timezone") if isinstance(family, dict) else None)
+
+
+def _days_until(value: object, state: dict[str, Any]) -> int:
     target = date.fromisoformat(_date_prefix(value))
-    return (target - date.today()).days
+    return (target - _state_today(state)).days
 
 
 def _today_tasks(state: dict[str, Any]) -> list[dict[str, Any]]:
-    today = date.today().isoformat()
+    today = _state_today(state).isoformat()
     return [
         task
         for task in state["tasks"]
@@ -25,7 +32,7 @@ def _today_tasks(state: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _today_meals(state: dict[str, Any]) -> list[dict[str, Any]]:
-    today = date.today().isoformat()
+    today = _state_today(state).isoformat()
     return [meal for meal in state["meals"] if _date_prefix(meal["planDate"]) == today]
 
 
@@ -33,7 +40,7 @@ def _expiring_items(state: dict[str, Any]) -> list[dict[str, Any]]:
     return [
         item
         for item in state["groceryItems"]
-        if item.get("expiryDate") and 0 <= _days_until(item["expiryDate"]) <= 2
+        if item.get("expiryDate") and 0 <= _days_until(item["expiryDate"], state) <= 2
     ]
 
 

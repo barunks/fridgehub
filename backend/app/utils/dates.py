@@ -1,4 +1,14 @@
 from datetime import date, datetime, time, timedelta
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+
+def today_for_timezone(timezone_name: str | None = None) -> date:
+    if not timezone_name:
+        return date.today()
+    try:
+        return datetime.now(ZoneInfo(timezone_name)).date()
+    except ZoneInfoNotFoundError:
+        return date.today()
 
 
 def start_of_week(value: date | None = None) -> date:

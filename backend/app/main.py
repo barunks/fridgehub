@@ -27,7 +27,11 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     setup_logging()
     logger.info("Starting FamilyHub API", extra={"version": settings.app_version, "environment": settings.environment})
 
-    init_db()
+    if settings.run_migrations_on_startup:
+        init_db()
+    else:
+        logger.info("Skipping startup migrations; expecting migrations to be run before the API starts")
+
     if settings.seed_on_startup:
         db = SessionLocal()
         try:

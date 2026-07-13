@@ -2,10 +2,14 @@ import { expect, test } from '@playwright/test'
 
 const signIn = async (page: import('@playwright/test').Page, path = '/') => {
   await page.goto(path)
+  await page.evaluate(() => {
+    localStorage.setItem('familyhub-device-id', 'familyhub-e2e-shared-device')
+    localStorage.setItem('familyhub-device-name', 'Playwright E2E Browser')
+  })
   await page.getByLabel('Username').fill('meera')
   await page.getByLabel('Password').fill('familyhub')
   await page.getByRole('button', { name: /^Sign in$/i }).click()
-  await expect(page.getByRole('heading', { name: /Good (morning|afternoon|evening), Meera/i })).toBeVisible()
+  await expect(page.getByRole('heading', { name: /Good (morning|afternoon|evening|night), Meera/i })).toBeVisible()
 }
 
 test.describe('Command Center', () => {
@@ -31,7 +35,7 @@ test.describe('Command Center', () => {
   test('members tab shows family members', async ({ page }) => {
     await signIn(page, '/command-center')
     await expect(page.getByText(/Family Members/i)).toBeVisible()
-    await expect(page.getByText(/Meera/i)).toBeVisible()
+    await expect(page.getByText('Meera', { exact: true })).toBeVisible()
   })
 
   test('contacts tab shows emergency contacts', async ({ page }) => {
@@ -64,16 +68,16 @@ test.describe('Command Center', () => {
   test('security tab shows change password form', async ({ page }) => {
     await signIn(page, '/command-center')
     await page.getByRole('button', { name: /Security/i }).click()
-    await expect(page.getByText(/Profile & Security/i)).toBeVisible()
+    await expect(page.getByRole('heading', { name: /Change Password/i })).toBeVisible()
     await expect(page.getByText(/Current Password/i)).toBeVisible()
-    await expect(page.getByText(/New Password/i)).toBeVisible()
+    await expect(page.getByText('New Password', { exact: true })).toBeVisible()
   })
 })
 
 test.describe('Per-Member Meal Plans', () => {
   test('meal plan page shows member selector', async ({ page }) => {
     await signIn(page, '/meals')
-    await expect(page.getByText(/All members/i)).toBeVisible()
+    await expect(page.locator('select').filter({ hasText: /All members/i })).toBeVisible()
   })
 
   test('selecting a member filters the meal grid', async ({ page }) => {
@@ -101,7 +105,7 @@ test.describe('Per-Member Meal Plans', () => {
     await expect(page.getByText(/Per-Member Meal Plans/i)).toBeVisible()
     await expect(page.getByRole('button', { name: /Generate for all members/i })).toBeVisible()
     // Should show member cards
-    await expect(page.getByText(/Meera/i)).toBeVisible()
+    await expect(page.getByText('Meera', { exact: true })).toBeVisible()
   })
 
   test('clicking a member in meal plans tab shows their grid', async ({ page }) => {
@@ -113,6 +117,6 @@ test.describe('Per-Member Meal Plans', () => {
     await memberCard.click()
 
     // Should show the member's meal grid
-    await expect(page.getByText(/Meal Plan/i)).toBeVisible()
+    await expect(page.getByRole('heading', { name: /Meal Plan/i }).last()).toBeVisible()
   })
 })

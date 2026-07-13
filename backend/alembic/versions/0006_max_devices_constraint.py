@@ -38,6 +38,7 @@ def upgrade() -> None:
 
     # MySQL trigger to enforce device limit on INSERT
     if _is_mysql():
+        op.execute(text("DROP TRIGGER IF EXISTS trg_enforce_max_devices"))
         op.execute(text("""
             CREATE TRIGGER trg_enforce_max_devices
             BEFORE INSERT ON devices

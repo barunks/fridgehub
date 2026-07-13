@@ -227,6 +227,40 @@ class GroceryCycleOut(CamelModel):
     isCompleted: bool
 
 
+class ShoppingCycleItemOut(CamelModel):
+    id: int
+    cycleId: int
+    itemId: int
+    itemNumber: str
+    itemName: str
+    listTypeId: int
+    frequency: Frequency
+    quantity: Decimal | float
+    unit: str
+    isPurchased: bool
+    purchasedQuantity: Decimal | float
+    notes: str
+    isAdhoc: bool = False
+    carriedForward: bool = False
+
+
+class ShoppingItemUpdate(CamelModel):
+    quantity: Decimal | float | None = Field(default=None, ge=0)
+    unit: str | None = Field(default=None, max_length=20)
+    isPurchased: bool | None = None
+    purchasedQuantity: Decimal | float | None = Field(default=None, ge=0)
+    notes: str | None = None
+
+
+class ShoppingAdhocCreate(CamelModel):
+    itemName: str = Field(min_length=1, max_length=255)
+    listTypeId: int
+    quantity: Decimal | float = Field(default=1, gt=0)
+    unit: str = Field(default="Units", max_length=20)
+    purchaseFrequency: Frequency = "weekly"
+    notes: str = ""
+
+
 class TaskOut(CamelModel):
     id: int
     title: str
@@ -294,6 +328,7 @@ class MealUpdate(CamelModel):
 class ApplyTemplateRequest(CamelModel):
     templateName: str | None = None
     memberId: int | None = None
+    allMembers: bool = False
 
 
 class RecipeOut(CamelModel):
@@ -440,6 +475,7 @@ class BootstrapState(CamelModel):
     listTypes: list[GroceryListTypeOut]
     groceryItems: list[GroceryItemOut]
     groceryCycles: list[GroceryCycleOut]
+    shoppingItems: list[ShoppingCycleItemOut] = []
     tasks: list[TaskOut]
     meals: list[MealPlanItemOut]
     recipes: list[RecipeOut]

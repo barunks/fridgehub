@@ -272,7 +272,7 @@ class Task(Base, TimestampMixin, ActiveMixin):
 class MealPlan(Base, TimestampMixin, ActiveMixin):
     __tablename__ = "meal_plans"
     __table_args__ = (
-        UniqueConstraint("family_id", "plan_date", "meal_type", "assigned_to", name="unique_meal_per_member"),
+        UniqueConstraint("family_id", "plan_date", "meal_type", "meal_plan_scope", name="unique_meal_scope"),
         Index("idx_meal_plan_family_date", "family_id", "plan_date"),
     )
 
@@ -290,6 +290,7 @@ class MealPlan(Base, TimestampMixin, ActiveMixin):
     color_class: Mapped[str] = mapped_column(String(64), default="bg-blue-500", nullable=False)
     created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     assigned_to: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), index=True)
+    meal_plan_scope: Mapped[str] = mapped_column(String(128), default="family", nullable=False, index=True)
     dietary_flags: Mapped[list[str] | None] = mapped_column(JSON)
 
     family: Mapped["Family"] = relationship(back_populates="meal_plans")
@@ -298,7 +299,7 @@ class MealPlan(Base, TimestampMixin, ActiveMixin):
 
 class MealPlanTemplate(Base, TimestampMixin, ActiveMixin):
     __tablename__ = "meal_plan_templates"
-    __table_args__ = (UniqueConstraint("template_name", "day_of_week", "meal_type", name="unique_template"),)
+    __table_args__ = (UniqueConstraint("template_scope", "template_name", "day_of_week", "meal_type", name="unique_template_scope"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     uuid: Mapped[str] = mapped_column(String(36), default=uuid_string, unique=True, nullable=False)
@@ -311,6 +312,7 @@ class MealPlanTemplate(Base, TimestampMixin, ActiveMixin):
     prep_time: Mapped[int | None] = mapped_column()
     recipe_id: Mapped[int | None] = mapped_column(ForeignKey("recipes.id", ondelete="SET NULL"))
     family_id: Mapped[int | None] = mapped_column(ForeignKey("families.id", ondelete="CASCADE"), index=True)
+    template_scope: Mapped[str] = mapped_column(String(128), default="global", nullable=False, index=True)
     is_global: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
 

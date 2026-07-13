@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     )
     cors_allow_credentials: bool = True
     seed_on_startup: bool = True
+    run_migrations_on_startup: bool = True
     login_rate_limit_per_minute: int = 10
     allow_memory_cache_in_production: bool = False
 
@@ -50,6 +51,8 @@ class Settings(BaseSettings):
             raise ValueError("SECRET_KEY must be set to at least 32 characters in production")
         if self.environment == "production" and not self.auth_cookie_secure:
             raise ValueError("AUTH_COOKIE_SECURE must be enabled in production")
+        if self.environment == "production" and self.seed_on_startup:
+            raise ValueError("SEED_ON_STARTUP must be disabled in production")
         if self.auth_cookie_samesite == "none" and not self.auth_cookie_secure:
             raise ValueError("AUTH_COOKIE_SAMESITE=none requires AUTH_COOKIE_SECURE=true")
         return self

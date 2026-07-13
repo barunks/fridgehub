@@ -14,6 +14,7 @@ import type {
   Notification,
   Permission,
   Recipe,
+  ShoppingCycleItem,
   Task,
 } from '@/types/familyHub'
 import { addDays, dateOffsetIso, dateTimeOffsetIso, toIsoDate, weekStart } from '@/utils/date'
@@ -258,6 +259,31 @@ const groceryCycles: GroceryCycle[] = [
     isCompleted: false,
   },
 ]
+
+const shoppingItems: ShoppingCycleItem[] = groceryItems.flatMap((item) => {
+  const cycle = groceryCycles.find(
+    (candidate) => candidate.listTypeId === item.listTypeId && candidate.frequency === item.purchaseFrequency,
+  )
+  if (!cycle) return []
+  return [
+    {
+      id: item.id,
+      cycleId: cycle.id,
+      itemId: item.id,
+      itemNumber: item.itemNumber,
+      itemName: item.itemName,
+      listTypeId: item.listTypeId,
+      frequency: item.purchaseFrequency,
+      quantity: item.quantity,
+      unit: item.unit,
+      isPurchased: item.purchased,
+      purchasedQuantity: item.purchased ? item.quantity : 0,
+      notes: item.notes,
+      isAdhoc: false,
+      carriedForward: false,
+    },
+  ]
+})
 
 const tasks: Task[] = [
   {
@@ -551,6 +577,7 @@ export const createInitialFamilyHubState = (): FamilyHubState => ({
   listTypes,
   groceryItems,
   groceryCycles,
+  shoppingItems,
   tasks,
   meals,
   recipes,
@@ -559,4 +586,34 @@ export const createInitialFamilyHubState = (): FamilyHubState => ({
   emergencyContacts,
   assistantMessages,
   assistantInsights,
+})
+
+export const createEmptyFamilyHubState = (): FamilyHubState => ({
+  currentUser: {
+    userId: 0,
+    familyId: 0,
+    role: '',
+    capabilities: [],
+  },
+  capabilities: [],
+  family: {
+    id: 0,
+    familyName: '',
+    homeBase: '',
+    timezone: 'UTC',
+    planStatus: 'api-ready',
+  },
+  members: [],
+  listTypes: [],
+  groceryItems: [],
+  groceryCycles: [],
+  shoppingItems: [],
+  tasks: [],
+  meals: [],
+  recipes: [],
+  notifications: [],
+  announcements: [],
+  emergencyContacts: [],
+  assistantMessages: [],
+  assistantInsights: [],
 })

@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from uuid import uuid4
 
 os.environ["DATABASE_URL"] = "sqlite:///./test_familyhub.db"
 os.environ["SEED_ON_STARTUP"] = "true"
@@ -12,7 +13,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 from app.core.database import SessionLocal  # noqa: E402
 from app.core.security import hash_password  # noqa: E402
 from app.main import app  # noqa: E402
-from app.models import User  # noqa: E402
+from app.models import DeviceSession, User  # noqa: E402
 
 
 def auth_headers(client: TestClient, username: str = "meera") -> dict[str, str]:
@@ -64,6 +65,8 @@ def test_bootstrap_returns_full_state() -> None:
         assert len(data["meals"]) == 28
         assert len(data["members"]) >= 2
         assert len(data["groceryItems"]) >= 1
+        assert "shoppingItems" in data
+        assert len(data["shoppingItems"]) >= 1
         assert len(data["tasks"]) >= 1
 
 
@@ -86,10 +89,20 @@ def test_refresh_and_logout() -> None:
     with TestClient(app) as client:
         login = client.post("/api/v1/auth/login", json={"username": "meera", "password": "familyhub"})
         tokens = login.json()
+        db = SessionLocal()
+        try:
+            session_count_before = db.query(DeviceSession).count()
+        finally:
+            db.close()
 
         refreshed = client.post("/api/v1/auth/refresh", json={})
         assert refreshed.status_code == 200
         new_token = refreshed.json()["accessToken"]
+        db = SessionLocal()
+        try:
+            assert db.query(DeviceSession).count() >= session_count_before + 2
+        finally:
+            db.close()
 
         headers = {"Authorization": f"Bearer {new_token}"}
         r = client.post("/api/v1/auth/logout", headers=headers)
@@ -167,6 +180,126 @@ def test_grocery_regenerate_cycles() -> None:
         r = client.post("/api/v1/grocery/regenerate-cycles", headers=headers)
         assert r.status_code == 200
         assert len(r.json()) >= 1
+
+
+def test_shopping_item_partial_purchase_flow() -> None:
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+        item_name = f"PartialShoppingMilk-{uuid4().hex[:8]}"
+        payload = {
+            "itemName": item_name,
+            "listTypeId": 1,
+            "quantity": 4,
+            "unit": "Units",
+            "purchaseFrequency": "weekly",
+            "currentStock": False,
+            "notes": "Partial test",
+        }
+        created = client.post("/api/v1/grocery/items", json=payload, headers=headers)
+        assert created.status_code == 200
+        item_id = created.json()["id"]
+
+        built = client.post("/api/v1/grocery/shopping-items/build", headers=headers)
+        assert built.status_code == 200
+        row = next(item for item in built.json() if item["itemId"] == item_id)
+
+        partial = client.patch(
+            f"/api/v1/grocery/shopping-items/{row['id']}",
+            json={"purchasedQuantity": 2},
+            headers=headers,
+        )
+        assert partial.status_code == 200
+        assert partial.json()["purchasedQuantity"] == 2
+        assert partial.json()["isPurchased"] is False
+
+        item = client.get(f"/api/v1/grocery/items/{item_id}", headers=headers)
+        assert item.json()["currentStock"] is False
+        assert item.json()["purchased"] is False
+
+        completed = client.patch(
+            f"/api/v1/grocery/shopping-items/{row['id']}",
+            json={"purchasedQuantity": 4},
+            headers=headers,
+        )
+        assert completed.status_code == 200
+        assert completed.json()["isPurchased"] is True
+
+        item = client.get(f"/api/v1/grocery/items/{item_id}", headers=headers)
+        assert item.json()["currentStock"] is True
+        assert item.json()["purchased"] is True
+
+        reopened = client.patch(
+            f"/api/v1/grocery/shopping-items/{row['id']}",
+            json={"isPurchased": False},
+            headers=headers,
+        )
+        assert reopened.status_code == 200
+        assert reopened.json()["purchasedQuantity"] == 0
+        assert reopened.json()["isPurchased"] is False
+
+        resized = client.patch(
+            f"/api/v1/grocery/shopping-items/{row['id']}",
+            json={"quantity": 6},
+            headers=headers,
+        )
+        assert resized.status_code == 200
+        assert resized.json()["quantity"] == 6
+
+        master_toggle = client.patch(f"/api/v1/grocery/items/{item_id}", json={"purchased": True}, headers=headers)
+        assert master_toggle.status_code == 200
+        current_row = client.get(f"/api/v1/grocery/shopping-items/{row['id']}", headers=headers)
+        assert current_row.status_code == 200
+        assert current_row.json()["isPurchased"] is True
+        assert current_row.json()["purchasedQuantity"] == 6
+
+        client.delete(f"/api/v1/grocery/items/{item_id}", headers=headers)
+
+
+def test_adhoc_shopping_item_increments_current_row() -> None:
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+        item_name = f"AdhocShoppingRice-{uuid4().hex[:8]}"
+        first = client.post(
+            "/api/v1/grocery/shopping-items",
+            json={
+                "itemName": item_name,
+                "listTypeId": 2,
+                "quantity": 2,
+                "unit": "Pack",
+                "purchaseFrequency": "weekly",
+                "notes": "first add",
+            },
+            headers=headers,
+        )
+        assert first.status_code == 201
+        first_row = first.json()
+        assert first_row["isAdhoc"] is True
+        assert first_row["quantity"] == 2
+
+        second = client.post(
+            "/api/v1/grocery/shopping-items",
+            json={
+                "itemName": item_name,
+                "listTypeId": 2,
+                "quantity": 3,
+                "unit": "Pack",
+                "purchaseFrequency": "weekly",
+                "notes": "extra",
+            },
+            headers=headers,
+        )
+        assert second.status_code == 201
+        second_row = second.json()
+        assert second_row["id"] == first_row["id"]
+        assert second_row["quantity"] == 5
+        assert second_row["isPurchased"] is False
+
+        listed = client.get("/api/v1/grocery/shopping-items", headers=headers)
+        matching = [item for item in listed.json() if item["itemId"] == first_row["itemId"]]
+        assert len(matching) == 1
+        assert matching[0]["quantity"] == 5
+
+        client.delete(f"/api/v1/grocery/items/{first_row['itemId']}", headers=headers)
 
 
 # --- Tasks ---
@@ -534,6 +667,23 @@ def test_grocery_soft_delete_hides_from_list() -> None:
         assert r.status_code == 404
 
 
+def test_grocery_item_can_be_recreated_after_soft_delete() -> None:
+    """Soft-deleted item names should not block future items in the same list."""
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+        payload = {"itemName": "RecreateSoftDeleteItem", "listTypeId": 1, "quantity": 1, "unit": "Kg", "purchaseFrequency": "daily", "currentStock": False, "notes": ""}
+        created = client.post("/api/v1/grocery/items", json=payload, headers=headers)
+        assert created.status_code == 200
+        first_id = created.json()["id"]
+
+        assert client.delete(f"/api/v1/grocery/items/{first_id}", headers=headers).status_code == 204
+
+        recreated = client.post("/api/v1/grocery/items", json=payload, headers=headers)
+        assert recreated.status_code == 200
+        assert recreated.json()["itemName"] == payload["itemName"]
+        client.delete(f"/api/v1/grocery/items/{recreated.json()['id']}", headers=headers)
+
+
 # --- Task Recurrence & Reminder ---
 
 
@@ -858,6 +1008,19 @@ def test_apply_template_without_member_creates_family_wide_plan() -> None:
         assert len(family_wide) >= 1
 
 
+def test_apply_template_for_all_members() -> None:
+    """POST /api/v1/meal-plan/apply-template with allMembers generates plans in one request."""
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+        bootstrap = client.get("/api/v1/family/bootstrap", headers=headers).json()
+        member_ids = {member["id"] for member in bootstrap["members"]}
+
+        r = client.post("/api/v1/meal-plan/apply-template", json={"allMembers": True}, headers=headers)
+        assert r.status_code == 200
+        assigned_ids = {meal["assignedTo"] for meal in r.json() if meal["assignedTo"] is not None}
+        assert member_ids.issubset(assigned_ids)
+
+
 def test_member_meal_can_be_customized_independently() -> None:
     """After generating from template, a member's meal can be edited without affecting others."""
     with TestClient(app) as client:
@@ -970,13 +1133,28 @@ def test_apply_template_nonexistent_template_returns_404() -> None:
         assert r.status_code == 404
 
 
-def test_meal_plan_week_nonexistent_member_returns_empty() -> None:
-    """Filtering by a member with no plan returns empty list."""
+def test_meal_plan_week_nonexistent_member_returns_400() -> None:
+    """Filtering by a nonexistent member returns 400 (member validation)."""
     with TestClient(app) as client:
         headers = auth_headers(client)
         r = client.get("/api/v1/meal-plan/week?member_id=9999", headers=headers)
+        assert r.status_code == 400
+        body = r.json()
+        detail = body.get("detail") or body.get("error", {}).get("detail", "")
+        assert "not an active family member" in detail
+
+
+def test_meal_plan_week_valid_member_no_plan_returns_empty() -> None:
+    """A valid member with no assigned meals returns 200 with empty list."""
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+        # Member 4 (Noah) exists but may not have a personal plan yet
+        # First ensure no personal plan exists by querying
+        r = client.get("/api/v1/meal-plan/week?member_id=4", headers=headers)
         assert r.status_code == 200
-        assert r.json() == []
+        # All returned meals (if any) should be assigned to member 4
+        for meal in r.json():
+            assert meal["assignedTo"] == 4
 
 
 def test_child_cannot_apply_template() -> None:

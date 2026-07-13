@@ -14,6 +14,9 @@ from app.schemas.familyhub import (
     GroceryListTypeCreate,
     GroceryListTypeOut,
     GroceryListTypeUpdate,
+    ShoppingAdhocCreate,
+    ShoppingCycleItemOut,
+    ShoppingItemUpdate,
     GroceryTypeCreate,
     GroceryTypeOut,
     GroceryTypeUpdate,
@@ -92,6 +95,51 @@ def get_master_types(_: CurrentUser = Depends(get_current_user), db: Session = D
 @router.get("/frequency-types", response_model=list[FrequencyTypeOut])
 def get_frequency_types(_: CurrentUser = Depends(get_current_user), db: Session = Depends(get_db)) -> list[dict]:
     return grocery_service.frequency_types(db)
+
+
+@router.get("/shopping-items", response_model=list[ShoppingCycleItemOut])
+def get_shopping_items(
+    list_type_id: int | None = None,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> list[dict]:
+    return grocery_service.list_current_shopping_items(db, current_user.family_id, list_type_id)
+
+
+@router.post("/shopping-items/build", response_model=list[ShoppingCycleItemOut])
+def build_shopping_items(
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> list[dict]:
+    return grocery_service.build_current_shopping_list(db, current_user.family_id)
+
+
+@router.post("/shopping-items", response_model=ShoppingCycleItemOut, status_code=201, responses={403: {"model": ErrorResponse}, 404: {"model": ErrorResponse}})
+def create_shopping_item(
+    payload: ShoppingAdhocCreate,
+    current_user: CurrentUser = Depends(require_permission(Permission.MANAGE_GROCERIES)),
+    db: Session = Depends(get_db),
+) -> dict:
+    return grocery_service.add_adhoc_shopping_item(db, payload, current_user.family_id, current_user.user_id)
+
+
+@router.get("/shopping-items/{sub_item_id}", response_model=ShoppingCycleItemOut, responses={404: {"model": ErrorResponse}})
+def get_shopping_item(
+    sub_item_id: int,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    return grocery_service.get_shopping_item(db, sub_item_id, current_user.family_id)
+
+
+@router.patch("/shopping-items/{sub_item_id}", response_model=ShoppingCycleItemOut, responses={403: {"model": ErrorResponse}, 404: {"model": ErrorResponse}})
+def update_shopping_item(
+    sub_item_id: int,
+    payload: ShoppingItemUpdate,
+    current_user: CurrentUser = Depends(require_permission(Permission.MANAGE_GROCERIES)),
+    db: Session = Depends(get_db),
+) -> dict:
+    return grocery_service.update_shopping_item(db, sub_item_id, payload, current_user.family_id, current_user.user_id)
 
 
 @router.get("/items", response_model=list[GroceryItemOut])

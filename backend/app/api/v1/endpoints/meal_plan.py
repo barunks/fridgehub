@@ -37,6 +37,8 @@ def apply_template(
     db: Session = Depends(get_db),
 ) -> list[dict]:
     template_name = payload.templateName if payload else None
+    if payload and payload.allMembers:
+        return meal_plan_service.apply_template_for_all(db, current_user.family_id, current_user.user_id, template_name)
     member_id = payload.memberId if payload else None
     return meal_plan_service.apply_template(db, current_user.family_id, current_user.user_id, template_name, member_id)
 

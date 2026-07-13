@@ -1,3 +1,5 @@
+-- Reference schema only. Production containers run Alembic migrations instead of mounting this file.
+
 CREATE TABLE IF NOT EXISTS users (
   id INT AUTO_INCREMENT PRIMARY KEY,
   uuid CHAR(36) NOT NULL UNIQUE,
@@ -39,6 +41,7 @@ CREATE TABLE IF NOT EXISTS family_members (
   status VARCHAR(255) DEFAULT 'Active',
   points INT DEFAULT 0,
   dietary_notes JSON,
+  permissions JSON,
   is_active BOOLEAN DEFAULT TRUE,
   joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (family_id) REFERENCES families(id) ON DELETE CASCADE,
@@ -140,6 +143,8 @@ CREATE TABLE IF NOT EXISTS grocery_sub_lists (
   is_purchased BOOLEAN DEFAULT FALSE,
   purchased_quantity DECIMAL(10, 2) DEFAULT 0,
   notes TEXT,
+  is_adhoc BOOLEAN DEFAULT FALSE,
+  carried_forward BOOLEAN DEFAULT FALSE,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   FOREIGN KEY (purchase_cycle_id) REFERENCES grocery_purchase_cycles(id) ON DELETE CASCADE,
@@ -205,17 +210,48 @@ CREATE TABLE IF NOT EXISTS devices (
   id INT AUTO_INCREMENT PRIMARY KEY,
   uuid CHAR(36) NOT NULL UNIQUE,
   user_id INT NOT NULL,
+  family_id INT,
   device_id VARCHAR(100) NOT NULL,
   device_name VARCHAR(255),
+  device_type VARCHAR(30) NOT NULL DEFAULT 'browser',
+  platform VARCHAR(100),
   user_agent VARCHAR(512),
   ip_address VARCHAR(45),
+  last_ip VARCHAR(45),
+  last_user_agent VARCHAR(512),
+  is_revoked BOOLEAN DEFAULT FALSE,
+  is_trusted BOOLEAN DEFAULT FALSE,
+  registered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   last_used_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   is_active BOOLEAN DEFAULT TRUE,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (family_id) REFERENCES families(id) ON DELETE SET NULL,
   UNIQUE KEY idx_devices_user_device (user_id, device_id),
-  INDEX idx_devices_user_id (user_id)
+  INDEX idx_devices_user_id (user_id),
+  INDEX idx_devices_family_id (family_id)
+);
+
+CREATE TABLE IF NOT EXISTS device_sessions (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  uuid CHAR(36) NOT NULL UNIQUE,
+  device_id INT NOT NULL,
+  user_id INT NOT NULL,
+  family_id INT,
+  jti VARCHAR(36) NOT NULL,
+  token_type VARCHAR(10) NOT NULL,
+  issued_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  expires_at DATETIME NOT NULL,
+  revoked_at DATETIME,
+  ip_address VARCHAR(45),
+  user_agent VARCHAR(512),
+  is_active BOOLEAN DEFAULT TRUE,
+  FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (family_id) REFERENCES families(id) ON DELETE SET NULL,
+  INDEX idx_device_sessions_device (device_id),
+  UNIQUE KEY idx_device_sessions_jti (jti)
 );
 
 CREATE TABLE IF NOT EXISTS meal_plans (
@@ -232,14 +268,20 @@ CREATE TABLE IF NOT EXISTS meal_plans (
   recipe_id INT,
   color_class VARCHAR(64) DEFAULT 'bg-blue-500',
   created_by INT,
+  assigned_to INT,
+  meal_plan_scope VARCHAR(128) NOT NULL DEFAULT 'family',
+  dietary_flags JSON,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   is_active BOOLEAN DEFAULT TRUE,
   FOREIGN KEY (family_id) REFERENCES families(id) ON DELETE CASCADE,
   FOREIGN KEY (recipe_id) REFERENCES recipes(id) ON DELETE SET NULL,
   FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,
-  UNIQUE KEY unique_meal (family_id, plan_date, meal_type),
-  INDEX idx_meal_plan_family_date (family_id, plan_date)
+  FOREIGN KEY (assigned_to) REFERENCES users(id) ON DELETE SET NULL,
+  UNIQUE KEY unique_meal_scope (family_id, plan_date, meal_type, meal_plan_scope),
+  INDEX idx_meal_plan_family_date (family_id, plan_date),
+  INDEX idx_meal_assigned_to (assigned_to),
+  INDEX idx_meal_plan_scope (meal_plan_scope)
 );
 
 CREATE TABLE IF NOT EXISTS meal_plan_templates (
@@ -254,6 +296,7 @@ CREATE TABLE IF NOT EXISTS meal_plan_templates (
   prep_time INT,
   recipe_id INT,
   family_id INT,
+  template_scope VARCHAR(128) NOT NULL DEFAULT 'global',
   is_global BOOLEAN DEFAULT FALSE,
   created_by INT,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -262,9 +305,10 @@ CREATE TABLE IF NOT EXISTS meal_plan_templates (
   FOREIGN KEY (recipe_id) REFERENCES recipes(id) ON DELETE SET NULL,
   FOREIGN KEY (family_id) REFERENCES families(id) ON DELETE CASCADE,
   FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,
-  UNIQUE KEY unique_template (template_name, day_of_week, meal_type),
+  UNIQUE KEY unique_template_scope (template_scope, template_name, day_of_week, meal_type),
   INDEX idx_family (family_id),
-  INDEX idx_day (day_of_week)
+  INDEX idx_day (day_of_week),
+  INDEX idx_template_scope (template_scope)
 );
 
 CREATE TABLE IF NOT EXISTS audit_logs (
