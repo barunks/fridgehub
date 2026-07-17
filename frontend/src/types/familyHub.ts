@@ -12,9 +12,15 @@ export type ViewKey =
   | 'demo'
   | 'command-center'
 
+export type TimeScope = 'today' | 'week'
+
+export interface ScopedNavigationOptions {
+  scope?: TimeScope
+}
+
 export type Priority = 'low' | 'medium' | 'high'
 export type TaskStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled'
-export type RecurrenceType = 'none' | 'daily' | 'weekly' | 'monthly' | 'yearly'
+export type RecurrenceType = 'none' | 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'semi_annually' | 'yearly'
 export type Frequency = 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'semi_annually' | 'yearly'
 export type MealType = 'breakfast' | 'lunch' | 'snacks' | 'dinner'
 export type WeekDay = 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday'
@@ -132,9 +138,10 @@ export interface Task {
   priority: Priority
   status: TaskStatus
   dueAt: string
-  reminderAt: string
+  reminderAt?: string | null
   recurrenceType: RecurrenceType
   recurrenceInterval: number
+  recurrenceEndAt?: string | null
   assignedTo: number
   category: string
   actionLabel?: string
@@ -152,7 +159,10 @@ export interface MealPlanItem {
   recipeId?: number | null
   colorClass: string
   assignedTo?: number | null
+  mealPlanScope?: string
+  targetMemberIds?: number[]
   dietaryFlags?: string[]
+  updatedAt?: string | null
 }
 
 export interface MealUpdateInput {
@@ -161,8 +171,11 @@ export interface MealUpdateInput {
   calories?: number
   prepTime?: number
   assignedTo?: number | null
+  targetMemberIds?: number[]
   dietaryFlags?: string[]
   recipeId?: number | null
+  effectiveScope?: 'daily' | 'weekly' | 'monthly'
+  effectiveUntil?: string
 }
 
 export interface MealTemplateRow {
@@ -324,9 +337,26 @@ export interface NewTaskInput {
   category: string
   priority: Priority
   dueAt: string
-  reminderAt?: string
+  reminderAt?: string | null
   assignedTo: number
+  description?: string
   recurrenceType?: RecurrenceType
+  recurrenceInterval?: number
+  recurrenceEndAt?: string | null
+}
+
+export interface TaskUpdateInput {
+  title?: string
+  description?: string
+  category?: string
+  priority?: Priority
+  status?: TaskStatus
+  dueAt?: string
+  reminderAt?: string | null
+  assignedTo?: number
+  recurrenceType?: RecurrenceType
+  recurrenceInterval?: number
+  recurrenceEndAt?: string | null
 }
 
 export interface GroceryType {

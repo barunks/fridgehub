@@ -441,7 +441,10 @@ export const api = {
         dueAt: payload.dueAt,
         reminderAt: payload.reminderAt,
         assignedTo: payload.assignedTo,
+        description: payload.description,
         recurrenceType: payload.recurrenceType || 'none',
+        recurrenceInterval: payload.recurrenceInterval || 1,
+        recurrenceEndAt: payload.recurrenceEndAt,
       }),
     }),
   updateTask: (taskId: number, payload: Record<string, unknown>) =>
@@ -545,17 +548,23 @@ export const api = {
   listFrequencyTypes: () => request<FrequencyType[]>('/api/v1/grocery/frequency-types'),
   downloadShoppingReport: async (params: {
     listTypeId?: number | 'all'
+    listTypeIds?: number[]
     frequency?: string | 'all'
     stock?: string | 'all'
+    stocks?: string[]
     itemName?: string | 'all'
+    itemNames?: string[]
     onlyNeeded?: boolean
   } = {}) => {
     const token = await accessTokenOrRefresh()
     const search = new URLSearchParams()
     if (params.listTypeId && params.listTypeId !== 'all') search.set('list_type_id', String(params.listTypeId))
+    if (params.listTypeIds?.length) search.set('list_type_ids', params.listTypeIds.join(','))
     if (params.frequency && params.frequency !== 'all') search.set('frequency', params.frequency)
     if (params.stock && params.stock !== 'all') search.set('stock', params.stock)
+    if (params.stocks?.length) search.set('stock_values', params.stocks.join(','))
     if (params.itemName && params.itemName !== 'all') search.set('item_name', params.itemName)
+    if (params.itemNames?.length) search.set('item_names', params.itemNames.join(','))
     if (params.onlyNeeded) search.set('only_needed', 'true')
     const qs = search.toString() ? `?${search.toString()}` : ''
     const response = await fetch(apiUrl(`/api/v1/grocery/shopping-report${qs}`), {

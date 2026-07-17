@@ -1,11 +1,12 @@
 import { expect, test } from '@playwright/test'
 
 const signIn = async (page: import('@playwright/test').Page, path = '/') => {
+  const deviceId = `familyhub-e2e-device-${test.info().parallelIndex}`
   await page.goto(path)
-  await page.evaluate(() => {
-    localStorage.setItem('familyhub-device-id', 'familyhub-e2e-shared-device')
+  await page.evaluate((id) => {
+    localStorage.setItem('familyhub-device-id', id)
     localStorage.setItem('familyhub-device-name', 'Playwright E2E Browser')
-  })
+  }, deviceId)
   await page.getByLabel('Username').fill('meera')
   await page.getByLabel('Password').fill('familyhub')
   await page.getByRole('button', { name: /^Sign in$/i }).click()

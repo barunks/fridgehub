@@ -28,7 +28,20 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { FormField, inputClass } from '@/components/ui/FormField'
 import type { FamilyHubStore } from '@/hooks/useFamilyHub'
 import { api } from '@/services/api'
-import type { AssistantInsight, DeviceInfo, DevicePolicy, MealPlanItem, MealTemplateRow, MealType, SignupInvite } from '@/types/familyHub'
+import type {
+  DeviceInfo,
+  DevicePolicy,
+  MealPlanItem,
+  MealTemplateRow,
+  MealType,
+  NewTaskInput,
+  Priority,
+  Recipe,
+  RecurrenceType,
+  SignupInvite,
+  TaskStatus,
+  TaskUpdateInput,
+} from '@/types/familyHub'
 import { cn } from '@/utils/style'
 
 type Tab = 'members' | 'contacts' | 'grocery-types' | 'meal-plans' | 'recipes' | 'tasks' | 'insights' | 'security'
@@ -46,6 +59,17 @@ const tabs: { key: Tab; label: string; icon: typeof Users }[] = [
 
 interface Props {
   store: FamilyHubStore
+}
+
+const toDateTimeLocalValue = (date: Date) => {
+  const pad = (value: number) => String(value).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
+const defaultDueLocalValue = () => {
+  const dueAt = new Date()
+  dueAt.setHours(18, 0, 0, 0)
+  return toDateTimeLocalValue(dueAt)
 }
 
 export const CommandCenterView = ({ store }: Props) => {
@@ -118,24 +142,27 @@ const MembersPanel = ({ store }: Props) => {
   const [showForm, setShowForm] = useState(false)
   const [editId, setEditId] = useState<number | null>(null)
   const [deleteId, setDeleteId] = useState<number | null>(null)
-  const [form, setForm] = useState({ name: '', email: '', username: '', password: '', role: 'child', colorClass: 'bg-blue-500' })
+  const [createForm, setCreateForm] = useState({ name: '', email: '', username: '', password: '', role: 'child', colorClass: 'bg-blue-500' })
+  const [editForm, setEditForm] = useState({ name: '', role: 'child', colorClass: 'bg-blue-500' })
 
   const handleSubmit = () => {
-    if (!form.name.trim()) return
     if (editId) {
-      updateMember(editId, { name: form.name, role: form.role, colorClass: form.colorClass })
+      if (!editForm.name.trim()) return
+      updateMember(editId, { name: editForm.name, role: editForm.role, colorClass: editForm.colorClass })
+      setEditId(null)
+      setEditForm({ name: '', role: 'child', colorClass: 'bg-blue-500' })
     } else {
-      addMember(form)
+      if (!createForm.name.trim() || !createForm.username.trim() || !createForm.email.trim() || !createForm.password.trim()) return
+      addMember(createForm)
+      setCreateForm({ name: '', email: '', username: '', password: '', role: 'child', colorClass: 'bg-blue-500' })
     }
     setShowForm(false)
-    setEditId(null)
-    setForm({ name: '', email: '', username: '', password: '', role: 'child', colorClass: 'bg-blue-500' })
   }
 
   const startEdit = (id: number) => {
     const m = state.members.find((x) => x.id === id)
     if (!m) return
-    setForm({ name: m.name, email: '', username: '', password: '', role: m.role, colorClass: m.colorClass })
+    setEditForm({ name: m.name, role: m.role, colorClass: m.colorClass })
     setEditId(id)
     setShowForm(true)
   }
@@ -151,15 +178,76 @@ const MembersPanel = ({ store }: Props) => {
       <CardContent className="grid gap-3">
         {showForm && (
           <div className="grid gap-3 rounded-xl border border-indigo-100 bg-indigo-50/30 p-4">
+            {editId && (
+              <p className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-500">
+                Account username, email, and password are set when a member is created. This edit updates the visible profile and role only.
+              </p>
+            )}
             <div className="grid gap-3 sm:grid-cols-2">
-              <FormField label="Name"><input className={inputClass} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></FormField>
-              {!editId && <FormField label="Username"><input className={inputClass} value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} /></FormField>}
-              {!editId && <FormField label="Email"><input className={inputClass} value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></FormField>}
-              {!editId && <FormField label="Password"><input className={inputClass} type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></FormField>}
+              <FormField label="Name">
+                <input
+                  className={inputClass}
+                  value={editId ? editForm.name : createForm.name}
+                  onChange={(e) => editId
+                    ? setEditForm((current) => ({ ...current, name: e.target.value }))
+                    : setCreateForm((current) => ({ ...current, name: e.target.value }))
+                  }
+                />
+              </FormField>
+              {!editId && (
+                <>
+                  <FormField label="Username">
+                    <input
+                      className={inputClass}
+                      value={createForm.username}
+                      onChange={(e) => setCreateForm((current) => ({ ...current, username: e.target.value }))}
+                    />
+                  </FormField>
+                  <FormField label="Email">
+                    <input
+                      className={inputClass}
+                      value={createForm.email}
+                      onChange={(e) => setCreateForm((current) => ({ ...current, email: e.target.value }))}
+                    />
+                  </FormField>
+                  <FormField label="Password">
+                    <input
+                      className={inputClass}
+                      type="password"
+                      value={createForm.password}
+                      onChange={(e) => setCreateForm((current) => ({ ...current, password: e.target.value }))}
+                    />
+                  </FormField>
+                </>
+              )}
               <FormField label="Role">
-                <select className={inputClass} value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>
+                <select
+                  className={inputClass}
+                  value={editId ? editForm.role : createForm.role}
+                  onChange={(e) => editId
+                    ? setEditForm((current) => ({ ...current, role: e.target.value }))
+                    : setCreateForm((current) => ({ ...current, role: e.target.value }))
+                  }
+                >
                   <option value="parent">Parent</option>
                   <option value="child">Child</option>
+                </select>
+              </FormField>
+              <FormField label="Color">
+                <select
+                  className={inputClass}
+                  value={editId ? editForm.colorClass : createForm.colorClass}
+                  onChange={(e) => editId
+                    ? setEditForm((current) => ({ ...current, colorClass: e.target.value }))
+                    : setCreateForm((current) => ({ ...current, colorClass: e.target.value }))
+                  }
+                >
+                  <option value="bg-blue-500">Blue</option>
+                  <option value="bg-emerald-500">Green</option>
+                  <option value="bg-amber-500">Amber</option>
+                  <option value="bg-rose-500">Rose</option>
+                  <option value="bg-violet-500">Violet</option>
+                  <option value="bg-slate-500">Slate</option>
                 </select>
               </FormField>
             </div>
@@ -320,10 +408,23 @@ const GroceryTypesPanel = ({ store }: Props) => {
 
 /* ─── Recipes Panel ─── */
 const RecipesPanel = ({ store }: Props) => {
-  const { state, addRecipe, deleteRecipe } = store
+  const { state, addRecipe, updateRecipe, deleteRecipe } = store
   const [showForm, setShowForm] = useState(false)
-  const [form, setForm] = useState({ recipeName: '', description: '', cuisine: '', difficulty: 'easy' as 'easy' | 'medium' | 'hard' })
+  const [editId, setEditId] = useState<number | null>(null)
+  const [form, setForm] = useState({
+    recipeName: '',
+    description: '',
+    cuisine: '',
+    difficulty: 'easy' as Recipe['difficulty'],
+    prepTime: 0,
+    cookTime: 0,
+    servings: 4,
+  })
   const [filter, setFilter] = useState('')
+  const resetRecipeForm = () => {
+    setEditId(null)
+    setForm({ recipeName: '', description: '', cuisine: '', difficulty: 'easy', prepTime: 0, cookTime: 0, servings: 4 })
+  }
 
   const filtered = filter
     ? state.recipes.filter((r) => r.recipeName.toLowerCase().includes(filter.toLowerCase()) || r.cuisine.toLowerCase().includes(filter.toLowerCase()))
@@ -331,9 +432,33 @@ const RecipesPanel = ({ store }: Props) => {
 
   const handleSubmit = () => {
     if (!form.recipeName.trim()) return
-    addRecipe({ recipeName: form.recipeName, description: form.description, cuisine: form.cuisine, difficulty: form.difficulty })
+    const payload = {
+      recipeName: form.recipeName.trim(),
+      description: form.description.trim(),
+      cuisine: form.cuisine.trim(),
+      difficulty: form.difficulty,
+      prepTime: Math.max(0, Number(form.prepTime) || 0),
+      cookTime: Math.max(0, Number(form.cookTime) || 0),
+      servings: Math.max(1, Number(form.servings) || 1),
+    }
+    if (editId) updateRecipe(editId, payload)
+    else addRecipe(payload)
     setShowForm(false)
-    setForm({ recipeName: '', description: '', cuisine: '', difficulty: 'easy' })
+    resetRecipeForm()
+  }
+
+  const startEdit = (recipe: Recipe) => {
+    setEditId(recipe.id)
+    setForm({
+      recipeName: recipe.recipeName,
+      description: recipe.description,
+      cuisine: recipe.cuisine,
+      difficulty: recipe.difficulty,
+      prepTime: recipe.prepTime,
+      cookTime: recipe.cookTime,
+      servings: recipe.servings,
+    })
+    setShowForm(true)
   }
 
   return (
@@ -342,7 +467,7 @@ const RecipesPanel = ({ store }: Props) => {
         <CardTitle>Recipes ({state.recipes.length})</CardTitle>
         <div className="flex gap-2">
           <input className={cn(inputClass, 'max-w-48')} placeholder="Filter..." value={filter} onChange={(e) => setFilter(e.target.value)} />
-          <Button variant="outline" onClick={() => setShowForm(!showForm)}>
+          <Button variant="outline" onClick={() => { if (showForm && !editId) setShowForm(false); else { resetRecipeForm(); setShowForm(true) } }}>
             <Plus className="size-4" /> Add
           </Button>
         </div>
@@ -360,9 +485,12 @@ const RecipesPanel = ({ store }: Props) => {
                 <option value="hard">Hard</option>
               </select>
             </FormField>
+            <FormField label="Prep time"><input className={inputClass} min={0} type="number" value={form.prepTime} onChange={(e) => setForm({ ...form, prepTime: Number(e.target.value) })} /></FormField>
+            <FormField label="Cook time"><input className={inputClass} min={0} type="number" value={form.cookTime} onChange={(e) => setForm({ ...form, cookTime: Number(e.target.value) })} /></FormField>
+            <FormField label="Servings"><input className={inputClass} min={1} type="number" value={form.servings} onChange={(e) => setForm({ ...form, servings: Number(e.target.value) })} /></FormField>
             <div className="flex gap-2 sm:col-span-2">
-              <Button onClick={handleSubmit}>Create</Button>
-              <Button variant="ghost" onClick={() => setShowForm(false)}>Cancel</Button>
+              <Button onClick={handleSubmit}>{editId ? 'Update' : 'Create'}</Button>
+              <Button variant="ghost" onClick={() => { setShowForm(false); resetRecipeForm() }}>Cancel</Button>
             </div>
           </div>
         )}
@@ -376,7 +504,10 @@ const RecipesPanel = ({ store }: Props) => {
                 <Badge tone="slate">{r.prepTime + r.cookTime}m</Badge>
               </div>
             </div>
-            <Button variant="icon" iconOnly onClick={() => deleteRecipe(r.id)} title="Delete"><Trash2 className="size-3.5 text-rose-500" /></Button>
+            <div className="flex gap-1">
+              <Button variant="icon" iconOnly onClick={() => startEdit(r)} title="Edit recipe"><Pencil className="size-3.5" /></Button>
+              <Button variant="icon" iconOnly onClick={() => deleteRecipe(r.id)} title="Delete"><Trash2 className="size-3.5 text-rose-500" /></Button>
+            </div>
           </div>
         ))}
         {filtered.length === 0 && <p className="py-8 text-center text-sm text-slate-400">No recipes found</p>}
@@ -387,24 +518,163 @@ const RecipesPanel = ({ store }: Props) => {
 
 /* ─── Tasks Panel ─── */
 const TasksPanel = ({ store }: Props) => {
-  const { state, deleteTask, toggleTaskStatus } = store
+  const { state, addTask, updateTask, deleteTask, toggleTaskStatus } = store
   const [filter, setFilter] = useState<string>('all')
+  const [showForm, setShowForm] = useState(false)
+  const [editId, setEditId] = useState<number | null>(null)
+  const [form, setForm] = useState<NewTaskInput & { status: TaskStatus }>({
+    title: '',
+    description: '',
+    category: 'chore',
+    priority: 'medium',
+    dueAt: defaultDueLocalValue(),
+    reminderAt: '',
+    assignedTo: state.members[0]?.id ?? 0,
+    recurrenceType: 'none',
+    recurrenceInterval: 1,
+    recurrenceEndAt: '',
+    status: 'pending',
+  })
 
   const filtered = filter === 'all' ? state.tasks : state.tasks.filter((t) => t.status === filter)
   const ownerName = (assignedTo: number) => state.members.find((m) => m.id === assignedTo)?.name ?? '—'
+  const resetTaskForm = () => {
+    setEditId(null)
+    setForm({
+      title: '',
+      description: '',
+      category: 'chore',
+      priority: 'medium',
+      dueAt: defaultDueLocalValue(),
+      reminderAt: '',
+      assignedTo: state.members[0]?.id ?? 0,
+      recurrenceType: 'none',
+      recurrenceInterval: 1,
+      recurrenceEndAt: '',
+      status: 'pending',
+    })
+  }
+
+  const startEdit = (taskId: number) => {
+    const task = state.tasks.find((item) => item.id === taskId)
+    if (!task) return
+    setEditId(task.id)
+    setForm({
+      title: task.title,
+      description: task.description,
+      category: task.category,
+      priority: task.priority,
+      dueAt: toDateTimeLocalValue(new Date(task.dueAt)),
+      reminderAt: task.reminderAt ? toDateTimeLocalValue(new Date(task.reminderAt)) : '',
+      assignedTo: task.assignedTo,
+      recurrenceType: task.recurrenceType,
+      recurrenceInterval: task.recurrenceInterval,
+      recurrenceEndAt: task.recurrenceEndAt ? toDateTimeLocalValue(new Date(task.recurrenceEndAt)) : '',
+      status: task.status,
+    })
+    setShowForm(true)
+  }
+
+  const handleSubmit = () => {
+    if (!form.title.trim() || state.members.length === 0) return
+    const recurrenceType = form.recurrenceType ?? 'none'
+    const payload: NewTaskInput & TaskUpdateInput = {
+      title: form.title.trim(),
+      description: form.description?.trim() || '',
+      category: form.category.trim() || 'general',
+      priority: form.priority,
+      assignedTo: form.assignedTo,
+      dueAt: new Date(form.dueAt).toISOString(),
+      reminderAt: form.reminderAt ? new Date(form.reminderAt).toISOString() : null,
+      recurrenceType,
+      recurrenceInterval: recurrenceType === 'none' ? 1 : Math.max(1, Number(form.recurrenceInterval) || 1),
+      recurrenceEndAt: recurrenceType !== 'none' && form.recurrenceEndAt ? new Date(form.recurrenceEndAt).toISOString() : null,
+    }
+    if (editId) {
+      updateTask(editId, { ...payload, status: form.status })
+    } else {
+      addTask(payload)
+    }
+    setShowForm(false)
+    resetTaskForm()
+  }
+
+  const updateTaskStatus = (taskId: number, status: TaskStatus) => {
+    updateTask(taskId, { status })
+  }
 
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between gap-3">
         <CardTitle>Tasks ({state.tasks.length})</CardTitle>
-        <select className={cn(inputClass, 'max-w-40')} value={filter} onChange={(e) => setFilter(e.target.value)}>
-          <option value="all">All statuses</option>
-          <option value="pending">Pending</option>
-          <option value="in_progress">In Progress</option>
-          <option value="completed">Completed</option>
-        </select>
+        <div className="flex flex-wrap gap-2">
+          <select aria-label="Task status filter" className={cn(inputClass, 'max-w-44')} value={filter} onChange={(e) => setFilter(e.target.value)}>
+            <option value="all">All Statuses</option>
+            <option value="pending">Pending</option>
+            <option value="in_progress">In progress</option>
+            <option value="completed">Completed</option>
+            <option value="cancelled">Cancelled</option>
+          </select>
+          <Button variant="outline" onClick={() => { if (showForm && !editId) setShowForm(false); else { resetTaskForm(); setShowForm(true) } }}>
+            <Plus className="size-4" /> Add
+          </Button>
+        </div>
       </CardHeader>
-      <CardContent className="grid gap-2 max-h-[500px] overflow-y-auto">
+      <CardContent className="grid gap-3">
+        {showForm && (
+          <div className="grid gap-3 rounded-xl border border-indigo-100 bg-indigo-50/30 p-4">
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              <FormField label="Title"><input className={inputClass} value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></FormField>
+              <FormField label="Assignee">
+                <select className={inputClass} value={form.assignedTo} onChange={(e) => setForm({ ...form, assignedTo: Number(e.target.value) })}>
+                  {state.members.length === 0 && <option value={0}>No active members</option>}
+                  {state.members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}
+                </select>
+              </FormField>
+              <FormField label="Status">
+                <select className={inputClass} value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value as TaskStatus })}>
+                  <option value="pending">Pending</option>
+                  <option value="in_progress">In progress</option>
+                  <option value="completed">Completed</option>
+                  <option value="cancelled">Cancelled</option>
+                </select>
+              </FormField>
+              <FormField label="Due / end"><input className={inputClass} type="datetime-local" value={form.dueAt} onChange={(e) => setForm({ ...form, dueAt: e.target.value })} /></FormField>
+              <FormField label="Reminder"><input className={inputClass} type="datetime-local" value={form.reminderAt ?? ''} onChange={(e) => setForm({ ...form, reminderAt: e.target.value })} /></FormField>
+              <FormField label="Priority">
+                <select className={inputClass} value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value as Priority })}>
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                </select>
+              </FormField>
+              <FormField label="Category"><input className={inputClass} value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} /></FormField>
+              <FormField label="Repeat">
+                <select
+                  className={inputClass}
+                  value={form.recurrenceType ?? 'none'}
+                  onChange={(e) => setForm({ ...form, recurrenceType: e.target.value as RecurrenceType, recurrenceEndAt: e.target.value === 'none' ? null : form.recurrenceEndAt })}
+                >
+                  <option value="none">No repeat</option>
+                  <option value="daily">Daily</option>
+                  <option value="weekly">Weekly</option>
+                  <option value="monthly">Monthly</option>
+                  <option value="quarterly">Quarterly</option>
+                  <option value="semi_annually">Semi-annually</option>
+                  <option value="yearly">Yearly</option>
+                </select>
+              </FormField>
+              <FormField label="Every"><input className={inputClass} disabled={(form.recurrenceType ?? 'none') === 'none'} min={1} type="number" value={form.recurrenceInterval ?? 1} onChange={(e) => setForm({ ...form, recurrenceInterval: Number(e.target.value) || 1 })} /></FormField>
+              <FormField label="Repeat ends"><input className={inputClass} disabled={(form.recurrenceType ?? 'none') === 'none'} type="datetime-local" value={form.recurrenceEndAt ?? ''} onChange={(e) => setForm({ ...form, recurrenceEndAt: e.target.value })} /></FormField>
+              <FormField className="sm:col-span-2" label="Note"><input className={inputClass} value={form.description ?? ''} onChange={(e) => setForm({ ...form, description: e.target.value })} /></FormField>
+            </div>
+            <div className="flex gap-2">
+              <Button disabled={state.members.length === 0} onClick={handleSubmit}>{editId ? 'Update task' : 'Create task'}</Button>
+              <Button variant="ghost" onClick={() => { setShowForm(false); resetTaskForm() }}>Cancel</Button>
+            </div>
+          </div>
+        )}
+        <div className="grid max-h-[500px] gap-2 overflow-y-auto">
         {filtered.map((t) => (
           <div className="flex items-center justify-between rounded-xl border border-slate-100 bg-white px-4 py-3 shadow-sm" key={t.id}>
             <div className="flex items-center gap-3 min-w-0">
@@ -414,10 +684,20 @@ const TasksPanel = ({ store }: Props) => {
                 <p className="text-xs text-slate-500">{ownerName(t.assignedTo)} · {t.priority}</p>
               </div>
             </div>
-            <Button variant="icon" iconOnly onClick={() => deleteTask(t.id)} title="Delete"><Trash2 className="size-3.5 text-rose-500" /></Button>
+            <div className="flex items-center gap-1">
+              <select aria-label={`Status for ${t.title}`} className={cn(inputClass, 'min-h-9 w-36 px-2 py-1 text-xs')} value={t.status} onChange={(e) => updateTaskStatus(t.id, e.target.value as TaskStatus)}>
+                <option value="pending">Pending</option>
+                <option value="in_progress">In progress</option>
+                <option value="completed">Completed</option>
+                <option value="cancelled">Cancelled</option>
+              </select>
+              <Button variant="icon" iconOnly onClick={() => startEdit(t.id)} title="Edit task"><Pencil className="size-3.5" /></Button>
+              <Button variant="icon" iconOnly onClick={() => deleteTask(t.id)} title="Delete"><Trash2 className="size-3.5 text-rose-500" /></Button>
+            </div>
           </div>
         ))}
         {filtered.length === 0 && <p className="py-8 text-center text-sm text-slate-400">No tasks match filter</p>}
+        </div>
       </CardContent>
     </Card>
   )
@@ -425,19 +705,16 @@ const TasksPanel = ({ store }: Props) => {
 
 /* ─── Insights Panel ─── */
 const InsightsPanel = ({ store }: Props) => {
-  const [insights, setInsights] = useState<AssistantInsight[]>(store.state.assistantInsights)
   const [loading, setLoading] = useState(false)
+  const insights = store.state.assistantInsights
 
   const fetchInsights = useCallback(() => {
     setLoading(true)
-    api
-      .getAssistantInsights()
-      .then(setInsights)
+    store
+      .refreshAssistantInsights()
       .catch(() => {})
       .finally(() => setLoading(false))
-  }, [])
-
-  useEffect(() => { fetchInsights() }, [fetchInsights])
+  }, [store])
 
   const typeColor: Record<string, 'blue' | 'green' | 'amber' | 'rose' | 'violet'> = {
     schedule: 'blue',
@@ -484,22 +761,26 @@ const MealPlansPanel = ({ store }: Props) => {
   const [editingMealId, setEditingMealId] = useState<number | null>(null)
   const [editName, setEditName] = useState('')
   const [templates, setTemplates] = useState<MealTemplateRow[]>([])
+  const [templatesLoading, setTemplatesLoading] = useState(false)
   const [selectedTemplateName, setSelectedTemplateName] = useState('Default Weekly Meal Plan')
   const [templateTarget, setTemplateTarget] = useState<TemplateApplyTarget>('all')
   const [templateMemberId, setTemplateMemberId] = useState<string>(() => String(state.members[0]?.id ?? ''))
 
-  useEffect(() => {
-    if (selectedMemberId !== null) loadMemberMeals(selectedMemberId)
-  }, [selectedMemberId, loadMemberMeals])
-
-  useEffect(() => {
+  const loadTemplates = useCallback(() => {
+    setTemplatesLoading(true)
     api.listMealTemplates().then((rows) => {
       setTemplates(rows)
       if (rows.length > 0) {
         setSelectedTemplateName((current) => (rows.some((row) => row.templateName === current) ? current : rows[0].templateName))
       }
-    }).catch(() => {})
+    }).catch(() => {}).finally(() => setTemplatesLoading(false))
   }, [])
+
+  useEffect(() => {
+    if (selectedMemberId !== null) loadMemberMeals(selectedMemberId)
+  }, [selectedMemberId, loadMemberMeals])
+
+  useEffect(() => { loadTemplates() }, [loadTemplates])
 
   useEffect(() => {
     if (!templateMemberId && state.members.length > 0) setTemplateMemberId(String(state.members[0].id))
@@ -508,7 +789,14 @@ const MealPlansPanel = ({ store }: Props) => {
     }
   }, [state.members, templateMemberId])
 
-  const activeMeals: MealPlanItem[] = selectedMemberId !== null && memberMeals ? memberMeals : state.meals
+  const activeMeals: MealPlanItem[] = useMemo(
+    () => selectedMemberId !== null
+      ? memberMealsLoading
+        ? []
+        : memberMeals ?? []
+      : state.meals,
+    [memberMeals, memberMealsLoading, selectedMemberId, state.meals],
+  )
   const mealsByDay = useMemo(() => {
     return activeMeals.reduce<Record<string, MealPlanItem[]>>((acc, meal) => {
       acc[meal.dayOfWeek] = [...(acc[meal.dayOfWeek] ?? []), meal]
@@ -573,11 +861,17 @@ const MealPlansPanel = ({ store }: Props) => {
         </CardHeader>
         <CardContent className="grid gap-5">
           <div className="grid gap-3 lg:grid-cols-[minmax(180px,1fr)_minmax(220px,1.2fr)_auto] lg:items-end">
-            <FormField label="Template">
-              <select className={inputClass} value={selectedTemplateName} onChange={(event) => setSelectedTemplateName(event.target.value)}>
-                {templateNames.map((name) => <option key={name} value={name}>{name}</option>)}
-              </select>
-            </FormField>
+            <div className="grid gap-2">
+              <FormField label="Template">
+                <select className={inputClass} value={selectedTemplateName} onChange={(event) => setSelectedTemplateName(event.target.value)}>
+                  {templateNames.map((name) => <option key={name} value={name}>{name}</option>)}
+                </select>
+              </FormField>
+              <Button className="min-h-9 justify-self-start px-3 py-1.5 text-xs" disabled={templatesLoading} onClick={loadTemplates} variant="secondary">
+                <RefreshCw className={cn('size-3.5', templatesLoading && 'animate-spin')} />
+                Refresh templates
+              </Button>
+            </div>
             <div className="grid gap-3 sm:grid-cols-2">
               <FormField label="Apply to">
                 <select className={inputClass} value={templateTarget} onChange={(event) => setTemplateTarget(event.target.value as TemplateApplyTarget)}>
@@ -592,10 +886,16 @@ const MealPlansPanel = ({ store }: Props) => {
                 </select>
               </FormField>
             </div>
-            <Button onClick={applyTarget} disabled={generating !== null}>
-              <ClipboardCheck className="size-4" />
-              {generating ? 'Applying...' : 'Apply template'}
-            </Button>
+            <div className="grid gap-2">
+              <Button onClick={applyTarget} disabled={generating !== null}>
+                <ClipboardCheck className="size-4" />
+                {generating ? 'Applying...' : 'Apply template'}
+              </Button>
+              <Button className="min-h-9 px-3 py-1.5 text-xs" onClick={generateForAll} disabled={generating !== null} variant="secondary">
+                <ClipboardCheck className="size-3.5" />
+                Generate for all members
+              </Button>
+            </div>
           </div>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {state.members.map((m) => {
@@ -755,12 +1055,27 @@ const SecurityPanel = ({ store: _store }: Props) => {
   const inviteLinkFromToken = (token: string) => `${window.location.origin}/?invite=${encodeURIComponent(token)}`
 
   const handleCreateInvite = () => {
+    const allowedRoles = new Set(['member', 'child', 'parent', 'admin'])
+    const email = inviteForm.email.trim()
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setStatus({ type: 'error', message: 'Enter a valid invite email or leave it blank for an open invite' })
+      return
+    }
+    if (!allowedRoles.has(inviteForm.role)) {
+      setStatus({ type: 'error', message: 'Choose a valid invite role' })
+      return
+    }
+    if (inviteForm.expiresInDays < 1 || inviteForm.expiresInDays > 30 || inviteForm.maxUses < 1 || inviteForm.maxUses > 10) {
+      setStatus({ type: 'error', message: 'Invite expiry must be 1-30 days and uses must be 1-10' })
+      return
+    }
     setInvitesLoading(true)
+    setStatus(null)
     setLatestInviteLink('')
     setLatestInviteQr('')
     api
       .createSignupInvite({
-        email: inviteForm.email.trim() || undefined,
+        email: email || undefined,
         role: inviteForm.role,
         expiresInDays: inviteForm.expiresInDays,
         maxUses: inviteForm.maxUses,
@@ -772,6 +1087,7 @@ const SecurityPanel = ({ store: _store }: Props) => {
           setLatestInviteLink(link)
           setLatestInviteQr(await QRCode.toDataURL(link, { margin: 1, width: 180 }))
         }
+        setStatus({ type: 'success', message: `${invite.role} invite created${invite.email ? ` for ${invite.email}` : ''}` })
         setInviteForm((current) => ({ ...current, email: '' }))
       })
       .catch((err: unknown) => setStatus({ type: 'error', message: err instanceof Error ? err.message : 'Failed to create invite' }))
@@ -779,7 +1095,13 @@ const SecurityPanel = ({ store: _store }: Props) => {
   }
 
   const handleRevokeInvite = (inviteId: number) => {
-    api.revokeSignupInvite(inviteId).then(loadInvites).catch(() => {})
+    api
+      .revokeSignupInvite(inviteId)
+      .then(() => {
+        setStatus({ type: 'success', message: 'Invite revoked' })
+        loadInvites()
+      })
+      .catch((err: unknown) => setStatus({ type: 'error', message: err instanceof Error ? err.message : 'Failed to revoke invite' }))
   }
 
   const handleChangePassword = () => {
@@ -808,14 +1130,30 @@ const SecurityPanel = ({ store: _store }: Props) => {
   }
 
   const handleRevokeDevice = (deviceId: number) => {
-    api.revokeDevice(deviceId).then(loadDevices).catch(() => {})
+    api
+      .revokeDevice(deviceId)
+      .then(() => {
+        setStatus({ type: 'success', message: 'Device revoked' })
+        loadDevices()
+      })
+      .catch((err: unknown) => setStatus({ type: 'error', message: err instanceof Error ? err.message : 'Failed to revoke device' }))
   }
 
   const handleToggleTrust = (deviceId: number, isTrusted: boolean) => {
-    api.updateDevice(deviceId, { isTrusted: !isTrusted }).then(loadDevices).catch(() => {})
+    api
+      .updateDevice(deviceId, { isTrusted: !isTrusted })
+      .then(() => {
+        setStatus({ type: 'success', message: isTrusted ? 'Device trust removed' : 'Device marked trusted' })
+        loadDevices()
+      })
+      .catch((err: unknown) => setStatus({ type: 'error', message: err instanceof Error ? err.message : 'Failed to update device trust' }))
   }
 
   const handleUpdateDeviceLimit = () => {
+    if (deviceLimitDraft < Math.max(1, devicePolicy?.activeDeviceCount ?? 1) || deviceLimitDraft > 20) {
+      setStatus({ type: 'error', message: 'Device limit must be at least the active device count and no more than 20' })
+      return
+    }
     api
       .updateDevicePolicy(deviceLimitDraft)
       .then((policy) => {
@@ -830,17 +1168,18 @@ const SecurityPanel = ({ store: _store }: Props) => {
 
   return (
     <div className="grid gap-5">
+      {status && (
+        <div className={cn('rounded-xl border px-4 py-3 text-sm font-medium', status.type === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-rose-200 bg-rose-50 text-rose-800')}>
+          {status.message}
+        </div>
+      )}
+
       {/* Change Password */}
       <Card>
         <CardHeader>
           <CardTitle>Change Password</CardTitle>
         </CardHeader>
         <CardContent className="grid gap-5 max-w-md">
-          {status && (
-            <div className={cn('rounded-xl border px-4 py-3 text-sm font-medium', status.type === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-rose-200 bg-rose-50 text-rose-800')}>
-              {status.message}
-            </div>
-          )}
           <FormField label="Current Password">
             <div className="relative">
               <input className={inputClass} type={showPassword ? 'text' : 'password'} value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} />

@@ -1,17 +1,44 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
-import { BookOpen, CalendarCheck2, ChefHat, ClipboardCheck, Clock3, Edit3, Flame, Gauge, Plus, RefreshCw, Save, Timer, Trash2, Users } from 'lucide-react'
+import { useSearchParams } from 'react-router-dom'
+import { BookOpen, CalendarCheck2, ChefHat, ClipboardCheck, Clock3, Edit3, Flame, Gauge, Plus, RefreshCw, Save, Timer, Trash2, Users, X } from 'lucide-react'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { FormField, inputClass } from '@/components/ui/FormField'
 import type { FamilyHubStore } from '@/hooks/useFamilyHub'
 import { api } from '@/services/api'
-import type { MealPlanItem, MealTemplateRow, MealTemplateRowInput, MealType, MealUpdateInput, WeekDay } from '@/types/familyHub'
+import type { MealPlanItem, MealTemplateRow, MealTemplateRowInput, MealType, MealUpdateInput, TimeScope, WeekDay } from '@/types/familyHub'
+import { formatCompactDate, formatDay, isIsoDateInRange, todayIso, weekEndIso, weekStartIso } from '@/utils/date'
 import { cn } from '@/utils/style'
 
 type MealPageTab = 'plan' | 'templates'
 type TemplateApplyTarget = 'family' | 'all' | 'member'
+type MealEffectiveScope = 'daily' | 'weekly' | 'monthly'
+type MealAudience = 'family' | 'individual' | 'group'
+
+interface MealDraft {
+  mealName: string
+  description: string
+  calories: number
+  prepTime: number
+  audience: MealAudience
+  audienceMemberId: string
+  audienceMemberIds: string[]
+  dietaryFlags: string
+  recipeId: string
+}
+
+interface MealSlotGroup {
+  date?: string
+  day: string
+  familyMeal?: MealPlanItem
+  key: string
+  mealType: MealType
+  meals: MealPlanItem[]
+  personalMeals: MealPlanItem[]
+  visibleMeal?: MealPlanItem
+}
 
 const mealColumns: { key: MealType; label: string }[] = [
   { key: 'breakfast', label: 'Breakfast' },
@@ -32,12 +59,14 @@ const dayOptions: { key: WeekDay; label: string }[] = [
 ]
 
 const defaultTemplateName = 'Default Weekly Meal Plan'
-const defaultMealDraft = {
+const defaultMealDraft: MealDraft = {
   mealName: '',
   description: '',
   calories: 0,
   prepTime: 0,
-  assignedTo: '',
+  audience: 'family',
+  audienceMemberId: '',
+  audienceMemberIds: [],
   dietaryFlags: '',
   recipeId: '',
 }
@@ -53,15 +82,83 @@ const defaultTemplateDraft = (): MealTemplateRowInput => ({
   recipeId: null,
 })
 
+const scopeFromSearchParam = (value: string | null): TimeScope | null =>
+  value === 'today' || value === 'week' ? value : null
+
+const mealSlotKey = (day: string, mealType: MealType) => `${day}:${mealType}`
+
+const memberIdsFromMealScope = (scope?: string | null, assignedTo?: number | null) => {
+  if (assignedTo) return [assignedTo]
+  if (!scope || scope === 'family') return []
+  if (scope.startsWith('user:')) {
+    const memberId = Number(scope.slice('user:'.length))
+    return Number.isFinite(memberId) ? [memberId] : []
+  }
+  if (scope.startsWith('group:')) {
+    return scope
+      .slice('group:'.length)
+      .split(',')
+      .map((value) => Number(value))
+      .filter((value, index, values) => Number.isFinite(value) && values.indexOf(value) === index)
+  }
+  return []
+}
+
+const targetMemberIdsForMeal = (meal: MealPlanItem) =>
+  meal.targetMemberIds?.length ? meal.targetMemberIds : memberIdsFromMealScope(meal.mealPlanScope, meal.assignedTo)
+
+const audienceFromMemberIds = (memberIds: number[]): MealAudience => {
+  if (memberIds.length === 0) return 'family'
+  if (memberIds.length === 1) return 'individual'
+  return 'group'
+}
+
+const isFamilyMeal = (meal: MealPlanItem) => targetMemberIdsForMeal(meal).length === 0
+
+const mealAppliesToMember = (meal: MealPlanItem, memberId: number) => targetMemberIdsForMeal(meal).includes(memberId)
+
+const mealAudienceLabel = (meal: MealPlanItem, members: { id: number; name: string }[]) => {
+  const memberIds = targetMemberIdsForMeal(meal)
+  if (memberIds.length === 0) return 'All family'
+  const names = memberIds.map((memberId) => members.find((member) => member.id === memberId)?.name ?? `Member ${memberId}`)
+  if (names.length === 1) return names[0]
+  return `Group: ${names.join(', ')}`
+}
+
+const formatDateTime = (value?: string | null) => {
+  if (!value) return 'Not recorded'
+  return new Intl.DateTimeFormat('en-US', {
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  }).format(new Date(value))
+}
+
+const monthEndIso = (isoDate: string) => {
+  const date = new Date(`${isoDate}T00:00:00`)
+  const end = new Date(date.getFullYear(), date.getMonth() + 1, 0)
+  return `${end.getFullYear()}-${String(end.getMonth() + 1).padStart(2, '0')}-${String(end.getDate()).padStart(2, '0')}`
+}
+
+const defaultEffectiveUntil = (planDate: string, scope: MealEffectiveScope) => {
+  if (scope === 'weekly') return weekEndIso(planDate)
+  if (scope === 'monthly') return monthEndIso(planDate)
+  return planDate
+}
+
 export const MealPlanView = ({ store }: { store: FamilyHubStore }) => {
   const { state, updateMeal, applyWeeklyTemplate, applyWeeklyTemplateForAll, addRecipe, updateRecipe, deleteRecipe, loadRecipePage, loadMemberMeals, memberMeals, memberMealsLoading } = store
   const canManageMeals = store.can('manage_meals')
   const canManageRecipes = store.can('manage_recipes')
   const page = store.pagination.recipes
   const recipes = store.paged.recipes ?? state.recipes
+  const [searchParams, setSearchParams] = useSearchParams()
   const [activeTab, setActiveTab] = useState<MealPageTab>('plan')
+  const [mealScope, setMealScope] = useState<TimeScope>(() => scopeFromSearchParam(searchParams.get('scope')) ?? 'week')
   const [selectedMemberId, setSelectedMemberId] = useState<number | null>(null)
-  const [selectedMealId, setSelectedMealId] = useState<number>(state.meals[0]?.id ?? 0)
+  const [selectedMealId, setSelectedMealId] = useState<number | null>(state.meals[0]?.id ?? null)
   const [templates, setTemplates] = useState<MealTemplateRow[]>([])
   const [templatesLoading, setTemplatesLoading] = useState(false)
   const [selectedTemplateName, setSelectedTemplateName] = useState(defaultTemplateName)
@@ -70,7 +167,12 @@ export const MealPlanView = ({ store }: { store: FamilyHubStore }) => {
   const [templateDraft, setTemplateDraft] = useState<MealTemplateRowInput>(defaultTemplateDraft)
   const [editingTemplateId, setEditingTemplateId] = useState<number | null>(null)
   const [templateFeedback, setTemplateFeedback] = useState<string | null>(null)
+  const [isApplyingTemplate, setIsApplyingTemplate] = useState(false)
+  const [detailSlotKey, setDetailSlotKey] = useState<string | null>(null)
+  const [detailSlotData, setDetailSlotData] = useState<MealSlotGroup | null>(null)
   const [mealDraft, setMealDraft] = useState(defaultMealDraft)
+  const [mealEffectiveScope, setMealEffectiveScope] = useState<MealEffectiveScope>('daily')
+  const [mealEffectiveUntil, setMealEffectiveUntil] = useState('')
   const [showAddRecipe, setShowAddRecipe] = useState(false)
   const [recipeDraft, setRecipeDraft] = useState({ recipeName: '', description: '', ingredients: '', prepTime: 10, cookTime: 15, servings: 4, difficulty: 'easy' as 'easy' | 'medium' | 'hard', cuisine: '', dietaryTags: '' })
   const [editingRecipeId, setEditingRecipeId] = useState<number | null>(null)
@@ -115,23 +217,106 @@ export const MealPlanView = ({ store }: { store: FamilyHubStore }) => {
     loadMemberMeals(selectedMemberId)
   }, [selectedMemberId, loadMemberMeals])
 
-  // Active meals: member-filtered or all family meals
-  const activeMeals = selectedMemberId !== null && memberMeals ? memberMeals : state.meals
+  useEffect(() => {
+    const nextScope = scopeFromSearchParam(searchParams.get('scope')) ?? 'week'
+    if (nextScope !== mealScope) {
+      setMealScope(nextScope)
+    }
+    if (searchParams.has('scope')) {
+      setActiveTab('plan')
+    }
+  }, [mealScope, searchParams])
+
+  const updateMealScope = (nextScope: TimeScope) => {
+    setMealScope(nextScope)
+    setActiveTab('plan')
+    const params = new URLSearchParams(searchParams)
+    params.set('scope', nextScope)
+    setSearchParams(params, { replace: true })
+  }
+
+  const mealScopeRange = useMemo(() => {
+    const familyToday = todayIso(state.family.timezone)
+    if (mealScope === 'today') {
+      return {
+        endIso: familyToday,
+        startIso: familyToday,
+      }
+    }
+    return {
+      endIso: weekEndIso(familyToday),
+      startIso: weekStartIso(familyToday),
+    }
+  }, [mealScope, state.family.timezone])
+
+  const familyMeals = useMemo(
+    () => state.meals.filter((meal) => isFamilyMeal(meal)),
+    [state.meals],
+  )
+
+  const selectedMemberMeals = useMemo(() => {
+    if (selectedMemberId === null) return []
+    const sourceMeals = memberMeals ?? state.meals
+    return sourceMeals.filter((meal) => !isFamilyMeal(meal) && mealAppliesToMember(meal, selectedMemberId))
+  }, [memberMeals, selectedMemberId, state.meals])
+
+  const activeMeals = useMemo(() => {
+    if (selectedMemberId === null) return state.meals
+    const personalKeys = new Set(selectedMemberMeals.map((meal) => mealSlotKey(meal.dayOfWeek, meal.mealType)))
+    return [
+      ...familyMeals.filter((meal) => !personalKeys.has(mealSlotKey(meal.dayOfWeek, meal.mealType))),
+      ...selectedMemberMeals,
+    ]
+  }, [familyMeals, selectedMemberId, selectedMemberMeals, state.meals])
+
+  const scopedMeals = useMemo(
+    () => activeMeals.filter((meal) => isIsoDateInRange(meal.planDate, mealScopeRange.startIso, mealScopeRange.endIso)),
+    [activeMeals, mealScopeRange],
+  )
+
+  const visibleDayOrder = useMemo(
+    () => (mealScope === 'today' ? [formatDay(todayIso(state.family.timezone))] : dayOrder),
+    [mealScope, state.family.timezone],
+  )
 
   useEffect(() => {
-    if (activeMeals.length > 0 && !activeMeals.some((meal) => meal.id === selectedMealId)) {
-      setSelectedMealId(activeMeals[0].id)
+    if (scopedMeals.length > 0 && (selectedMealId === null || !scopedMeals.some((meal) => meal.id === selectedMealId))) {
+      setSelectedMealId(scopedMeals[0].id)
+    } else if (scopedMeals.length === 0 && selectedMealId !== null) {
+      setSelectedMealId(null)
     }
-  }, [activeMeals, selectedMealId])
+  }, [scopedMeals, selectedMealId])
 
-  const activeMealsByDay = useMemo(() => {
-    return activeMeals.reduce<Record<string, MealPlanItem[]>>((acc, meal) => {
-      acc[meal.dayOfWeek] = [...(acc[meal.dayOfWeek] ?? []), meal]
-      return acc
-    }, {})
-  }, [activeMeals])
+  const mealSlotGroups = useMemo<MealSlotGroup[]>(() => {
+    return visibleDayOrder.flatMap((day) =>
+      mealColumns.map((column) => {
+        const meals = scopedMeals.filter((meal) => meal.dayOfWeek === day && meal.mealType === column.key)
+        const familyMeal = meals.find(isFamilyMeal)
+        const personalMeals = meals.filter((meal) => !isFamilyMeal(meal))
+        const selectedMemberMeal = selectedMemberId === null
+          ? undefined
+          : personalMeals.find((meal) => mealAppliesToMember(meal, selectedMemberId))
+        return {
+          date: meals[0]?.planDate,
+          day,
+          familyMeal,
+          key: mealSlotKey(day, column.key),
+          mealType: column.key,
+          meals,
+          personalMeals,
+          visibleMeal: selectedMemberMeal ?? familyMeal ?? personalMeals[0],
+        }
+      }),
+    )
+  }, [scopedMeals, selectedMemberId, visibleDayOrder])
 
-  const selectedMeal = activeMeals.find((meal) => meal.id === selectedMealId)
+  const mealSlotByKey = useMemo(
+    () => new Map(mealSlotGroups.map((slot) => [slot.key, slot])),
+    [mealSlotGroups],
+  )
+
+  const selectedMeal = scopedMeals.find((meal) => meal.id === selectedMealId)
+  const detailSlot = detailSlotKey ? (mealSlotGroups.find((slot) => slot.key === detailSlotKey) ?? detailSlotData) : undefined
   const templateNames = useMemo(() => {
     const names = Array.from(new Set(templates.map((row) => row.templateName))).sort((a, b) => a.localeCompare(b))
     return names.length > 0 ? names : [defaultTemplateName]
@@ -140,16 +325,20 @@ export const MealPlanView = ({ store }: { store: FamilyHubStore }) => {
     () => templates.filter((row) => row.templateName === selectedTemplateName),
     [selectedTemplateName, templates],
   )
+  const templateRowBySlot = useMemo(
+    () => new Map(filteredTemplates.map((row) => [mealSlotKey(dayOptions.find((day) => day.key === row.dayOfWeek)?.label ?? row.dayOfWeek, row.mealType), row])),
+    [filteredTemplates],
+  )
 
   const mealStats = useMemo(() => {
     const averagePrep = Math.round(
-      activeMeals.reduce((total, meal) => total + meal.prepTime, 0) / Math.max(1, activeMeals.length),
+      scopedMeals.reduce((total, meal) => total + meal.prepTime, 0) / Math.max(1, scopedMeals.length),
     )
-    const weeklyCalories = activeMeals.reduce((total, meal) => total + meal.calories, 0)
-    const plannedSlots = activeMeals.length
-    const coverage = Math.min(100, Math.round((plannedSlots / (dayOrder.length * mealColumns.length)) * 100))
+    const weeklyCalories = scopedMeals.reduce((total, meal) => total + meal.calories, 0)
+    const plannedSlots = scopedMeals.length
+    const coverage = Math.min(100, Math.round((plannedSlots / (visibleDayOrder.length * mealColumns.length)) * 100))
     return { averagePrep, coverage, plannedSlots, weeklyCalories }
-  }, [activeMeals])
+  }, [scopedMeals, visibleDayOrder.length])
 
   const selectedRecipe = selectedMeal?.recipeId
     ? state.recipes.find((recipe) => recipe.id === selectedMeal.recipeId)
@@ -158,36 +347,156 @@ export const MealPlanView = ({ store }: { store: FamilyHubStore }) => {
   useEffect(() => {
     if (!selectedMeal) {
       setMealDraft(defaultMealDraft)
+      setMealEffectiveScope('daily')
+      setMealEffectiveUntil('')
       return
     }
+    const targetMemberIds = targetMemberIdsForMeal(selectedMeal)
+    const firstMemberId = String(targetMemberIds[0] ?? state.members[0]?.id ?? '')
     setMealDraft({
       mealName: selectedMeal.mealName,
       description: selectedMeal.description,
       calories: selectedMeal.calories,
       prepTime: selectedMeal.prepTime,
-      assignedTo: selectedMeal.assignedTo ? String(selectedMeal.assignedTo) : '',
+      audience: audienceFromMemberIds(targetMemberIds),
+      audienceMemberId: firstMemberId,
+      audienceMemberIds: targetMemberIds.map(String),
       dietaryFlags: (selectedMeal.dietaryFlags ?? []).join(', '),
       recipeId: selectedMeal.recipeId ? String(selectedMeal.recipeId) : '',
     })
-  }, [selectedMeal])
+    setMealEffectiveScope('daily')
+    setMealEffectiveUntil(selectedMeal.planDate)
+  }, [selectedMeal, state.members])
 
-  const selectMeal = (meal: MealPlanItem) => {
+  const updateMealEffectiveScope = (scope: MealEffectiveScope) => {
+    setMealEffectiveScope(scope)
+    if (selectedMeal) {
+      setMealEffectiveUntil(defaultEffectiveUntil(selectedMeal.planDate, scope))
+    }
+  }
+
+  const updateMealAudience = (audience: MealAudience) => {
+    setMealDraft((current) => {
+      const fallbackMemberId = current.audienceMemberId || current.audienceMemberIds[0] || String(state.members[0]?.id ?? '')
+      return {
+        ...current,
+        audience,
+        audienceMemberId: audience === 'individual' ? fallbackMemberId : current.audienceMemberId,
+        audienceMemberIds: audience === 'group'
+          ? (current.audienceMemberIds.length > 0 ? current.audienceMemberIds : (fallbackMemberId ? [fallbackMemberId] : []))
+          : current.audienceMemberIds,
+      }
+    })
+  }
+
+  const toggleMealAudienceMember = (memberId: number) => {
+    const value = String(memberId)
+    setMealDraft((current) => ({
+      ...current,
+      audienceMemberIds: current.audienceMemberIds.includes(value)
+        ? current.audienceMemberIds.filter((id) => id !== value)
+        : [...current.audienceMemberIds, value],
+    }))
+  }
+
+  const mealDraftTargetMemberIds = () => {
+    if (mealDraft.audience === 'family') return []
+    const ids = mealDraft.audience === 'individual'
+      ? [mealDraft.audienceMemberId]
+      : mealDraft.audienceMemberIds
+    return ids
+      .map((value) => Number(value))
+      .filter((value, index, values) => Number.isFinite(value) && values.indexOf(value) === index)
+      .sort((a, b) => a - b)
+  }
+
+  const renderAudienceControls = () => (
+    <div className="grid gap-3">
+      <div className="grid gap-3 sm:grid-cols-2">
+        <FormField label="Meal audience">
+          <select
+            className={inputClass}
+            onChange={(event) => updateMealAudience(event.target.value as MealAudience)}
+            value={mealDraft.audience}
+          >
+            <option value="family">All family members</option>
+            <option value="individual">One family member</option>
+            <option value="group">Selected members</option>
+          </select>
+        </FormField>
+        {mealDraft.audience === 'individual' && (
+          <FormField label="Family member">
+            <select
+              className={inputClass}
+              onChange={(event) => setMealDraft((current) => ({ ...current, audienceMemberId: event.target.value }))}
+              value={mealDraft.audienceMemberId}
+            >
+              {state.members.map((member) => (
+                <option key={member.id} value={member.id}>{member.name}</option>
+              ))}
+            </select>
+          </FormField>
+        )}
+      </div>
+      {mealDraft.audience === 'group' && (
+        <div className="rounded-xl border border-slate-200 bg-white p-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Selected members</p>
+          <div className="mt-2 flex flex-wrap gap-2" role="group" aria-label="Selected meal members">
+            {state.members.map((member) => {
+              const selected = mealDraft.audienceMemberIds.includes(String(member.id))
+              return (
+                <button
+                  aria-pressed={selected}
+                  className={cn(
+                    'rounded-full border px-3 py-1.5 text-xs font-semibold transition',
+                    selected
+                      ? 'border-indigo-200 bg-indigo-600 text-white shadow-sm'
+                      : 'border-slate-200 bg-slate-50 text-slate-600 hover:border-indigo-200 hover:bg-indigo-50',
+                  )}
+                  key={member.id}
+                  onClick={() => toggleMealAudienceMember(member.id)}
+                  type="button"
+                >
+                  {member.name}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+
+  const openMealDetails = (slot: MealSlotGroup) => {
+    const meal = slot.visibleMeal ?? slot.familyMeal ?? slot.meals[0]
+    if (!meal) return
     setSelectedMealId(meal.id)
+    setDetailSlotData(slot)
+    setDetailSlotKey(slot.key)
   }
 
   const handleSave = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     if (selectedMeal && mealDraft.mealName.trim()) {
+      const targetMemberIds = mealDraftTargetMemberIds()
+      if (mealDraft.audience !== 'family' && targetMemberIds.length === 0) {
+        return
+      }
       const payload: MealUpdateInput = {
         mealName: mealDraft.mealName.trim(),
         description: mealDraft.description.trim(),
         calories: Math.max(0, Number(mealDraft.calories) || 0),
         prepTime: Math.max(0, Number(mealDraft.prepTime) || 0),
-        assignedTo: mealDraft.assignedTo ? Number(mealDraft.assignedTo) : null,
+        assignedTo: targetMemberIds.length === 1 ? targetMemberIds[0] : null,
+        targetMemberIds,
         dietaryFlags: mealDraft.dietaryFlags.split(',').map((flag) => flag.trim()).filter(Boolean),
         recipeId: mealDraft.recipeId ? Number(mealDraft.recipeId) : null,
+        effectiveScope: mealEffectiveScope,
+        effectiveUntil: mealEffectiveUntil || selectedMeal.planDate,
       }
       updateMeal(selectedMeal.id, payload)
+      setDetailSlotKey(null)
+      setDetailSlotData(null)
     }
   }
 
@@ -264,20 +573,34 @@ export const MealPlanView = ({ store }: { store: FamilyHubStore }) => {
       setTemplateFeedback('Choose a family member before applying this template.')
       return
     }
-    if (!window.confirm(`Apply ${selectedTemplateName} to ${templateTargetLabel}?`)) {
-      return
+    setIsApplyingTemplate(true)
+    setTemplateFeedback(`Applying ${selectedTemplateName} to ${templateTargetLabel}...`)
+    try {
+      if (templateTarget === 'all') {
+        await applyWeeklyTemplateForAll(selectedTemplateName)
+        setSelectedMemberId(null)
+      } else if (templateTarget === 'member') {
+        const memberId = Number(templateMemberId)
+        await applyWeeklyTemplate(memberId, selectedTemplateName)
+        setSelectedMemberId(memberId)
+        loadMemberMeals(memberId)
+      } else {
+        await applyWeeklyTemplate(null, selectedTemplateName)
+        setSelectedMemberId(null)
+      }
+      setMealScope('week')
+      const params = new URLSearchParams(searchParams)
+      params.set('scope', 'week')
+      setSearchParams(params, { replace: true })
+      setActiveTab('plan')
+      setDetailSlotKey(null)
+      setDetailSlotData(null)
+      setTemplateFeedback(`Applied ${selectedTemplateName} to ${templateTargetLabel}.`)
+    } catch (error) {
+      setTemplateFeedback(error instanceof Error ? error.message : 'Unable to apply meal template')
+    } finally {
+      setIsApplyingTemplate(false)
     }
-    if (templateTarget === 'all') {
-      await applyWeeklyTemplateForAll(selectedTemplateName)
-    } else if (templateTarget === 'member') {
-      await applyWeeklyTemplate(Number(templateMemberId), selectedTemplateName)
-    } else {
-      await applyWeeklyTemplate(null, selectedTemplateName)
-    }
-    if (selectedMemberId !== null && (templateTarget === 'all' || String(selectedMemberId) === templateMemberId)) {
-      loadMemberMeals(selectedMemberId)
-    }
-    setTemplateFeedback(`Applied ${selectedTemplateName} to ${templateTargetLabel}.`)
   }
 
   return (
@@ -288,20 +611,44 @@ export const MealPlanView = ({ store }: { store: FamilyHubStore }) => {
           <p className="mt-1 text-sm text-slate-400">Meals, member plans, and weekly templates</p>
         </div>
         {activeTab === 'plan' && (
-          <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm">
-            <Users className="size-4 text-slate-400" />
-            <select
-              className="bg-transparent text-sm font-medium text-slate-700 outline-none"
-              value={selectedMemberId ?? ''}
-              onChange={(e) => setSelectedMemberId(e.target.value ? Number(e.target.value) : null)}
-            >
-              <option value="">All members</option>
-              {state.members.map((m) => (
-                <option key={m.id} value={m.id}>{m.name}</option>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
+              {[
+                { value: 'today' as const, label: 'Today' },
+                { value: 'week' as const, label: 'This week' },
+              ].map((option) => (
+                <button
+                  className={cn(
+                    'min-h-9 rounded-lg px-3 text-xs font-bold transition',
+                    mealScope === option.value ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900',
+                  )}
+                  key={option.value}
+                  onClick={() => updateMealScope(option.value)}
+                  type="button"
+                >
+                  {option.label}
+                </button>
               ))}
-            </select>
-          </div>
-        )}
+            </div>
+	            <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm">
+	              <Users className="size-4 text-slate-400" />
+	              <select
+                className="bg-transparent text-sm font-medium text-slate-700 outline-none"
+                value={selectedMemberId ?? ''}
+                onChange={(e) => setSelectedMemberId(e.target.value ? Number(e.target.value) : null)}
+              >
+                <option value="">All members</option>
+                {state.members.map((m) => (
+                  <option key={m.id} value={m.id}>{m.name}</option>
+	                ))}
+	              </select>
+	            </div>
+	            <Button className="min-h-10 px-3 py-2 text-xs" onClick={() => setActiveTab('templates')} variant="outline">
+	              <ClipboardCheck className="size-4" aria-hidden="true" />
+	              Apply template
+	            </Button>
+	          </div>
+	        )}
       </div>
 
       <div className="flex w-fit gap-1 rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
@@ -329,12 +676,16 @@ export const MealPlanView = ({ store }: { store: FamilyHubStore }) => {
         <CardContent className="grid gap-5 p-6 lg:grid-cols-[1fr_auto]">
           <div className="grid gap-4">
             <Badge className="border-white/20 bg-white/15 text-white" icon={<CalendarCheck2 className="size-3.5" aria-hidden="true" />} mode="pill">
-              Weekly coverage
+              {mealScope === 'today' ? 'Daily coverage' : 'Weekly coverage'}
             </Badge>
             <div>
-              <h3 className="text-2xl font-bold text-white">Meals, prep time, and nutrition are visible before the week starts.</h3>
+              <h3 className="text-2xl font-bold text-white">
+                {mealScope === 'today'
+                  ? 'Today meals, prep time, and nutrition are visible in one row.'
+                  : 'Meals, prep time, and nutrition are visible before the week starts.'}
+              </h3>
               <p className="mt-2 max-w-2xl text-sm leading-6 text-white/75">
-                The grid keeps every day scannable while the side panel exposes the selected meal and matching recipe.
+                The grid keeps the selected scope scannable while the side panel exposes the selected meal and matching recipe.
               </p>
             </div>
           </div>
@@ -359,10 +710,10 @@ export const MealPlanView = ({ store }: { store: FamilyHubStore }) => {
         <Card className="overflow-hidden">
           <CardHeader className="flex flex-row items-center justify-between gap-3">
             <div>
-              <CardTitle>Week Grid{selectedMemberId !== null ? ` — ${state.members.find((m) => m.id === selectedMemberId)?.name ?? ''}` : ''}</CardTitle>
+              <CardTitle>{mealScope === 'today' ? 'Today Grid' : 'Week Grid'}{selectedMemberId !== null ? ` — ${state.members.find((m) => m.id === selectedMemberId)?.name ?? ''}` : ''}</CardTitle>
               <p className="mt-1 text-xs text-slate-400">{selectedMemberId !== null ? 'Personal meal plan' : 'Family-wide meals'}{memberMealsLoading ? ' · Loading...' : ''}</p>
             </div>
-            <Badge tone="green">{activeMeals.length} meals</Badge>
+            <Badge tone="green">{scopedMeals.length} meals</Badge>
           </CardHeader>
           <CardContent className="p-0">
             <div className="overflow-x-auto">
@@ -375,13 +726,14 @@ export const MealPlanView = ({ store }: { store: FamilyHubStore }) => {
                     </div>
                   ))}
 
-                  {dayOrder.map((day) => (
+                  {visibleDayOrder.map((day) => (
                     <div className="contents" key={day}>
                       <div className="flex items-center justify-end pr-3 text-xs font-bold uppercase tracking-wide text-slate-500">
                         {day.slice(0, 3)}
                       </div>
                       {mealColumns.map((column) => {
-                        const meal = activeMealsByDay[day]?.find((item) => item.mealType === column.key)
+                        const slot = mealSlotByKey.get(mealSlotKey(day, column.key))
+                        const meal = slot?.visibleMeal
                         const active = meal?.id === selectedMealId
 
                         if (!meal) {
@@ -397,17 +749,22 @@ export const MealPlanView = ({ store }: { store: FamilyHubStore }) => {
 
                         return (
                           <button
+                            aria-label={`Open ${meal.mealName} ${day} ${column.label} details`}
                             className={cn(
                               'grid min-h-[6.5rem] content-between rounded-2xl px-3.5 py-3.5 text-left text-white shadow-md transition-all duration-300 hover:scale-[1.05] hover:shadow-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-indigo-500',
                               meal.colorClass,
                               active && 'ring-[3px] ring-white/60 shadow-xl scale-[1.06] z-10 relative',
                             )}
                             key={`${day}-${column.key}`}
-                            onClick={() => selectMeal(meal)}
+                            onClick={() => slot && openMealDetails(slot)}
                             type="button"
                           >
                             <span className="line-clamp-2 text-[13px] font-bold leading-5">{meal.mealName}</span>
                             <span className="mt-3 flex flex-wrap gap-1.5 text-[10px] font-semibold text-white/80">
+                              <span className="rounded-full bg-white/20 px-2 py-1">{mealAudienceLabel(meal, state.members)}</span>
+                              {slot && slot.personalMeals.length > 0 && selectedMemberId === null && (
+                                <span className="rounded-full bg-white/20 px-2 py-1">{slot.personalMeals.length} scoped</span>
+                              )}
                               <span className="rounded-full bg-white/20 px-2 py-1">{meal.calories} cal</span>
                               <span className="rounded-full bg-white/20 px-2 py-1">{meal.prepTime}m</span>
                             </span>
@@ -435,6 +792,16 @@ export const MealPlanView = ({ store }: { store: FamilyHubStore }) => {
                     <Badge tone="indigo">
                       {selectedMeal.dayOfWeek} - {selectedMeal.mealType}
                     </Badge>
+                    <div className="grid gap-2 rounded-xl border border-slate-100 bg-slate-50/70 p-3 text-xs text-slate-500">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="font-semibold text-slate-600">Effective date</span>
+                        <span>{formatCompactDate(selectedMeal.planDate)}</span>
+                      </div>
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="font-semibold text-slate-600">Updated</span>
+                        <span>{formatDateTime(selectedMeal.updatedAt)}</span>
+                      </div>
+                    </div>
                     <FormField label="Meal name">
                       <textarea
                         className={cn(inputClass, 'min-h-24 resize-none')}
@@ -475,32 +842,19 @@ export const MealPlanView = ({ store }: { store: FamilyHubStore }) => {
                         </div>
                       </FormField>
                     </div>
-                    <div className="grid grid-cols-2 gap-3">
-                      <FormField label="Assigned to">
-                        <select
-                          className={inputClass}
-                          onChange={(event) => setMealDraft((current) => ({ ...current, assignedTo: event.target.value }))}
-                          value={mealDraft.assignedTo}
-                        >
-                          <option value="">Family</option>
-                          {state.members.map((member) => (
-                            <option key={member.id} value={member.id}>{member.name}</option>
-                          ))}
-                        </select>
-                      </FormField>
-                      <FormField label="Recipe">
-                        <select
-                          className={inputClass}
-                          onChange={(event) => setMealDraft((current) => ({ ...current, recipeId: event.target.value }))}
-                          value={mealDraft.recipeId}
-                        >
-                          <option value="">No recipe</option>
-                          {state.recipes.map((recipe) => (
-                            <option key={recipe.id} value={recipe.id}>{recipe.recipeName}</option>
-                          ))}
-                        </select>
-                      </FormField>
-                    </div>
+                    {renderAudienceControls()}
+                    <FormField label="Recipe">
+                      <select
+                        className={inputClass}
+                        onChange={(event) => setMealDraft((current) => ({ ...current, recipeId: event.target.value }))}
+                        value={mealDraft.recipeId}
+                      >
+                        <option value="">No recipe</option>
+                        {state.recipes.map((recipe) => (
+                          <option key={recipe.id} value={recipe.id}>{recipe.recipeName}</option>
+                        ))}
+                      </select>
+                    </FormField>
                     <FormField label="Dietary flags">
                       <input
                         className={inputClass}
@@ -509,6 +863,28 @@ export const MealPlanView = ({ store }: { store: FamilyHubStore }) => {
                         value={mealDraft.dietaryFlags}
                       />
                     </FormField>
+                    <div className="grid grid-cols-2 gap-3">
+                      <FormField label="Change scope">
+                        <select
+                          className={inputClass}
+                          onChange={(event) => updateMealEffectiveScope(event.target.value as MealEffectiveScope)}
+                          value={mealEffectiveScope}
+                        >
+                          <option value="daily">Daily until date</option>
+                          <option value="weekly">Weekly same day</option>
+                          <option value="monthly">Monthly same date</option>
+                        </select>
+                      </FormField>
+                      <FormField label="Effective until">
+                        <input
+                          className={inputClass}
+                          min={selectedMeal.planDate}
+                          onChange={(event) => setMealEffectiveUntil(event.target.value)}
+                          type="date"
+                          value={mealEffectiveUntil || selectedMeal.planDate}
+                        />
+                      </FormField>
+                    </div>
                     {selectedRecipe && (
                       <div className="rounded-2xl border border-emerald-100 bg-emerald-50/50 p-4">
                         <div className="flex items-start justify-between gap-3">
@@ -708,7 +1084,7 @@ export const MealPlanView = ({ store }: { store: FamilyHubStore }) => {
 
           <Card>
             <CardHeader>
-              <CardTitle>Weekly Signals</CardTitle>
+              <CardTitle>{mealScope === 'today' ? 'Daily Signals' : 'Weekly Signals'}</CardTitle>
             </CardHeader>
             <CardContent className="grid grid-cols-2 gap-3">
               <div className="rounded-xl bg-indigo-50/80 p-4">
@@ -716,7 +1092,7 @@ export const MealPlanView = ({ store }: { store: FamilyHubStore }) => {
                 <p className="text-xl font-bold text-slate-900">{mealStats.averagePrep}m</p>
               </div>
               <div className="rounded-xl bg-emerald-50/80 p-4">
-                <p className="text-[11px] font-medium text-emerald-600">Weekly calories</p>
+                <p className="text-[11px] font-medium text-emerald-600">{mealScope === 'today' ? 'Daily calories' : 'Weekly calories'}</p>
                 <p className="text-xl font-bold text-slate-900">{mealStats.weeklyCalories}</p>
               </div>
             </CardContent>
@@ -788,10 +1164,60 @@ export const MealPlanView = ({ store }: { store: FamilyHubStore }) => {
                   </select>
                 </FormField>
               </div>
-              <Button disabled={!canManageMeals} onClick={applyTemplateToTarget}>
+              <Button disabled={!canManageMeals || isApplyingTemplate} onClick={applyTemplateToTarget}>
                 <ClipboardCheck className="size-4" aria-hidden="true" />
-                Apply template
+                {isApplyingTemplate ? 'Applying...' : 'Apply template'}
               </Button>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle>Template Week Grid</CardTitle>
+              <p className="mt-1 text-xs text-slate-400">Preview of breakfast, lunch, snacks, and dinner before applying.</p>
+            </CardHeader>
+            <CardContent>
+              <div className="overflow-x-auto">
+                <div className="min-w-[900px]">
+                  <div className="grid grid-cols-[110px_repeat(4,minmax(150px,1fr))] gap-3">
+                    <div />
+                    {mealColumns.map((column) => (
+                      <div className="text-center text-[11px] font-bold uppercase tracking-wider text-slate-400" key={column.key}>
+                        {column.label}
+                      </div>
+                    ))}
+                    {dayOptions.map((day) => (
+                      <div className="contents" key={day.key}>
+                        <div className="flex items-center justify-end pr-3 text-xs font-bold uppercase tracking-wide text-slate-500">
+                          {day.label.slice(0, 3)}
+                        </div>
+                        {mealColumns.map((column) => {
+                          const row = templateRowBySlot.get(mealSlotKey(day.label, column.key))
+                          return row ? (
+                            <div
+                              className="grid min-h-[6.5rem] content-between rounded-2xl border border-indigo-100 bg-indigo-50 px-3.5 py-3.5 text-left"
+                              key={`${day.key}-${column.key}`}
+                            >
+                              <span className="line-clamp-2 text-[13px] font-bold leading-5 text-slate-900">{row.mealName}</span>
+                              <span className="mt-3 flex flex-wrap gap-1.5 text-[10px] font-semibold text-indigo-700">
+                                <span className="rounded-full bg-white px-2 py-1">{row.calories} cal</span>
+                                <span className="rounded-full bg-white px-2 py-1">{row.prepTime}m</span>
+                                <span className="rounded-full bg-white px-2 py-1">{row.isGlobal ? 'Global' : 'Family'}</span>
+                              </span>
+                            </div>
+                          ) : (
+                            <div
+                              className="grid min-h-[6rem] place-items-center rounded-2xl border border-dashed border-slate-200 bg-slate-50 text-center text-xs font-semibold text-slate-300"
+                              key={`${day.key}-${column.key}`}
+                            >
+                              No template
+                            </div>
+                          )
+                        })}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
             </CardContent>
           </Card>
       <Card className="overflow-hidden">
@@ -981,6 +1407,180 @@ export const MealPlanView = ({ store }: { store: FamilyHubStore }) => {
           </div>
         </CardContent>
       </Card>
+        </div>
+      )}
+
+      {detailSlot && (
+        <div
+          className="fixed inset-0 z-[9999] grid place-items-center bg-slate-950/50 p-4 backdrop-blur-md"
+          onClick={() => { setDetailSlotKey(null); setDetailSlotData(null) }}
+        >
+          <section
+            aria-modal="true"
+            className="animate-scale-in max-h-[90vh] w-full max-w-3xl overflow-auto rounded-3xl border border-slate-200/80 bg-white shadow-[0_32px_80px_rgb(15_23_42/0.18)]"
+            onClick={(event) => event.stopPropagation()}
+            role="dialog"
+          >
+            <div className="relative overflow-hidden border-b border-slate-100 px-6 py-5">
+              <div className="absolute inset-0 bg-gradient-to-r from-indigo-50/80 via-purple-50/40 to-amber-50/60" />
+              <div className="relative flex items-start justify-between gap-4">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+	                    <Badge tone="indigo">{detailSlot.day}</Badge>
+	                    <Badge tone="green">{mealColumns.find((column) => column.key === detailSlot.mealType)?.label ?? detailSlot.mealType}</Badge>
+	                    {detailSlot.visibleMeal && <Badge tone={isFamilyMeal(detailSlot.visibleMeal) ? 'slate' : 'indigo'}>{mealAudienceLabel(detailSlot.visibleMeal, state.members)}</Badge>}
+	                    {detailSlot.date && <Badge tone="slate">Effective {formatCompactDate(detailSlot.date)}</Badge>}
+                  </div>
+                  <h3 className="mt-3 text-2xl font-bold text-slate-950">
+                    {detailSlot.visibleMeal?.mealName ?? 'Meal details'}
+                  </h3>
+                  <p className="mt-1 text-sm text-slate-500">
+	                    {detailSlot.personalMeals.length > 0
+	                      ? `${detailSlot.personalMeals.length} scoped variation${detailSlot.personalMeals.length === 1 ? '' : 's'}`
+	                      : 'Shared family plan'}
+                  </p>
+                </div>
+                <button
+                  className="flex size-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white/80 text-slate-500 shadow-sm transition hover:bg-slate-50 hover:text-slate-900"
+                  onClick={() => { setDetailSlotKey(null); setDetailSlotData(null) }}
+                  type="button"
+                >
+                  <span className="sr-only">Close meal details</span>
+                  <X className="size-4" aria-hidden="true" />
+                </button>
+              </div>
+            </div>
+
+            <div className="grid gap-5 px-6 py-6">
+              {selectedMeal && (
+                <form className="grid gap-4 rounded-2xl border border-indigo-100 bg-gradient-to-br from-indigo-50/60 to-blue-50/40 p-5 shadow-sm" onSubmit={handleSave}>
+                  <fieldset className="m-0 grid gap-3 border-0 p-0" disabled={!canManageMeals}>
+                    <div className="grid gap-3 sm:grid-cols-[1.4fr_0.8fr_0.8fr]">
+                      <FormField label="Meal name">
+                        <input
+                          className={inputClass}
+                          onChange={(event) => setMealDraft((current) => ({ ...current, mealName: event.target.value }))}
+                          value={mealDraft.mealName}
+                        />
+                      </FormField>
+                      <FormField label="Calories">
+                        <input
+                          className={inputClass}
+                          min={0}
+                          onChange={(event) => setMealDraft((current) => ({ ...current, calories: Number(event.target.value) }))}
+                          type="number"
+                          value={mealDraft.calories}
+                        />
+                      </FormField>
+                      <FormField label="Prep time">
+                        <input
+                          className={inputClass}
+                          min={0}
+                          onChange={(event) => setMealDraft((current) => ({ ...current, prepTime: Number(event.target.value) }))}
+                          type="number"
+                          value={mealDraft.prepTime}
+                        />
+                      </FormField>
+                    </div>
+                    <FormField label="Description">
+                      <textarea
+                        className={cn(inputClass, 'min-h-20 resize-y')}
+                        onChange={(event) => setMealDraft((current) => ({ ...current, description: event.target.value }))}
+                        value={mealDraft.description}
+                      />
+                    </FormField>
+                    {renderAudienceControls()}
+                    <FormField label="Recipe">
+                      <select
+                        className={inputClass}
+                        onChange={(event) => setMealDraft((current) => ({ ...current, recipeId: event.target.value }))}
+                        value={mealDraft.recipeId}
+                      >
+                        <option value="">No recipe</option>
+                        {state.recipes.map((recipe) => (
+                          <option key={recipe.id} value={recipe.id}>{recipe.recipeName}</option>
+                        ))}
+                      </select>
+                    </FormField>
+                    <FormField label="Dietary flags">
+                      <input
+                        className={inputClass}
+                        onChange={(event) => setMealDraft((current) => ({ ...current, dietaryFlags: event.target.value }))}
+                        placeholder="vegetarian, low-sugar"
+                        value={mealDraft.dietaryFlags}
+                      />
+                    </FormField>
+                    <div className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+                      <FormField label="Change scope">
+                        <select
+                          className={inputClass}
+                          onChange={(event) => updateMealEffectiveScope(event.target.value as MealEffectiveScope)}
+                          value={mealEffectiveScope}
+                        >
+                          <option value="daily">Daily until date</option>
+                          <option value="weekly">Weekly same day</option>
+                          <option value="monthly">Monthly same date</option>
+                        </select>
+                      </FormField>
+                      <FormField label="Effective until">
+                        <input
+                          className={inputClass}
+                          min={selectedMeal.planDate}
+                          onChange={(event) => setMealEffectiveUntil(event.target.value)}
+                          type="date"
+                          value={mealEffectiveUntil || selectedMeal.planDate}
+                        />
+                      </FormField>
+                      <Button type="submit">
+                        <Save className="size-4" aria-hidden="true" />
+                        Save change
+                      </Button>
+                    </div>
+                  </fieldset>
+                </form>
+              )}
+              {[detailSlot.familyMeal, ...detailSlot.personalMeals].filter(Boolean).map((meal) => {
+                const item = meal as MealPlanItem
+	                const recipe = item.recipeId ? state.recipes.find((candidate) => candidate.id === item.recipeId) : undefined
+                return (
+                  <article className="rounded-2xl border border-slate-100 bg-slate-50/70 p-4" key={item.id}>
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+	                          <Badge tone={isFamilyMeal(item) ? 'slate' : 'indigo'}>{mealAudienceLabel(item, state.members)}</Badge>
+                          <Badge tone="green">{item.calories} cal</Badge>
+                          <Badge tone="amber">{item.prepTime}m prep</Badge>
+                        </div>
+                        <h4 className="mt-2 text-base font-bold text-slate-950">{item.mealName}</h4>
+                        <p className="mt-1 text-sm leading-6 text-slate-600">{item.description || 'No description added.'}</p>
+                      </div>
+                      <div className="rounded-xl border border-white bg-white px-3 py-2 text-right text-xs text-slate-500 shadow-sm">
+                        <p className="font-semibold text-slate-700">Updated</p>
+                        <p>{formatDateTime(item.updatedAt)}</p>
+                      </div>
+                    </div>
+                    <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                      <div className="rounded-xl bg-white p-3 text-xs text-slate-500">
+                        <p className="font-semibold text-slate-700">Effective date</p>
+                        <p className="mt-1">{formatCompactDate(item.planDate)}</p>
+                      </div>
+                      <div className="rounded-xl bg-white p-3 text-xs text-slate-500">
+                        <p className="font-semibold text-slate-700">Recipe</p>
+                        <p className="mt-1">{recipe?.recipeName ?? 'No recipe linked'}</p>
+                      </div>
+                    </div>
+                    {item.dietaryFlags && item.dietaryFlags.length > 0 && (
+                      <div className="mt-3 flex flex-wrap gap-1.5">
+                        {item.dietaryFlags.map((flag) => (
+                          <Badge key={flag} tone="teal">{flag}</Badge>
+                        ))}
+                      </div>
+                    )}
+                  </article>
+                )
+              })}
+            </div>
+          </section>
         </div>
       )}
     </div>

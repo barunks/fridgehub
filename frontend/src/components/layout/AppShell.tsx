@@ -22,14 +22,14 @@ import { Button } from '@/components/ui/Button'
 import type { FamilyHubStore } from '@/hooks/useFamilyHub'
 import type { ThemeMode } from '@/hooks/useTheme'
 import { navItems } from '@/navigation'
-import type { ViewKey } from '@/types/familyHub'
-import { formatFullDate } from '@/utils/date'
+import type { ScopedNavigationOptions, ViewKey } from '@/types/familyHub'
+import { formatFullDate, todayIso } from '@/utils/date'
 import { cn } from '@/utils/style'
 
 interface AppShellProps extends PropsWithChildren {
   activeView: ViewKey
   onLogout: () => void
-  onNavigate: (view: ViewKey) => void
+  onNavigate: (view: ViewKey, options?: ScopedNavigationOptions) => void
   onToggleTheme: () => void
   store: FamilyHubStore
   theme: ThemeMode
@@ -45,7 +45,13 @@ export const AppShell = ({ activeView, onLogout, onNavigate, onToggleTheme, stor
   const displayName = currentMember?.name || username || 'Family'
   const timeContext = useMemo(() => {
     const now = new Date()
-    const hour = now.getHours()
+    const hour = Number(
+      new Intl.DateTimeFormat('en-US', {
+        hour: 'numeric',
+        hour12: false,
+        timeZone: state.family.timezone || undefined,
+      }).format(now),
+    )
     const homeBase = state.family.homeBase || 'Singapore'
     let greeting: string
     let timeIcon: typeof Sun
@@ -75,7 +81,7 @@ export const AppShell = ({ activeView, onLogout, onNavigate, onToggleTheme, stor
     }
 
     return { greeting, timeIcon, iconClass, bgAccent, homeBase, hour }
-  }, [state.family.homeBase])
+  }, [state.family.homeBase, state.family.timezone])
   const greetingText = timeContext.greeting
   const TimeIcon = timeContext.timeIcon
   const visibleNavItems = navItems.filter((item) => !item.requiredPermission || store.can(item.requiredPermission))
@@ -178,7 +184,7 @@ export const AppShell = ({ activeView, onLogout, onNavigate, onToggleTheme, stor
             <div className="min-w-0">
               <div className="flex items-center gap-2">
                 <TimeIcon className={cn('size-5', timeContext.iconClass)} aria-hidden="true" />
-                <p className="text-xs font-medium tracking-wide text-slate-400">{formatFullDate()} · {timeContext.homeBase}</p>
+                <p className="text-xs font-medium tracking-wide text-slate-400">{formatFullDate(todayIso(state.family.timezone))} · {timeContext.homeBase}</p>
               </div>
               <h1 className="greeting-animated truncate text-xl font-bold tracking-tight text-slate-900 sm:text-2xl">
                 {greetingText}, {displayName}

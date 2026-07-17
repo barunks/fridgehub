@@ -1,22 +1,32 @@
 import { expect, test } from '@playwright/test'
 
 const signIn = async (page: import('@playwright/test').Page, path = '/') => {
+  const deviceId = `familyhub-e2e-device-${test.info().parallelIndex}`
   await page.goto(path)
-  await page.evaluate(() => {
-    localStorage.setItem('familyhub-device-id', 'familyhub-e2e-shared-device')
+  await page.evaluate((id) => {
+    localStorage.setItem('familyhub-device-id', id)
     localStorage.setItem('familyhub-device-name', 'Playwright E2E Browser')
-  })
+  }, deviceId)
   await page.getByLabel('Username').fill('meera')
   await page.getByLabel('Password').fill('familyhub')
   await page.getByRole('button', { name: /^Sign in$/i }).click()
   await expect(page.getByRole('heading', { name: /Good (morning|afternoon|evening|night), Meera/i })).toBeVisible()
 }
 
+const addDaysIso = (isoDate: string, days: number) => {
+  const [year, month, day] = isoDate.split('-').map(Number)
+  const value = new Date(Date.UTC(year, month - 1, day + days))
+  return value.toISOString().slice(0, 10)
+}
+
 test('routes between major workspaces and persists dark mode', async ({ page }) => {
   await signIn(page)
 
-  await expect(page.getByText('Weekly family health')).toBeVisible()
-  await expect(page.getByRole('button', { name: /Open history/i })).toBeVisible()
+  await expect(page.getByRole('heading', { name: /Home Dashboard/i })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Today', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: /Tasks Open today task board/i })).toBeVisible()
+  await expect(page.getByRole('button', { name: /Shop Now Open today shopping list/i })).toBeVisible()
+  await expect(page.getByRole('button', { name: /Plan Meals Open today meal plan/i })).toBeVisible()
 
   await page.getByRole('link', { name: /Tasks/i }).click()
   await expect(page).toHaveURL(/\/tasks$/)
@@ -61,15 +71,97 @@ test('supports task reassignment from the board', async ({ page }) => {
   await expect(targetLane.getByRole('heading', { name: taskTitle })).toBeVisible()
 })
 
+test('supports multi-select task filters', async ({ page }) => {
+  await signIn(page, '/tasks')
+
+  const allDates = page.getByTestId('task-filter-date-all')
+  const today = page.getByTestId('task-filter-date-today')
+  const week = page.getByTestId('task-filter-date-week')
+  await expect(allDates).toHaveAttribute('aria-pressed', 'true')
+  await today.click()
+  await week.click()
+  await expect(today).toHaveAttribute('aria-pressed', 'true')
+  await expect(week).toHaveAttribute('aria-pressed', 'true')
+  await expect(allDates).toHaveAttribute('aria-pressed', 'false')
+  await today.click()
+  await week.click()
+  await expect(allDates).toHaveAttribute('aria-pressed', 'true')
+
+  const allStatuses = page.getByTestId('task-filter-status-all')
+  const pending = page.getByTestId('task-filter-status-pending')
+  const inProgress = page.getByTestId('task-filter-status-in_progress')
+  await expect(allStatuses).toHaveAttribute('aria-pressed', 'true')
+  await pending.click()
+  await inProgress.click()
+  await expect(pending).toHaveAttribute('aria-pressed', 'true')
+  await expect(inProgress).toHaveAttribute('aria-pressed', 'true')
+  await expect(allStatuses).toHaveAttribute('aria-pressed', 'false')
+  await pending.click()
+  await inProgress.click()
+  await expect(allStatuses).toHaveAttribute('aria-pressed', 'true')
+
+  const allCategories = page.getByTestId('task-filter-category-all')
+  const health = page.getByTestId('task-filter-category-health')
+  const school = page.getByTestId('task-filter-category-school')
+  await expect(allCategories).toHaveText('All Catagories')
+  await health.click()
+  await school.click()
+  await expect(health).toHaveAttribute('aria-pressed', 'true')
+  await expect(school).toHaveAttribute('aria-pressed', 'true')
+  await health.click()
+  await school.click()
+  await expect(allCategories).toHaveAttribute('aria-pressed', 'true')
+
+  const everyone = page.getByTestId('task-filter-assignee-all')
+  const meera = page.getByTestId('task-filter-assignee-1')
+  const dad = page.getByTestId('task-filter-assignee-2')
+  await meera.click()
+  await dad.click()
+  await expect(meera).toHaveAttribute('aria-pressed', 'true')
+  await expect(dad).toHaveAttribute('aria-pressed', 'true')
+  await expect(everyone).toHaveAttribute('aria-pressed', 'false')
+  await meera.click()
+  await dad.click()
+  await expect(everyone).toHaveAttribute('aria-pressed', 'true')
+})
+
+test('edits task details and recurrence from the dialog', async ({ page }) => {
+  const taskTitle = `E2E Edited Task ${Date.now()}`
+
+  await signIn(page, '/tasks')
+
+  const firstTask = page.locator('[data-testid^="task-card-"]').first()
+  await expect(firstTask).toBeVisible()
+  await firstTask.click()
+
+  const dialog = page.getByRole('dialog')
+  await expect(dialog.getByText('Edit task rule')).toBeVisible()
+  await dialog.getByLabel('Title').fill(taskTitle)
+  await dialog.getByLabel('Status').selectOption('in_progress')
+  await dialog.getByTestId('task-edit-repeat').selectOption('weekly')
+  await dialog.getByTestId('task-edit-interval').fill('2')
+  await dialog.getByRole('button', { name: /^Save task$/i }).click()
+
+  await expect(page.getByText('Task updated')).toBeVisible()
+  await expect(page.getByRole('heading', { name: taskTitle })).toBeVisible()
+  await expect(page.getByText('Every 2 weeks').first()).toBeVisible()
+})
+
 test('supports partial grocery shopping updates', async ({ page }) => {
   await signIn(page, '/groceries')
 
   await page.getByRole('button', { name: /Shopping Lists/i }).click()
-  await expect(page.getByRole('heading', { name: /Current Shopping Trip/i })).toBeVisible()
+  await expect(page.getByRole('heading', { name: /Shopping List Planner/i })).toBeVisible()
+  const statusDropdown = page.locator('details').filter({ hasText: /Open only/ }).first()
+  await expect(statusDropdown.locator('summary')).toBeVisible()
+  await statusDropdown.locator('summary').click()
+  await statusDropdown.getByRole('checkbox', { name: 'Done only', exact: true }).check()
+  await page.getByLabel('Budget target').fill('125')
   await page.getByRole('button', { name: /Build now/i }).click()
 
   const boughtInput = page.getByLabel('Bought').first()
   await expect(boughtInput).toBeVisible()
+  await expect(page.getByLabel(/Unit budget/i).first()).toBeVisible()
   await boughtInput.fill('0.5')
   await boughtInput.press('Enter')
 
@@ -129,4 +221,35 @@ test('manages and applies a weekly meal template row', async ({ page }) => {
 
   await page.getByRole('button', { name: /Current Plan/i }).click()
   await expect(page.locator('button').filter({ hasText: mealName }).first()).toBeVisible()
+})
+
+test('edits a meal from the dialog with an effective scope', async ({ page }) => {
+  const mealName = `Scoped Dialog Meal ${Date.now()}`
+
+  await signIn(page, '/meals')
+
+  await expect(page.getByRole('heading', { name: /Weekly Meal Plan/i })).toBeVisible()
+  await page.getByRole('button', { name: /^Open .* details$/i }).first().click()
+
+  const dialog = page.getByRole('dialog')
+  await expect(dialog.getByLabel('Change scope')).toBeVisible()
+  await dialog.getByLabel('Meal name').fill(mealName)
+  await dialog.getByLabel('Meal audience').selectOption('group')
+  const memberPicker = dialog.locator('[aria-label="Selected meal members"]')
+  await expect(memberPicker).toBeVisible()
+  await expect(memberPicker.getByRole('button').first()).toHaveAttribute('aria-pressed', 'true')
+  await memberPicker.getByRole('button').nth(1).click()
+  await expect(memberPicker.getByRole('button').nth(1)).toHaveAttribute('aria-pressed', 'true')
+  await dialog.getByLabel('Change scope').selectOption('weekly')
+  const effectiveUntil = dialog.getByLabel('Effective until')
+  const selectedDate = await effectiveUntil.getAttribute('min')
+  expect(selectedDate).toBeTruthy()
+  await effectiveUntil.fill(addDaysIso(selectedDate!, 7))
+  await dialog.getByRole('button', { name: /^Save change$/i }).click()
+
+  await expect(page.getByText('Meal updated')).toBeVisible()
+  await page.getByRole('button', { name: /^Open .* details$/i }).first().click()
+  const updatedDialog = page.getByRole('dialog')
+  await expect(updatedDialog.getByText(mealName)).toBeVisible()
+  await expect(updatedDialog.getByText(/Group:/)).toBeVisible()
 })

@@ -9,9 +9,12 @@ import {
   CheckCircle2,
   ClipboardList,
   MessageCircle,
+  RefreshCw,
+  Search,
   Send,
   ShoppingBasket,
   Sparkles,
+  Trash2,
   Utensils,
   WandSparkles,
   Zap,
@@ -50,9 +53,11 @@ const typeIcon = {
 const insightSeverity = (insight: AssistantInsight) => insight.severity ?? 'info'
 
 export const AssistantView = ({ store }: { store: FamilyHubStore }) => {
-  const { state, askAssistant } = store
+  const { state, askAssistant, clearAssistantChat, refreshAssistantInsights } = store
   const navigate = useNavigate()
   const [query, setQuery] = useState('')
+  const [messageSearch, setMessageSearch] = useState('')
+  const [isRefreshingInsights, setIsRefreshingInsights] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
@@ -64,6 +69,12 @@ export const AssistantView = ({ store }: { store: FamilyHubStore }) => {
     const reminders = insights.filter((insight) => insight.type === 'task' || insight.type === 'schedule').length
     return { critical, warnings, reminders }
   }, [insights])
+
+  const visibleMessages = useMemo(() => {
+    const search = messageSearch.trim().toLowerCase()
+    if (!search) return state.assistantMessages
+    return state.assistantMessages.filter((message) => message.content.toLowerCase().includes(search))
+  }, [messageSearch, state.assistantMessages])
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ block: 'end' })
@@ -87,6 +98,18 @@ export const AssistantView = ({ store }: { store: FamilyHubStore }) => {
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     void submitQuery(query)
+  }
+
+  const handleRefreshInsights = async () => {
+    setIsRefreshingInsights(true)
+    setError(null)
+    try {
+      await refreshAssistantInsights()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to refresh assistant insights')
+    } finally {
+      setIsRefreshingInsights(false)
+    }
   }
 
   return (
@@ -163,12 +186,33 @@ export const AssistantView = ({ store }: { store: FamilyHubStore }) => {
                 <CardTitle>Ask AI</CardTitle>
                 <p className="mt-1 text-xs text-slate-400">Questions use live household context for specific answers</p>
               </div>
-              <div className="flex size-10 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 text-white shadow-lg shadow-indigo-500/25">
-                <Sparkles className="size-5" aria-hidden="true" />
+              <div className="flex items-center gap-2">
+                <Button
+                  className="min-h-9 px-3 py-1.5 text-xs"
+                  disabled={state.assistantMessages.length === 0 || isSubmitting}
+                  onClick={clearAssistantChat}
+                  variant="secondary"
+                >
+                  <Trash2 className="size-3.5" aria-hidden="true" />
+                  Clear
+                </Button>
+                <div className="flex size-10 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 text-white shadow-lg shadow-indigo-500/25">
+                  <Sparkles className="size-5" aria-hidden="true" />
+                </div>
               </div>
             </div>
           </CardHeader>
           <CardContent className="grid gap-4">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" aria-hidden="true" />
+              <input
+                className={cn(inputClass, 'pl-9')}
+                onChange={(event) => setMessageSearch(event.target.value)}
+                placeholder="Search this conversation"
+                value={messageSearch}
+              />
+            </div>
+
             {/* Messages area */}
             <div className="grid max-h-[520px] min-h-[320px] content-start gap-3 overflow-auto rounded-2xl border border-slate-100 bg-gradient-to-b from-slate-50/50 to-white p-4 scrollbar-thin" data-testid="assistant-messages">
               {state.assistantMessages.length === 0 && (
@@ -180,7 +224,12 @@ export const AssistantView = ({ store }: { store: FamilyHubStore }) => {
                   <p className="mt-1 text-xs text-slate-400">Ask about alerts, groceries, meals, or use a quick prompt below</p>
                 </div>
               )}
-              {state.assistantMessages.map((message) => (
+              {state.assistantMessages.length > 0 && visibleMessages.length === 0 && (
+                <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-8 text-center text-sm font-semibold text-slate-400">
+                  No messages match this search.
+                </div>
+              )}
+              {visibleMessages.map((message) => (
                 <div
                   className={cn(
                     'max-w-[88%] rounded-2xl px-4 py-3 text-sm leading-6 shadow-sm',
@@ -267,9 +316,15 @@ export const AssistantView = ({ store }: { store: FamilyHubStore }) => {
         {/* Sidebar — Attention Queue only */}
         <aside className="grid gap-5 self-start">
           <Card>
-            <CardHeader className="bg-gradient-to-r from-rose-50/50 to-amber-50/30">
-              <CardTitle>Attention Queue</CardTitle>
-              <p className="mt-1 text-xs text-slate-400">Sorted by severity from current household state</p>
+            <CardHeader className="flex flex-row items-center justify-between gap-3 bg-gradient-to-r from-rose-50/50 to-amber-50/30">
+              <div>
+                <CardTitle>Attention Queue</CardTitle>
+                <p className="mt-1 text-xs text-slate-400">Sorted by severity from current household state</p>
+              </div>
+              <Button className="min-h-9 px-3 py-1.5 text-xs" disabled={isRefreshingInsights} onClick={handleRefreshInsights} variant="outline">
+                <RefreshCw className={cn('size-3.5', isRefreshingInsights && 'animate-spin')} aria-hidden="true" />
+                Refresh
+              </Button>
             </CardHeader>
             <CardContent className="grid gap-3">
               {insights.length === 0 && (

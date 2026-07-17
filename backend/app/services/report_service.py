@@ -46,9 +46,12 @@ def generate_shopping_report(
     family_id: int,
     *,
     list_type_id: int | None = None,
+    list_type_ids: list[int] | None = None,
     frequency: str | None = None,
     stock_filter: str | None = None,
+    stock_filters: list[str] | None = None,
     item_name: str | None = None,
+    item_names: list[str] | None = None,
     only_needed: bool = False,
 ) -> bytes:
     """Generate a filtered shopping report PDF and return raw bytes."""
@@ -70,15 +73,24 @@ def generate_shopping_report(
         )
     )
 
-    if list_type_id:
+    selected_list_type_ids = list_type_ids or ([list_type_id] if list_type_id else [])
+    selected_stock_filters = stock_filters or ([stock_filter] if stock_filter else [])
+    selected_item_names = item_names or ([item_name] if item_name else [])
+
+    if selected_list_type_ids:
+        query = query.filter(GroceryPurchaseCycle.list_type_id.in_(selected_list_type_ids))
+    elif list_type_id:
         query = query.filter(GroceryPurchaseCycle.list_type_id == list_type_id)
     if frequency:
         query = query.filter(GroceryPurchaseCycle.frequency == frequency)
-    if stock_filter == "yes":
-        query = query.filter(GrocerySubList.is_purchased.is_(True))
-    elif stock_filter == "no":
-        query = query.filter(GrocerySubList.is_purchased.is_(False))
-    if item_name:
+    if selected_stock_filters and set(selected_stock_filters) != {"yes", "no"}:
+        if "yes" in selected_stock_filters:
+            query = query.filter(GrocerySubList.is_purchased.is_(True))
+        elif "no" in selected_stock_filters:
+            query = query.filter(GrocerySubList.is_purchased.is_(False))
+    if selected_item_names:
+        query = query.filter(GroceryItem.item_name.in_(selected_item_names))
+    elif item_name:
         query = query.filter(GroceryItem.item_name == item_name)
     if only_needed:
         query = query.filter(GrocerySubList.is_purchased.is_(False))
@@ -117,16 +129,23 @@ def generate_shopping_report(
 
     # Filter summary
     filters_applied = []
-    if list_type_id:
-        lt = db.get(GroceryListType, list_type_id)
-        if lt:
-            filters_applied.append(f"Place: {lt.list_name}")
+    if selected_list_type_ids:
+        names = [
+            row.list_name
+            for row in db.query(GroceryListType)
+            .filter(GroceryListType.id.in_(selected_list_type_ids))
+            .order_by(GroceryListType.list_name)
+            .all()
+        ]
+        if names:
+            filters_applied.append(f"Place: {', '.join(names)}")
     if frequency:
         filters_applied.append(f"Frequency: {frequency}")
-    if stock_filter:
-        filters_applied.append(f"Status: {'Purchased' if stock_filter == 'yes' else 'Not purchased'}")
-    if item_name:
-        filters_applied.append(f"Item: {item_name}")
+    if selected_stock_filters and set(selected_stock_filters) != {"yes", "no"}:
+        labels = ["Purchased" if value == "yes" else "Not purchased" for value in selected_stock_filters]
+        filters_applied.append(f"Status: {', '.join(labels)}")
+    if selected_item_names:
+        filters_applied.append(f"Item: {', '.join(selected_item_names)}")
     if only_needed:
         filters_applied.append("Only items needed")
 

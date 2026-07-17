@@ -6,10 +6,11 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 Priority = Literal["low", "medium", "high"]
 TaskStatus = Literal["pending", "in_progress", "completed", "cancelled"]
-RecurrenceType = Literal["none", "daily", "weekly", "monthly", "yearly"]
+RecurrenceType = Literal["none", "daily", "weekly", "monthly", "quarterly", "semi_annually", "yearly"]
 Frequency = Literal["daily", "weekly", "monthly", "quarterly", "semi_annually", "yearly"]
 MealType = Literal["breakfast", "lunch", "snacks", "dinner"]
 WeekDay = Literal["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+MealEffectiveScope = Literal["daily", "weekly", "monthly"]
 
 
 def normalize_week_day(value: str) -> str:
@@ -348,9 +349,10 @@ class TaskOut(CamelModel):
     priority: Priority
     status: TaskStatus
     dueAt: datetime
-    reminderAt: datetime
+    reminderAt: datetime | None = None
     recurrenceType: RecurrenceType
     recurrenceInterval: int
+    recurrenceEndAt: datetime | None = None
     assignedTo: int
     category: str
     actionLabel: str | None = None
@@ -366,6 +368,7 @@ class TaskCreate(CamelModel):
     description: str | None = None
     recurrenceType: RecurrenceType = "none"
     recurrenceInterval: int = 1
+    recurrenceEndAt: datetime | None = None
 
 
 class TaskUpdate(CamelModel):
@@ -377,6 +380,7 @@ class TaskUpdate(CamelModel):
     reminderAt: datetime | None = None
     recurrenceType: RecurrenceType | None = None
     recurrenceInterval: int | None = None
+    recurrenceEndAt: datetime | None = None
     assignedTo: int | None = None
     category: str | None = None
 
@@ -393,7 +397,10 @@ class MealPlanItemOut(CamelModel):
     recipeId: int | None = None
     colorClass: str
     assignedTo: int | None = None
+    mealPlanScope: str = "family"
+    targetMemberIds: list[int] = []
     dietaryFlags: list[str] = []
+    updatedAt: datetime | None = None
 
 
 class MealUpdate(CamelModel):
@@ -402,8 +409,11 @@ class MealUpdate(CamelModel):
     calories: int | None = Field(default=None, ge=0, le=5000)
     prepTime: int | None = Field(default=None, ge=0, le=1440)
     assignedTo: int | None = None
+    targetMemberIds: list[int] | None = Field(default=None, max_length=20)
     dietaryFlags: list[str] | None = Field(default=None, max_length=12)
     recipeId: int | None = None
+    effectiveScope: MealEffectiveScope | None = None
+    effectiveUntil: date | None = None
 
 
 class ApplyTemplateRequest(CamelModel):

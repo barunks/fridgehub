@@ -1,3 +1,4 @@
+from calendar import monthrange
 from datetime import date, timedelta
 
 from fastapi import HTTPException
@@ -111,6 +112,45 @@ def _meal_scope(member_id: int | None) -> str:
     return f"user:{member_id}" if member_id else "family"
 
 
+def _meal_scope_for_members(member_ids: list[int]) -> str:
+    if not member_ids:
+        return "family"
+    if len(member_ids) == 1:
+        return _meal_scope(member_ids[0])
+    return f"group:{','.join(str(member_id) for member_id in member_ids)}"
+
+
+def _scope_member_ids(scope: str | None, assigned_to: int | None = None) -> list[int]:
+    if assigned_to:
+        return [assigned_to]
+    if not scope:
+        return []
+    if scope.startswith("user:"):
+        try:
+            return [int(scope.split(":", 1)[1])]
+        except ValueError:
+            return []
+    if scope.startswith("group:"):
+        member_ids: list[int] = []
+        for value in scope.split(":", 1)[1].split(","):
+            try:
+                member_id = int(value)
+            except ValueError:
+                continue
+            if member_id not in member_ids:
+                member_ids.append(member_id)
+        return member_ids
+    return []
+
+
+def _add_months(value: date, months: int) -> date:
+    total_month = value.month - 1 + months
+    year = value.year + total_month // 12
+    month = total_month % 12 + 1
+    day = min(value.day, monthrange(year, month)[1])
+    return date(year, month, day)
+
+
 def _family_week_start(db: Session, family_id: int) -> date:
     family = db.get(Family, family_id)
     if not family:
@@ -128,6 +168,32 @@ def _ensure_active_member(db: Session, family_id: int, member_id: int | None) ->
     )
     if not membership:
         raise HTTPException(status_code=400, detail="Meal assignee is not an active family member")
+
+
+def _normalize_target_member_ids(db: Session, family_id: int, member_ids: list[int] | None) -> list[int]:
+    if not member_ids:
+        return []
+    active_ids = set(_active_member_ids(db, family_id))
+    normalized: list[int] = []
+    for member_id in member_ids:
+        if member_id not in active_ids:
+            raise HTTPException(status_code=400, detail="Meal audience includes an inactive family member")
+        if member_id not in normalized:
+            normalized.append(member_id)
+    return sorted(normalized)
+
+
+def _target_member_ids_from_updates(db: Session, family_id: int, meal: MealPlan, updates: dict) -> list[int]:
+    if "targetMemberIds" in updates:
+        return _normalize_target_member_ids(db, family_id, updates["targetMemberIds"])
+    if "assignedTo" in updates:
+        return _normalize_target_member_ids(db, family_id, [updates["assignedTo"]] if updates["assignedTo"] else [])
+    return _scope_member_ids(meal.meal_plan_scope, meal.assigned_to)
+
+
+def _apply_meal_audience(meal: MealPlan, member_ids: list[int]) -> None:
+    meal.assigned_to = member_ids[0] if len(member_ids) == 1 else None
+    meal.meal_plan_scope = _meal_scope_for_members(member_ids)
 
 
 def _active_member_ids(db: Session, family_id: int) -> list[int]:
@@ -194,9 +260,10 @@ def _apply_templates_to_scope(
     db: Session,
     *,
     family_id: int,
-    user_id: int,
+    user_id: int | None,
     templates: list[MealPlanTemplate],
     member_id: int | None,
+    overwrite: bool = True,
 ) -> None:
     week_start = _family_week_start(db, family_id)
     day_lookup = {day: week_start + timedelta(days=index) for index, day in enumerate(DAY_NAMES)}
@@ -228,6 +295,9 @@ def _apply_templates_to_scope(
                 meal_plan_scope=meal_scope,
             )
             db.add(meal)
+        elif not overwrite and meal.is_active:
+            continue
+        meal.is_active = True
         meal.assigned_to = member_id
         meal.meal_plan_scope = meal_scope
         meal.day_of_week = day_key.title()
@@ -239,17 +309,48 @@ def _apply_templates_to_scope(
         meal.color_class = DAY_COLORS.get(day_key, "bg-blue-500")
 
 
+def ensure_current_week_family_plan(db: Session, family_id: int, user_id: int | None = None) -> bool:
+    """Materialize missing current-week family slots from the default weekly template."""
+    start = _family_week_start(db, family_id)
+    end = start + timedelta(days=6)
+    current_count = (
+        db.query(MealPlan.id)
+        .filter(
+            MealPlan.family_id == family_id,
+            MealPlan.plan_date >= start,
+            MealPlan.plan_date <= end,
+            MealPlan.meal_plan_scope == "family",
+            MealPlan.is_active.is_(True),
+        )
+        .count()
+    )
+
+    _, templates = _resolve_templates(db, family_id)
+    if current_count >= len(templates):
+        return False
+
+    _apply_templates_to_scope(db, family_id=family_id, user_id=user_id, templates=templates, member_id=None, overwrite=False)
+    db.commit()
+    invalidate_entity("meals", family_id)
+    return True
+
+
 def weekly_meals(db: Session, family_id: int, member_id: int | None = None) -> list[dict]:
     _ensure_active_member(db, family_id, member_id)
+    ensure_current_week_family_plan(db, family_id)
     start = _family_week_start(db, family_id)
     end = start + timedelta(days=6)
     query = (
         db.query(MealPlan)
         .filter(MealPlan.family_id == family_id, MealPlan.plan_date >= start, MealPlan.plan_date <= end, MealPlan.is_active.is_(True))
     )
-    if member_id is not None:
-        query = query.filter(MealPlan.assigned_to == member_id, MealPlan.meal_plan_scope == _meal_scope(member_id))
     rows = query.order_by(MealPlan.plan_date, MealPlan.id).all()
+    if member_id is not None:
+        rows = [
+            row
+            for row in rows
+            if member_id in _scope_member_ids(row.meal_plan_scope, row.assigned_to)
+        ]
     return [serialize_meal(row) for row in rows]
 
 
@@ -406,12 +507,7 @@ def delete_template_row(db: Session, template_id: int, family_id: int, user_id: 
     db.commit()
 
 
-def update_meal(db: Session, meal_id: int, payload: MealUpdate, family_id: int, user_id: int) -> dict:
-    meal = db.get(MealPlan, meal_id)
-    if not meal or meal.family_id != family_id:
-        raise HTTPException(status_code=404, detail="Meal not found")
-
-    updates = payload.model_dump(exclude_unset=True)
+def _apply_simple_meal_updates(db: Session, meal: MealPlan, updates: dict, family_id: int) -> None:
     if "mealName" in updates:
         meal.meal_name = sanitize_text(updates["mealName"])
     if "description" in updates:
@@ -420,15 +516,132 @@ def update_meal(db: Session, meal_id: int, payload: MealUpdate, family_id: int, 
         meal.calories = updates["calories"]
     if "prepTime" in updates:
         meal.prep_time = updates["prepTime"]
-    if "assignedTo" in updates:
-        _ensure_active_member(db, family_id, updates["assignedTo"])
-        meal.assigned_to = updates["assignedTo"]
-        meal.meal_plan_scope = _meal_scope(updates["assignedTo"])
+    if "targetMemberIds" in updates or "assignedTo" in updates:
+        _apply_meal_audience(meal, _target_member_ids_from_updates(db, family_id, meal, updates))
     if "dietaryFlags" in updates:
         meal.dietary_flags = _sanitize_tags(updates["dietaryFlags"])
     if "recipeId" in updates:
         _ensure_recipe_available(db, family_id, updates["recipeId"])
         meal.recipe_id = updates["recipeId"]
+
+
+def _target_dates(start: date, effective_scope: str, effective_until: date) -> list[date]:
+    if effective_until < start:
+        raise HTTPException(status_code=400, detail="Effective until date cannot be before the selected meal date")
+
+    dates: list[date] = []
+    cursor = start
+    if effective_scope == "daily":
+        while cursor <= effective_until:
+            dates.append(cursor)
+            cursor += timedelta(days=1)
+        return dates
+
+    if effective_scope == "weekly":
+        while cursor <= effective_until:
+            dates.append(cursor)
+            cursor += timedelta(days=7)
+        return dates
+
+    if effective_scope == "monthly":
+        month_offset = 0
+        while cursor <= effective_until:
+            dates.append(cursor)
+            month_offset += 1
+            cursor = _add_months(start, month_offset)
+        return dates
+
+    raise HTTPException(status_code=400, detail="Unsupported meal effective scope")
+
+
+def _copy_base_meal(base: MealPlan, meal: MealPlan, target_date: date, target_member_id: int | None, target_scope: str, user_id: int) -> None:
+    day_key = target_date.strftime("%A")
+    meal.family_id = base.family_id
+    meal.plan_date = target_date
+    meal.day_of_week = day_key
+    meal.meal_type = base.meal_type
+    meal.assigned_to = target_member_id
+    meal.meal_plan_scope = target_scope
+    meal.created_by = meal.created_by or user_id
+    meal.meal_name = base.meal_name
+    meal.description = base.description
+    meal.calories = base.calories
+    meal.prep_time = base.prep_time
+    meal.recipe_id = base.recipe_id
+    meal.color_class = DAY_COLORS.get(day_key.lower(), base.color_class or "bg-blue-500")
+    meal.dietary_flags = base.dietary_flags
+    meal.is_active = True
+
+
+def _update_meal_with_effective_scope(db: Session, meal: MealPlan, updates: dict, family_id: int, user_id: int) -> dict:
+    effective_scope = updates.pop("effectiveScope", None)
+    effective_until = updates.pop("effectiveUntil", None) or meal.plan_date
+    _ensure_recipe_available(db, family_id, updates.get("recipeId"))
+
+    target_member_ids = _target_member_ids_from_updates(db, family_id, meal, updates)
+    target_member_id = target_member_ids[0] if len(target_member_ids) == 1 else None
+    target_scope = _meal_scope_for_members(target_member_ids)
+    dates = _target_dates(meal.plan_date, effective_scope, effective_until)
+    changed_meals: list[MealPlan] = []
+
+    for target_date in dates:
+        target = (
+            db.query(MealPlan)
+            .filter_by(
+                family_id=family_id,
+                plan_date=target_date,
+                meal_type=meal.meal_type,
+                meal_plan_scope=target_scope,
+            )
+            .first()
+        )
+        if not target:
+            target = MealPlan(
+                family_id=family_id,
+                plan_date=target_date,
+                meal_type=meal.meal_type,
+                created_by=user_id,
+                meal_plan_scope=target_scope,
+            )
+            db.add(target)
+        _copy_base_meal(meal, target, target_date, target_member_id, target_scope, user_id)
+        _apply_simple_meal_updates(db, target, updates, family_id)
+        _apply_meal_audience(target, target_member_ids)
+        changed_meals.append(target)
+
+    write_audit_log(
+        db,
+        user_id=user_id,
+        family_id=family_id,
+        action="update",
+        entity_type="meal_plan",
+        entity_id=meal.id,
+        changes={
+            **updates,
+            "targetMemberIds": target_member_ids,
+            "effectiveScope": effective_scope,
+            "effectiveUntil": str(effective_until),
+            "changedMeals": len(changed_meals),
+        },
+    )
+    db.commit()
+    for item in changed_meals:
+        db.refresh(item)
+    invalidate_entity("meals", family_id)
+    return serialize_meal(changed_meals[0])
+
+
+def update_meal(db: Session, meal_id: int, payload: MealUpdate, family_id: int, user_id: int) -> dict:
+    meal = db.get(MealPlan, meal_id)
+    if not meal or meal.family_id != family_id:
+        raise HTTPException(status_code=404, detail="Meal not found")
+
+    updates = payload.model_dump(exclude_unset=True)
+    if updates.get("effectiveScope"):
+        return _update_meal_with_effective_scope(db, meal, updates, family_id, user_id)
+
+    updates.pop("effectiveUntil", None)
+    _apply_simple_meal_updates(db, meal, updates, family_id)
 
     write_audit_log(
         db,

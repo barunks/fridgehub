@@ -173,7 +173,6 @@ def serialize_shopping_item(sub_item: GrocerySubList) -> dict[str, Any]:
 
 def serialize_task(task: Task) -> dict[str, Any]:
     due_at = task.due_date or datetime.now(UTC)
-    reminder_at = task.reminder_date or due_at
 
     return {
         "id": task.id,
@@ -182,13 +181,37 @@ def serialize_task(task: Task) -> dict[str, Any]:
         "priority": task.priority,
         "status": task.status,
         "dueAt": due_at,
-        "reminderAt": reminder_at,
+        "reminderAt": task.reminder_date,
         "recurrenceType": task.recurrence_type,
         "recurrenceInterval": task.recurrence_interval,
+        "recurrenceEndAt": task.recurrence_end_date,
         "assignedTo": task.assigned_to or 0,
         "category": task.category or "general",
         "actionLabel": task.action_label,
     }
+
+
+def _meal_target_member_ids(meal: MealPlan) -> list[int]:
+    if meal.assigned_to:
+        return [meal.assigned_to]
+
+    scope = meal.meal_plan_scope or "family"
+    if scope.startswith("user:"):
+        try:
+            return [int(scope.split(":", 1)[1])]
+        except ValueError:
+            return []
+    if scope.startswith("group:"):
+        member_ids: list[int] = []
+        for value in scope.split(":", 1)[1].split(","):
+            try:
+                member_id = int(value)
+            except ValueError:
+                continue
+            if member_id not in member_ids:
+                member_ids.append(member_id)
+        return member_ids
+    return []
 
 
 def serialize_meal(meal: MealPlan) -> dict[str, Any]:
@@ -204,7 +227,10 @@ def serialize_meal(meal: MealPlan) -> dict[str, Any]:
         "recipeId": meal.recipe_id,
         "colorClass": meal.color_class,
         "assignedTo": meal.assigned_to,
+        "mealPlanScope": meal.meal_plan_scope,
+        "targetMemberIds": _meal_target_member_ids(meal),
         "dietaryFlags": meal.dietary_flags or [],
+        "updatedAt": meal.updated_at,
     }
 
 
@@ -267,6 +293,10 @@ def default_assistant_messages() -> list[dict[str, Any]]:
 def _fetch_entity(db: Session, entity: str, family_id: int) -> Any:
     """Fetch and cache a single entity for a family."""
     key: str | None = None
+    if entity == "meals":
+        from app.services.meal_plan_service import ensure_current_week_family_plan
+
+        ensure_current_week_family_plan(db, family_id)
     try:
         key = _entity_key(entity, family_id)
         cached = cache.get(key)

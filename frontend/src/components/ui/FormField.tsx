@@ -10,7 +10,7 @@ interface FormFieldProps extends PropsWithChildren {
 export const FormField = ({ label, children, className, variant = 'default' }: FormFieldProps) => (
   <label
     className={cn(
-      'grid text-[13px] font-medium text-slate-600',
+      'grid min-w-0 text-[13px] font-medium text-slate-600',
       variant === 'default' && 'gap-2',
       variant === 'floating' && 'gap-1.5 rounded-2xl border border-slate-200/70 bg-white/70 px-3.5 py-2 shadow-inner',
       variant === 'pill' && 'gap-2 rounded-2xl border border-slate-200/70 bg-slate-50/70 px-4 py-3',

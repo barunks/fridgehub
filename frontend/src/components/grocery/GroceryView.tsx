@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   AlertTriangle,
   Check,
@@ -11,6 +12,7 @@ import {
   List,
   PackageCheck,
   Plus,
+  Printer,
   RefreshCw,
   Search,
   ShoppingBasket,
@@ -31,8 +33,9 @@ import type {
   NewGroceryItemInput,
   NewShoppingItemInput,
   ShoppingCycleItem,
+  TimeScope,
 } from '@/types/familyHub'
-import { formatCompactDate, todayIso } from '@/utils/date'
+import { formatCompactDate, isoDateRangesOverlap, todayIso, weekEndIso, weekStartIso } from '@/utils/date'
 import { cn } from '@/utils/style'
 import { api } from '@/services/api'
 
@@ -67,6 +70,7 @@ type Tab = 'master' | 'shopping' | 'places' | 'cycles'
 type StockFilter = 'all' | 'yes' | 'no'
 type SortDirection = 'asc' | 'desc'
 type SortKey = 'itemNumber' | 'listType' | 'itemName' | 'quantity' | 'purchaseFrequency' | 'currentStock' | 'startDate'
+type ShoppingScope = TimeScope | 'all'
 type GroceryDraft = NewGroceryItemInput & { startDate: string }
 interface ViewFilters {
   listTypeId: number | 'all'
@@ -76,6 +80,14 @@ interface ViewFilters {
   search: string
 }
 
+interface MultiViewFilters {
+  listTypeIds: number[]
+  frequency: Frequency | 'all'
+  itemNames: string[]
+  search: string
+  statuses: Exclude<StockFilter, 'all'>[]
+}
+
 const defaultViewFilters: ViewFilters = {
   listTypeId: 'all',
   frequency: 'all',
@@ -83,6 +95,25 @@ const defaultViewFilters: ViewFilters = {
   itemName: 'all',
   search: '',
 }
+
+const defaultShoppingFilters: MultiViewFilters = {
+  listTypeIds: [],
+  frequency: 'all',
+  itemNames: [],
+  search: '',
+  statuses: ['no'],
+}
+
+const defaultCycleFilters: MultiViewFilters = {
+  listTypeIds: [],
+  frequency: 'all',
+  itemNames: [],
+  search: '',
+  statuses: [],
+}
+
+const budgetTargetStorageKey = 'familyhub-shopping-budget-target'
+const budgetEstimateStorageKey = 'familyhub-shopping-budget-estimates'
 
 const createEmptyItem = (listTypeId = 1): GroceryDraft => ({
   itemName: '',
@@ -120,6 +151,27 @@ const toEditDraft = (item: GroceryItem): GroceryDraft => ({
 
 const normalizeText = (value: string) => value.toLowerCase().trim()
 
+const scopeFromSearchParam = (value: string | null): TimeScope | null =>
+  value === 'today' || value === 'week' ? value : null
+
+const readStoredBudgetEstimates = () => {
+  if (typeof window === 'undefined') return {}
+  try {
+    return JSON.parse(window.localStorage.getItem(budgetEstimateStorageKey) ?? '{}') as Record<number, string>
+  } catch {
+    return {}
+  }
+}
+
+const readStoredBudgetTarget = () =>
+  typeof window === 'undefined' ? '' : window.localStorage.getItem(budgetTargetStorageKey) ?? ''
+
+const formatBudget = (value: number) =>
+  new Intl.NumberFormat('en-US', {
+    maximumFractionDigits: 2,
+    minimumFractionDigits: 2,
+  }).format(value)
+
 export const GroceryView = ({ store }: { store: FamilyHubStore }) => {
   const {
     state,
@@ -138,10 +190,13 @@ export const GroceryView = ({ store }: { store: FamilyHubStore }) => {
   } = store
   const canManageGroceries = store.can('manage_groceries')
   const firstListId = state.listTypes[0]?.id ?? 1
+  const [searchParams, setSearchParams] = useSearchParams()
 
   const [tab, setTab] = useState<Tab>('master')
+  const [shoppingScope, setShoppingScope] = useState<ShoppingScope>(() => scopeFromSearchParam(searchParams.get('scope')) ?? 'all')
+  const [shoppingFilters, setShoppingFilters] = useState<MultiViewFilters>(defaultShoppingFilters)
   const [shopFilters, setShopFilters] = useState<ViewFilters>(defaultViewFilters)
-  const [cycleFilters, setCycleFilters] = useState<ViewFilters>(defaultViewFilters)
+  const [cycleFilters, setCycleFilters] = useState<MultiViewFilters>(defaultCycleFilters)
   const [masterPage, setMasterPage] = useState(0)
   const [masterPageSize, setMasterPageSize] = useState(10)
   const [sort, setSort] = useState<{ key: SortKey; direction: SortDirection }>({
@@ -159,6 +214,8 @@ export const GroceryView = ({ store }: { store: FamilyHubStore }) => {
     purchaseFrequency: 'weekly',
     notes: '',
   })
+  const [shoppingBudgetTarget, setShoppingBudgetTarget] = useState(readStoredBudgetTarget)
+  const [shoppingBudgetEstimates, setShoppingBudgetEstimates] = useState<Record<number, string>>(readStoredBudgetEstimates)
   const [purchaseDrafts, setPurchaseDrafts] = useState<Record<number, string>>({})
   const [requiredDrafts, setRequiredDrafts] = useState<Record<number, string>>({})
   const [newPlace, setNewPlace] = useState({ name: '', description: '', color: 'bg-slate-500' })
@@ -171,6 +228,40 @@ export const GroceryView = ({ store }: { store: FamilyHubStore }) => {
       void buildShoppingList()
     }
   }, [buildShoppingList, tab])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    window.localStorage.setItem(budgetTargetStorageKey, shoppingBudgetTarget)
+  }, [shoppingBudgetTarget])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    window.localStorage.setItem(budgetEstimateStorageKey, JSON.stringify(shoppingBudgetEstimates))
+  }, [shoppingBudgetEstimates])
+
+  useEffect(() => {
+    const nextScope = scopeFromSearchParam(searchParams.get('scope')) ?? 'all'
+    if (nextScope !== shoppingScope) {
+      setShoppingScope(nextScope)
+    }
+    if (nextScope !== 'all') {
+      setTab('shopping')
+    }
+  }, [searchParams, shoppingScope])
+
+  const updateShoppingScope = (nextScope: ShoppingScope) => {
+    setShoppingScope(nextScope)
+    if (nextScope !== 'all') {
+      setTab('shopping')
+    }
+    const params = new URLSearchParams(searchParams)
+    if (nextScope === 'all') {
+      params.delete('scope')
+    } else {
+      params.set('scope', nextScope)
+    }
+    setSearchParams(params, { replace: true })
+  }
 
   useEffect(() => {
     if (!state.listTypes.length) return
@@ -191,8 +282,8 @@ export const GroceryView = ({ store }: { store: FamilyHubStore }) => {
   }, [state.listTypes])
 
   const itemNameOptions = useMemo(() => {
-    return Array.from(new Set(state.groceryItems.map((item) => item.itemName))).sort((a, b) => a.localeCompare(b))
-  }, [state.groceryItems])
+    return Array.from(new Set([...state.groceryItems.map((item) => item.itemName), ...state.shoppingItems.map((item) => item.itemName)])).sort((a, b) => a.localeCompare(b))
+  }, [state.groceryItems, state.shoppingItems])
 
   const itemCountByListType = useMemo(() => {
     const counts = new Map<number, number>()
@@ -252,19 +343,87 @@ export const GroceryView = ({ store }: { store: FamilyHubStore }) => {
     return matchesList && matchesFrequency && matchesStock && matchesItem && matchesSearch
   }, [listTypeById])
 
+  const shoppingItemMatchesFilters = useCallback((item: ShoppingCycleItem, filters: MultiViewFilters) => {
+    const normalized = normalizeText(filters.search)
+    const listType = listTypeById.get(item.listTypeId)
+    const matchesList = filters.listTypeIds.length === 0 || filters.listTypeIds.includes(item.listTypeId)
+    const matchesFrequency = filters.frequency === 'all' || item.frequency === filters.frequency
+    const matchesStatus = filters.statuses.length === 0 || filters.statuses.some((status) => (status === 'yes' ? item.isPurchased : !item.isPurchased))
+    const matchesItem = filters.itemNames.length === 0 || filters.itemNames.includes(item.itemName)
+    const matchesSearch =
+      !normalized ||
+      item.itemName.toLowerCase().includes(normalized) ||
+      item.itemNumber.toLowerCase().includes(normalized) ||
+      item.notes.toLowerCase().includes(normalized) ||
+      listType?.listName.toLowerCase().includes(normalized)
+
+    return matchesList && matchesFrequency && matchesStatus && matchesItem && matchesSearch
+  }, [listTypeById])
+
   const shopFilteredItems = useMemo(() => {
     return state.groceryItems.filter((item) => itemMatchesFilters(item, shopFilters))
   }, [itemMatchesFilters, shopFilters, state.groceryItems])
 
+  const shoppingScopeRange = useMemo(() => {
+    if (shoppingScope === 'all') return null
+    const familyToday = todayIso(state.family.timezone)
+    if (shoppingScope === 'today') {
+      return {
+        endIso: familyToday,
+        startIso: familyToday,
+      }
+    }
+    return {
+      endIso: weekEndIso(familyToday),
+      startIso: weekStartIso(familyToday),
+    }
+  }, [shoppingScope, state.family.timezone])
+
   const shoppingLists = useMemo(() => {
-    const activeCycles = state.groceryCycles.filter((cycle) => !cycle.isCompleted)
+    const activeCycles = state.groceryCycles
+      .filter((cycle) => !cycle.isCompleted)
+      .filter((cycle) => !shoppingScopeRange || isoDateRangesOverlap(cycle.cycleStartDate, cycle.cycleEndDate, shoppingScopeRange.startIso, shoppingScopeRange.endIso))
+      .filter((cycle) => shoppingFilters.listTypeIds.length === 0 || shoppingFilters.listTypeIds.includes(cycle.listTypeId))
+      .filter((cycle) => shoppingFilters.frequency === 'all' || cycle.frequency === shoppingFilters.frequency)
+
     return activeCycles.map((cycle) => {
       const listType = listTypeById.get(cycle.listTypeId)
-      const items = state.shoppingItems.filter((item) => item.cycleId === cycle.id)
+      const items = state.shoppingItems
+        .filter((item) => item.cycleId === cycle.id)
+        .filter((item) => shoppingItemMatchesFilters(item, shoppingFilters))
       const purchased = items.filter((item) => item.isPurchased).length
       return { cycle, listType, items, purchased }
-    })
-  }, [listTypeById, state.groceryCycles, state.shoppingItems])
+    }).filter((row) => row.items.length > 0)
+  }, [listTypeById, shoppingFilters, shoppingItemMatchesFilters, shoppingScopeRange, state.groceryCycles, state.shoppingItems])
+
+  const shoppingRowCount = useMemo(
+    () => shoppingLists.reduce((total, row) => total + row.items.length, 0),
+    [shoppingLists],
+  )
+
+  const shoppingPlanItems = useMemo(
+    () => shoppingLists.flatMap((row) => row.items),
+    [shoppingLists],
+  )
+
+  const shoppingPlanSummary = useMemo(() => {
+    const openItems = shoppingPlanItems.filter((item) => !item.isPurchased)
+    const partialItems = shoppingPlanItems.filter((item) => item.purchasedQuantity > 0 && !item.isPurchased)
+    const estimatedTotal = shoppingPlanItems.reduce((total, item) => {
+      const unitEstimate = Number(shoppingBudgetEstimates[item.id] ?? 0)
+      return Number.isFinite(unitEstimate) ? total + unitEstimate * item.quantity : total
+    }, 0)
+    const budgetTarget = Number(shoppingBudgetTarget)
+    const validBudgetTarget = Number.isFinite(budgetTarget) && budgetTarget > 0 ? budgetTarget : 0
+    return {
+      estimatedTotal,
+      openItems: openItems.length,
+      partialItems: partialItems.length,
+      totalQuantity: shoppingPlanItems.reduce((total, item) => total + item.quantity, 0),
+      budgetTarget: validBudgetTarget,
+      budgetDelta: validBudgetTarget - estimatedTotal,
+    }
+  }, [shoppingBudgetEstimates, shoppingBudgetTarget, shoppingPlanItems])
 
   const shopSubTables = useMemo(() => {
     return state.listTypes.map((listType) => ({
@@ -277,7 +436,7 @@ export const GroceryView = ({ store }: { store: FamilyHubStore }) => {
     const normalized = normalizeText(cycleFilters.search)
     return state.groceryCycles
       .filter((cycle) => {
-        const matchesList = cycleFilters.listTypeId === 'all' || cycle.listTypeId === cycleFilters.listTypeId
+        const matchesList = cycleFilters.listTypeIds.length === 0 || cycleFilters.listTypeIds.includes(cycle.listTypeId)
         const matchesFrequency = cycleFilters.frequency === 'all' || cycle.frequency === cycleFilters.frequency
         return matchesList && matchesFrequency
       })
@@ -286,8 +445,8 @@ export const GroceryView = ({ store }: { store: FamilyHubStore }) => {
         const listTypeMatchesSearch = Boolean(normalized && listType?.listName.toLowerCase().includes(normalized))
         const items = state.shoppingItems.filter((item) => {
           if (item.cycleId !== cycle.id) return false
-          const matchesStock = cycleFilters.stock === 'all' || (cycleFilters.stock === 'yes' ? item.isPurchased : !item.isPurchased)
-          const matchesItem = cycleFilters.itemName === 'all' || item.itemName === cycleFilters.itemName
+          const matchesStock = cycleFilters.statuses.length === 0 || cycleFilters.statuses.some((status) => (status === 'yes' ? item.isPurchased : !item.isPurchased))
+          const matchesItem = cycleFilters.itemNames.length === 0 || cycleFilters.itemNames.includes(item.itemName)
           const matchesSearch =
             !normalized ||
             listTypeMatchesSearch ||
@@ -305,7 +464,7 @@ export const GroceryView = ({ store }: { store: FamilyHubStore }) => {
           progress: items.length === 0 ? 0 : Math.round((purchased / items.length) * 100),
         }
       })
-      .filter((row) => row.items.length > 0 || (cycleFilters.itemName === 'all' && !normalized && cycleFilters.stock === 'all'))
+      .filter((row) => row.items.length > 0 || (cycleFilters.itemNames.length === 0 && !normalized && cycleFilters.statuses.length === 0))
   }, [cycleFilters, listTypeById, state.groceryCycles, state.shoppingItems])
 
   const neededItems = state.groceryItems.filter((item) => item.needsPurchase || !item.currentStock)
@@ -318,6 +477,23 @@ export const GroceryView = ({ store }: { store: FamilyHubStore }) => {
     filters.itemName !== 'all',
     filters.search.trim() !== '',
   ].filter(Boolean).length
+
+  const countActiveMultiFilters = (filters: MultiViewFilters) => [
+    filters.listTypeIds.length > 0,
+    filters.frequency !== 'all',
+    filters.statuses.length > 0,
+    filters.itemNames.length > 0,
+    filters.search.trim() !== '',
+  ].filter(Boolean).length
+
+  const toggleMultiValue = <T,>(values: T[], value: T) =>
+    values.includes(value) ? values.filter((item) => item !== value) : [...values, value]
+
+  const multiSummary = (selectedLabels: string[], allLabel: string) => {
+    if (selectedLabels.length === 0) return allLabel
+    if (selectedLabels.length <= 2) return selectedLabels.join(', ')
+    return `${selectedLabels.length} selected`
+  }
 
   const updateSort = (key: SortKey) => {
     setSort((current) =>
@@ -398,6 +574,19 @@ export const GroceryView = ({ store }: { store: FamilyHubStore }) => {
       return next
     })
     updateShoppingItem(item.id, { quantity })
+  }
+
+  const updateBudgetEstimate = (itemId: number, rawValue: string) => {
+    setShoppingBudgetEstimates((current) => {
+      const next = { ...current }
+      const parsed = Number(rawValue)
+      if (!rawValue.trim() || !Number.isFinite(parsed) || parsed < 0) {
+        delete next[itemId]
+      } else {
+        next[itemId] = rawValue
+      }
+      return next
+    })
   }
 
   const SortableHeader = ({
@@ -523,6 +712,129 @@ export const GroceryView = ({ store }: { store: FamilyHubStore }) => {
     </div>
   )
 
+  const renderMultiSelectDropdown = <T extends string | number,>({
+    allLabel,
+    options,
+    selected,
+    onChange,
+  }: {
+    allLabel: string
+    options: Array<{ label: string; value: T }>
+    selected: T[]
+    onChange: (values: T[]) => void
+  }) => {
+    const selectedLabels = options
+      .filter((option) => selected.includes(option.value))
+      .map((option) => option.label)
+
+    return (
+      <details className="group relative">
+        <summary className={cn(inputClass, 'flex cursor-pointer list-none items-center justify-between gap-2 pr-3 [&::-webkit-details-marker]:hidden')}>
+          <span className="truncate">{multiSummary(selectedLabels, allLabel)}</span>
+          <ChevronsUpDown className="size-4 shrink-0 text-slate-400" aria-hidden="true" />
+        </summary>
+        <div className="absolute z-30 mt-2 max-h-72 w-full min-w-56 overflow-auto rounded-lg border border-slate-200 bg-white p-2 shadow-xl">
+          <label className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50">
+            <input
+              checked={selected.length === 0}
+              className="size-3.5 rounded border-slate-300"
+              onChange={() => onChange([])}
+              type="checkbox"
+            />
+            {allLabel}
+          </label>
+          <div className="my-1 border-t border-slate-100" />
+          {options.map((option) => (
+            <label className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50" key={String(option.value)}>
+              <input
+                checked={selected.includes(option.value)}
+                className="size-3.5 rounded border-slate-300"
+                onChange={() => onChange(toggleMultiValue(selected, option.value))}
+                type="checkbox"
+              />
+              {option.label}
+            </label>
+          ))}
+        </div>
+      </details>
+    )
+  }
+
+  const renderMultiFilterPanel = (
+    filters: MultiViewFilters,
+    updateFilters: (patch: Partial<MultiViewFilters>) => void,
+    resetFilters: () => void,
+    searchPlaceholder: string,
+    stockLabel = 'Purchase status',
+    stockAllLabel = 'Done and open',
+    stockYesLabel = 'Done only',
+    stockNoLabel = 'Open only',
+  ) => (
+    <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+      <div className="grid gap-3 lg:grid-cols-[minmax(150px,1fr)_minmax(150px,1fr)_minmax(150px,1fr)_minmax(180px,1.2fr)_minmax(220px,1.4fr)_auto]">
+        <FormField label="Shopping place">
+          {renderMultiSelectDropdown({
+            allLabel: 'All places',
+            options: state.listTypes.map((listType) => ({ label: listType.listName, value: listType.id })),
+            selected: filters.listTypeIds,
+            onChange: (listTypeIds) => updateFilters({ listTypeIds }),
+          })}
+        </FormField>
+        <FormField label="Purchase frequency">
+          <select
+            className={inputClass}
+            onChange={(event) => updateFilters({ frequency: event.target.value as Frequency | 'all' })}
+            value={filters.frequency}
+          >
+            <option value="all">All cycles</option>
+            {frequencyOptions.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+        </FormField>
+        <FormField label={stockLabel}>
+          {renderMultiSelectDropdown({
+            allLabel: stockAllLabel,
+            options: [
+              { label: stockYesLabel, value: 'yes' as const },
+              { label: stockNoLabel, value: 'no' as const },
+            ],
+            selected: filters.statuses,
+            onChange: (statuses) => updateFilters({ statuses }),
+          })}
+        </FormField>
+        <FormField label="Item menu">
+          {renderMultiSelectDropdown({
+            allLabel: 'All items',
+            options: itemNameOptions.map((itemName) => ({ label: itemName, value: itemName })),
+            selected: filters.itemNames,
+            onChange: (itemNames) => updateFilters({ itemNames }),
+          })}
+        </FormField>
+        <FormField label="Search">
+          <div className="relative">
+            <Search
+              className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-slate-400"
+              aria-hidden="true"
+            />
+            <input
+              className={cn(inputClass, 'pl-10')}
+              onChange={(event) => updateFilters({ search: event.target.value })}
+              placeholder={searchPlaceholder}
+              value={filters.search}
+            />
+          </div>
+        </FormField>
+        <div className="flex items-end">
+          <Button className="w-full" onClick={resetFilters} variant="secondary">
+            <X className="size-4" aria-hidden="true" />
+            Reset {countActiveMultiFilters(filters) > 0 ? `(${countActiveMultiFilters(filters)})` : ''}
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
+
   return (
     <div className="grid gap-6">
       {/* Hero banner */}
@@ -560,50 +872,58 @@ export const GroceryView = ({ store }: { store: FamilyHubStore }) => {
       </div>
 
       <div className="grid gap-3 sm:grid-cols-4">
-        <Card className="border-rose-100/70 bg-white">
-          <CardContent className="flex items-center gap-3 p-4">
-            <div className="flex size-10 items-center justify-center rounded-lg bg-rose-50">
-              <AlertTriangle className="size-5 text-rose-600" aria-hidden="true" />
+        <div className="kpi-card p-5" style={{ '--kpi-accent': '244 63 94', '--kpi-glow': 'rgb(244 63 94 / 0.06)', '--kpi-shadow': 'rgb(244 63 94 / 0.10)' } as React.CSSProperties}>
+          <div className="kpi-shimmer" />
+          <div className="kpi-glow-line" />
+          <div className="relative flex items-center gap-4">
+            <div className="kpi-icon flex size-12 items-center justify-center rounded-2xl bg-gradient-to-br from-rose-500 to-pink-600 shadow-lg shadow-rose-500/25">
+              <AlertTriangle className="size-5 text-white" aria-hidden="true" />
             </div>
             <div>
-              <p className="text-xs font-medium text-slate-500">Needs purchase</p>
-              <p className="text-xl font-bold text-slate-900">{neededItems.length}</p>
+              <p className="text-xs font-semibold text-slate-500">Needs purchase</p>
+              <p className="kpi-value mt-0.5 text-2xl font-extrabold text-slate-900">{neededItems.length}</p>
             </div>
-          </CardContent>
-        </Card>
-        <Card className="border-emerald-100/70 bg-white">
-          <CardContent className="flex items-center gap-3 p-4">
-            <div className="flex size-10 items-center justify-center rounded-lg bg-emerald-50">
-              <PackageCheck className="size-5 text-emerald-600" aria-hidden="true" />
-            </div>
-            <div>
-              <p className="text-xs font-medium text-slate-500">Purchased</p>
-              <p className="text-xl font-bold text-slate-900">{purchasedItems.length}</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="border-sky-100/70 bg-white">
-          <CardContent className="flex items-center gap-3 p-4">
-            <div className="flex size-10 items-center justify-center rounded-lg bg-sky-50">
-              <Store className="size-5 text-sky-600" aria-hidden="true" />
+          </div>
+        </div>
+        <div className="kpi-card p-5" style={{ '--kpi-accent': '16 185 129', '--kpi-glow': 'rgb(16 185 129 / 0.06)', '--kpi-shadow': 'rgb(16 185 129 / 0.10)' } as React.CSSProperties}>
+          <div className="kpi-shimmer" />
+          <div className="kpi-glow-line" />
+          <div className="relative flex items-center gap-4">
+            <div className="kpi-icon flex size-12 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-600 shadow-lg shadow-emerald-500/25">
+              <PackageCheck className="size-5 text-white" aria-hidden="true" />
             </div>
             <div>
-              <p className="text-xs font-medium text-slate-500">Shopping places</p>
-              <p className="text-xl font-bold text-slate-900">{state.listTypes.length}</p>
+              <p className="text-xs font-semibold text-slate-500">Purchased</p>
+              <p className="kpi-value mt-0.5 text-2xl font-extrabold text-slate-900">{purchasedItems.length}</p>
             </div>
-          </CardContent>
-        </Card>
-        <Card className="border-indigo-100/70 bg-white">
-          <CardContent className="flex items-center gap-3 p-4">
-            <div className="flex size-10 items-center justify-center rounded-lg bg-indigo-50">
-              <ShoppingBasket className="size-5 text-indigo-600" aria-hidden="true" />
+          </div>
+        </div>
+        <div className="kpi-card p-5" style={{ '--kpi-accent': '14 165 233', '--kpi-glow': 'rgb(14 165 233 / 0.06)', '--kpi-shadow': 'rgb(14 165 233 / 0.10)' } as React.CSSProperties}>
+          <div className="kpi-shimmer" />
+          <div className="kpi-glow-line" />
+          <div className="relative flex items-center gap-4">
+            <div className="kpi-icon flex size-12 items-center justify-center rounded-2xl bg-gradient-to-br from-sky-500 to-blue-600 shadow-lg shadow-sky-500/25">
+              <Store className="size-5 text-white" aria-hidden="true" />
             </div>
             <div>
-              <p className="text-xs font-medium text-slate-500">Active cycles</p>
-              <p className="text-xl font-bold text-slate-900">{activeCycleCount}</p>
+              <p className="text-xs font-semibold text-slate-500">Shopping places</p>
+              <p className="kpi-value mt-0.5 text-2xl font-extrabold text-slate-900">{state.listTypes.length}</p>
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
+        <div className="kpi-card p-5" style={{ '--kpi-accent': '99 102 241', '--kpi-glow': 'rgb(99 102 241 / 0.06)', '--kpi-shadow': 'rgb(99 102 241 / 0.10)' } as React.CSSProperties}>
+          <div className="kpi-shimmer" />
+          <div className="kpi-glow-line" />
+          <div className="relative flex items-center gap-4">
+            <div className="kpi-icon flex size-12 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-600 shadow-lg shadow-indigo-500/25">
+              <ShoppingBasket className="size-5 text-white" aria-hidden="true" />
+            </div>
+            <div>
+              <p className="text-xs font-semibold text-slate-500">Active cycles</p>
+              <p className="kpi-value mt-0.5 text-2xl font-extrabold text-slate-900">{activeCycleCount}</p>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div className="flex gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1">
@@ -655,6 +975,41 @@ export const GroceryView = ({ store }: { store: FamilyHubStore }) => {
           {cycleRows.length > 0 && <Badge tone="teal">{cycleRows.length}</Badge>}
         </button>
       </div>
+
+      {tab === 'shopping' && (
+        <Card variant="subtle">
+          <CardContent className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-bold text-slate-900">Shopping scope</p>
+              <p className="mt-1 text-xs text-slate-400">
+                {shoppingScope === 'all'
+                  ? 'Showing all current shopping rows'
+                  : `Showing open rows for ${shoppingScope === 'today' ? 'today' : 'this week'}`}
+              </p>
+            </div>
+            <div className="flex rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
+              {[
+                { value: 'all' as const, label: 'All' },
+                { value: 'today' as const, label: 'Today' },
+                { value: 'week' as const, label: 'This week' },
+              ].map((option) => (
+                <button
+                  className={cn(
+                    'min-h-9 rounded-lg px-3 text-xs font-bold transition',
+                    shoppingScope === option.value ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900',
+                  )}
+                  key={option.value}
+                  onClick={() => updateShoppingScope(option.value)}
+                  type="button"
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+            <Badge tone={shoppingRowCount > 0 ? 'green' : 'slate'}>{shoppingRowCount} row{shoppingRowCount === 1 ? '' : 's'}</Badge>
+          </CardContent>
+        </Card>
+      )}
 
       {tab === 'master' && (
         <div className="grid gap-5">
@@ -1114,28 +1469,32 @@ export const GroceryView = ({ store }: { store: FamilyHubStore }) => {
         </div>
       )}
 
-      {tab === 'shopping' && (
-        <div className="grid gap-5">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between gap-3">
-              <div>
-                <CardTitle>Current Shopping Trip</CardTitle>
-                <p className="mt-1 text-xs text-slate-400">
-                  {state.shoppingItems.length} active rows across {shoppingLists.length} list{shoppingLists.length === 1 ? '' : 's'}
-                </p>
-              </div>
-              <div className="flex items-center gap-2">
-                <Button
-                  onClick={() => {
-                    void api.downloadShoppingReport({
-                      listTypeId: shopFilters.listTypeId,
-                      frequency: shopFilters.frequency,
-                      stock: shopFilters.stock,
-                      itemName: shopFilters.itemName,
-                      onlyNeeded: false,
-                    })
-                  }}
-                  variant="secondary"
+	      {tab === 'shopping' && (
+	        <div className="grid gap-5">
+	          <Card>
+	            <CardHeader className="flex flex-row items-center justify-between gap-3">
+	              <div>
+	                <CardTitle>Shopping List Planner</CardTitle>
+	                <p className="mt-1 text-xs text-slate-400">
+	                  {shoppingRowCount} filtered row{shoppingRowCount === 1 ? '' : 's'} across {shoppingLists.length} printable list{shoppingLists.length === 1 ? '' : 's'}
+	                </p>
+	              </div>
+	              <div className="flex flex-wrap items-center gap-2">
+	                <Button onClick={() => window.print()} variant="secondary">
+	                  <Printer className="size-4" aria-hidden="true" />
+	                  Print
+	                </Button>
+	                <Button
+	                  onClick={() => {
+	                    void api.downloadShoppingReport({
+	                      listTypeIds: shoppingFilters.listTypeIds,
+	                      frequency: shoppingFilters.frequency,
+	                      stocks: shoppingFilters.statuses,
+	                      itemNames: shoppingFilters.itemNames,
+	                      onlyNeeded: shoppingFilters.statuses.length === 1 && shoppingFilters.statuses[0] === 'no',
+	                    })
+	                  }}
+	                  variant="secondary"
                 >
                   <Download className="size-4" aria-hidden="true" />
                   Download PDF
@@ -1143,11 +1502,73 @@ export const GroceryView = ({ store }: { store: FamilyHubStore }) => {
                 <Button onClick={() => void buildShoppingList()} variant="secondary">
                   <RefreshCw className="size-4" aria-hidden="true" />
                   Build now
-                </Button>
-              </div>
-            </CardHeader>
-            {canManageGroceries && (
-              <CardContent>
+	                </Button>
+	              </div>
+	            </CardHeader>
+	            <CardContent className="grid gap-4">
+	              <div className="flex w-fit gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1">
+	                {[
+	                  { value: 'all' as const, label: 'All cycles' },
+	                  { value: 'today' as const, label: 'Today' },
+	                  { value: 'week' as const, label: 'This week' },
+	                ].map((option) => (
+	                  <button
+	                    className={cn(
+	                      'rounded-md px-3 py-2 text-xs font-semibold transition',
+	                      shoppingScope === option.value ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800',
+	                    )}
+	                    key={option.value}
+	                    onClick={() => updateShoppingScope(option.value)}
+	                    type="button"
+	                  >
+	                    {option.label}
+	                  </button>
+	                ))}
+	              </div>
+	              {renderMultiFilterPanel(
+	                shoppingFilters,
+	                (patch) => setShoppingFilters((current) => ({ ...current, ...patch })),
+	                () => setShoppingFilters(defaultShoppingFilters),
+	                'Search item, number, place, note',
+	                'Purchase status',
+	                'Done and open',
+	                'Done only',
+	                'Open only',
+	              )}
+	              <div className="grid gap-3 md:grid-cols-[minmax(180px,0.9fr)_repeat(4,minmax(140px,1fr))]">
+	                <FormField label="Budget target">
+	                  <input
+	                    className={inputClass}
+	                    min="0"
+	                    onChange={(event) => setShoppingBudgetTarget(event.target.value)}
+	                    placeholder="0.00"
+	                    step="0.01"
+	                    type="number"
+	                    value={shoppingBudgetTarget}
+	                  />
+	                </FormField>
+	                <div className="rounded-xl border border-slate-200 bg-white p-3">
+	                  <p className="text-[11px] font-semibold uppercase text-slate-400">Estimated total</p>
+	                  <p className="mt-1 text-lg font-bold text-slate-900">{formatBudget(shoppingPlanSummary.estimatedTotal)}</p>
+	                </div>
+	                <div className="rounded-xl border border-slate-200 bg-white p-3">
+	                  <p className="text-[11px] font-semibold uppercase text-slate-400">Budget balance</p>
+	                  <p className={cn('mt-1 text-lg font-bold', shoppingPlanSummary.budgetDelta < 0 ? 'text-rose-600' : 'text-emerald-600')}>
+	                    {shoppingPlanSummary.budgetTarget > 0 ? formatBudget(shoppingPlanSummary.budgetDelta) : '-'}
+	                  </p>
+	                </div>
+	                <div className="rounded-xl border border-slate-200 bg-white p-3">
+	                  <p className="text-[11px] font-semibold uppercase text-slate-400">Open rows</p>
+	                  <p className="mt-1 text-lg font-bold text-slate-900">{shoppingPlanSummary.openItems}</p>
+	                </div>
+	                <div className="rounded-xl border border-slate-200 bg-white p-3">
+	                  <p className="text-[11px] font-semibold uppercase text-slate-400">Planned quantity</p>
+	                  <p className="mt-1 text-lg font-bold text-slate-900">{formatBudget(shoppingPlanSummary.totalQuantity)}</p>
+	                </div>
+	              </div>
+	            </CardContent>
+	            {canManageGroceries && (
+	              <CardContent>
                 <form onSubmit={handleShoppingSubmit}>
                   <fieldset
                     className="m-0 grid gap-3 border-0 p-0 lg:grid-cols-[minmax(180px,1.3fr)_minmax(150px,1fr)_150px_100px_110px_minmax(160px,1fr)_auto]"
@@ -1259,90 +1680,109 @@ export const GroceryView = ({ store }: { store: FamilyHubStore }) => {
                     </div>
                   </CardHeader>
                   <CardContent className="p-0">
-                    <div className="overflow-x-auto">
-                      <table className="w-full min-w-[920px] text-left">
-                        <thead>
-                          <tr>
-                            <th className={tableHeadClass}>Done</th>
-                            <th className={tableHeadClass}>Item</th>
-                            <th className={tableHeadClass}>Item no.</th>
-                            <th className={tableHeadClass}>Need</th>
-                            <th className={tableHeadClass}>Bought</th>
-                            <th className={tableHeadClass}>Unit</th>
-                            <th className={tableHeadClass}>Notes</th>
-                            <th className={tableHeadClass}>Status</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {items.map((item) => (
-                            <tr className={cn(item.isPurchased ? 'bg-emerald-50/40' : 'bg-white hover:bg-slate-50')} key={item.id}>
-                              <td className={tableCellClass}>
-                                <input
-                                  checked={item.isPurchased}
-                                  className="size-4 rounded border-slate-300 text-emerald-600"
-                                  disabled={!canManageGroceries}
-                                  onChange={() => updateShoppingItem(item.id, { isPurchased: !item.isPurchased })}
-                                  type="checkbox"
-                                />
-                              </td>
-                              <td className={cn(tableCellClass, 'font-semibold text-slate-900')}>
-                                <span className={cn(item.isPurchased && 'text-slate-400 line-through')}>{item.itemName}</span>
-                                <span className="ml-2 inline-flex gap-1">
-                                  {item.isAdhoc && <Badge tone="indigo">Added</Badge>}
-                                  {item.carriedForward && <Badge tone="amber">Carry</Badge>}
-                                </span>
-                              </td>
-                              <td className={cn(tableCellClass, 'font-mono')}>{item.itemNumber}</td>
-                              <td className={tableCellClass}>
-                                <input
-                                  aria-label={`Need ${item.itemName}`}
-                                  className={cellInputClass}
-                                  disabled={!canManageGroceries}
-                                  min="0"
-                                  onBlur={(event) => commitRequiredQuantity(item, event.currentTarget.value)}
-                                  onChange={(event) => setRequiredDrafts((current) => ({ ...current, [item.id]: event.target.value }))}
-                                  onKeyDown={(event) => {
-                                    if (event.key === 'Enter') {
-                                      event.preventDefault()
-                                      event.currentTarget.blur()
-                                    }
-                                  }}
-                                  step="0.5"
-                                  type="number"
-                                  value={requiredDrafts[item.id] ?? String(item.quantity)}
-                                />
-                              </td>
-                              <td className={tableCellClass}>
-                                <input
-                                  aria-label={`Bought ${item.itemName}`}
-                                  className={cellInputClass}
-                                  disabled={!canManageGroceries}
-                                  max={item.quantity}
-                                  min="0"
-                                  onBlur={(event) => commitPurchasedQuantity(item, event.currentTarget.value)}
-                                  onChange={(event) => setPurchaseDrafts((current) => ({ ...current, [item.id]: event.target.value }))}
-                                  onKeyDown={(event) => {
-                                    if (event.key === 'Enter') {
-                                      event.preventDefault()
-                                      event.currentTarget.blur()
-                                    }
-                                  }}
-                                  step="0.5"
-                                  type="number"
-                                  value={purchaseDrafts[item.id] ?? String(item.purchasedQuantity)}
-                                />
-                              </td>
-                              <td className={tableCellClass}>{item.unit}</td>
-                              <td className={tableCellClass}>{item.notes || '-'}</td>
-                              <td className={tableCellClass}>
-                                <Badge tone={item.isPurchased ? 'green' : item.purchasedQuantity > 0 ? 'amber' : 'slate'}>
-                                  {item.isPurchased ? 'Done' : item.purchasedQuantity > 0 ? 'Partial' : 'Open'}
-                                </Badge>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
+	                    <div className="overflow-x-auto">
+	                      <table className="w-full min-w-[1080px] text-left">
+	                        <thead>
+	                          <tr>
+	                            <th className={tableHeadClass}>Done</th>
+	                            <th className={tableHeadClass}>Item</th>
+	                            <th className={tableHeadClass}>Item no.</th>
+	                            <th className={tableHeadClass}>Need</th>
+	                            <th className={tableHeadClass}>Bought</th>
+	                            <th className={tableHeadClass}>Unit</th>
+	                            <th className={tableHeadClass}>Unit budget</th>
+	                            <th className={tableHeadClass}>Line est.</th>
+	                            <th className={tableHeadClass}>Notes</th>
+	                            <th className={tableHeadClass}>Status</th>
+	                          </tr>
+	                        </thead>
+	                        <tbody>
+	                          {items.map((item) => {
+	                            const unitEstimate = Number(shoppingBudgetEstimates[item.id] ?? 0)
+	                            const lineEstimate = Number.isFinite(unitEstimate) ? unitEstimate * item.quantity : 0
+	                            return (
+	                              <tr className={cn(item.isPurchased ? 'bg-emerald-50/40' : 'bg-white hover:bg-slate-50')} key={item.id}>
+	                                <td className={tableCellClass}>
+	                                  <input
+	                                    checked={item.isPurchased}
+	                                    className="size-4 rounded border-slate-300 text-emerald-600"
+	                                    disabled={!canManageGroceries}
+	                                    onChange={() => updateShoppingItem(item.id, { isPurchased: !item.isPurchased })}
+	                                    type="checkbox"
+	                                  />
+	                                </td>
+	                                <td className={cn(tableCellClass, 'font-semibold text-slate-900')}>
+	                                  <span className={cn(item.isPurchased && 'text-slate-400 line-through')}>{item.itemName}</span>
+	                                  <span className="ml-2 inline-flex gap-1">
+	                                    {item.isAdhoc && <Badge tone="indigo">Added</Badge>}
+	                                    {item.carriedForward && <Badge tone="amber">Carry</Badge>}
+	                                  </span>
+	                                </td>
+	                                <td className={cn(tableCellClass, 'font-mono')}>{item.itemNumber}</td>
+	                                <td className={tableCellClass}>
+	                                  <input
+	                                    aria-label={`Need ${item.itemName}`}
+	                                    className={cellInputClass}
+	                                    disabled={!canManageGroceries}
+	                                    min="0"
+	                                    onBlur={(event) => commitRequiredQuantity(item, event.currentTarget.value)}
+	                                    onChange={(event) => setRequiredDrafts((current) => ({ ...current, [item.id]: event.target.value }))}
+	                                    onKeyDown={(event) => {
+	                                      if (event.key === 'Enter') {
+	                                        event.preventDefault()
+	                                        event.currentTarget.blur()
+	                                      }
+	                                    }}
+	                                    step="0.5"
+	                                    type="number"
+	                                    value={requiredDrafts[item.id] ?? String(item.quantity)}
+	                                  />
+	                                </td>
+	                                <td className={tableCellClass}>
+	                                  <input
+	                                    aria-label={`Bought ${item.itemName}`}
+	                                    className={cellInputClass}
+	                                    disabled={!canManageGroceries}
+	                                    max={item.quantity}
+	                                    min="0"
+	                                    onBlur={(event) => commitPurchasedQuantity(item, event.currentTarget.value)}
+	                                    onChange={(event) => setPurchaseDrafts((current) => ({ ...current, [item.id]: event.target.value }))}
+	                                    onKeyDown={(event) => {
+	                                      if (event.key === 'Enter') {
+	                                        event.preventDefault()
+	                                        event.currentTarget.blur()
+	                                      }
+	                                    }}
+	                                    step="0.5"
+	                                    type="number"
+	                                    value={purchaseDrafts[item.id] ?? String(item.purchasedQuantity)}
+	                                  />
+	                                </td>
+	                                <td className={tableCellClass}>{item.unit}</td>
+	                                <td className={tableCellClass}>
+	                                  <input
+	                                    aria-label={`Unit budget ${item.itemName}`}
+	                                    className={cellInputClass}
+	                                    min="0"
+	                                    onChange={(event) => updateBudgetEstimate(item.id, event.target.value)}
+	                                    placeholder="0.00"
+	                                    step="0.01"
+	                                    type="number"
+	                                    value={shoppingBudgetEstimates[item.id] ?? ''}
+	                                  />
+	                                </td>
+	                                <td className={cn(tableCellClass, 'font-semibold text-slate-900')}>{formatBudget(lineEstimate)}</td>
+	                                <td className={tableCellClass}>{item.notes || '-'}</td>
+	                                <td className={tableCellClass}>
+	                                  <Badge tone={item.isPurchased ? 'green' : item.purchasedQuantity > 0 ? 'amber' : 'slate'}>
+	                                    {item.isPurchased ? 'Done' : item.purchasedQuantity > 0 ? 'Partial' : 'Open'}
+	                                  </Badge>
+	                                </td>
+	                              </tr>
+	                            )
+	                          })}
+	                        </tbody>
+	                      </table>
                     </div>
                   </CardContent>
                 </Card>
@@ -1551,10 +1991,10 @@ export const GroceryView = ({ store }: { store: FamilyHubStore }) => {
 
       {tab === 'cycles' && (
         <div className="grid gap-5">
-          {renderFilterPanel(
+          {renderMultiFilterPanel(
             cycleFilters,
             (patch) => setCycleFilters((current) => ({ ...current, ...patch })),
-            () => setCycleFilters(defaultViewFilters),
+            () => setCycleFilters(defaultCycleFilters),
             'Search place, item, number, note',
             'Purchase status',
             'Done and open',

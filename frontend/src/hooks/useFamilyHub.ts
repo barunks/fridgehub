@@ -17,8 +17,9 @@ import type {
   ShoppingCycleItem,
   ShoppingItemUpdateInput,
   Task,
+  TaskUpdateInput,
 } from '@/types/familyHub'
-import { dateOffsetIso, dateTimeOffsetIso, todayIso } from '@/utils/date'
+import { dateOffsetIso, dateTimeOffsetIso, recurringDateIntersectsRange, todayIso } from '@/utils/date'
 
 const nextId = (items: { id: number }[]) => Math.max(0, ...items.map((item) => item.id)) + 1
 
@@ -360,8 +361,11 @@ export const useFamilyHub = (
   }, [refreshFromApi])
 
   const stats = useMemo(() => {
+    const familyToday = todayIso(state.family.timezone)
     const activeTasks = state.tasks.filter((task) => task.status !== 'completed' && task.status !== 'cancelled')
-    const todayTasks = activeTasks.filter((task) => task.dueAt.slice(0, 10) === todayIso())
+    const todayTasks = activeTasks.filter((task) =>
+      recurringDateIntersectsRange(task.dueAt, task.recurrenceType, task.recurrenceInterval, familyToday, familyToday, task.recurrenceEndAt),
+    )
     const pendingPurchases = state.groceryItems.filter((item) => item.needsPurchase)
     const expiringItems = state.groceryItems.filter((item) => {
       if (!item.expiryDate) {
@@ -369,12 +373,12 @@ export const useFamilyHub = (
       }
 
       const days = Math.round(
-        (new Date(`${item.expiryDate}T00:00:00`).getTime() - new Date(`${todayIso()}T00:00:00`).getTime()) /
+        (new Date(`${item.expiryDate}T00:00:00`).getTime() - new Date(`${familyToday}T00:00:00`).getTime()) /
           86_400_000,
       )
       return days >= 0 && days <= 2
     })
-    const todayMeals = state.meals.filter((meal) => meal.planDate === todayIso())
+    const todayMeals = state.meals.filter((meal) => meal.planDate === familyToday)
 
     return {
       activeTasks,
@@ -414,6 +418,36 @@ export const useFamilyHub = (
     )
   }
 
+  const updateTask = (taskId: number, patch: TaskUpdateInput) => {
+    if (!guardPermission('manage_tasks')) {
+      return
+    }
+
+    const applyPatch = (tasks: Task[]): Task[] =>
+      tasks.map((task) =>
+        task.id === taskId
+          ? {
+              ...task,
+              ...patch,
+              recurrenceType: patch.recurrenceType ?? task.recurrenceType,
+              recurrenceInterval: patch.recurrenceInterval ?? task.recurrenceInterval,
+              recurrenceEndAt: patch.recurrenceEndAt === undefined ? task.recurrenceEndAt : patch.recurrenceEndAt,
+              reminderAt: patch.reminderAt === undefined ? task.reminderAt : patch.reminderAt,
+            }
+          : task,
+      )
+
+    mutateWithRollback(
+      (current) => ({
+        ...current,
+        tasks: applyPatch(current.tasks),
+      }),
+      api.updateTask(taskId, { ...patch }),
+      'Task updated',
+      () => setTaskPageItems((current) => (current ? applyPatch(current) : current)),
+    )
+  }
+
   const toggleGroceryPurchased = (itemId: number) => {
     if (!guardPermission('manage_groceries')) {
       return
@@ -443,11 +477,14 @@ export const useFamilyHub = (
       )
 
     return mutateWithRollback(
-      (current) => ({
-        ...current,
-        groceryItems: updateGroceryPurchased(current.groceryItems),
-        shoppingItems: updateShoppingPurchased(current.shoppingItems),
-      }),
+      (current) => {
+        const nextShoppingItems = updateShoppingPurchased(current.shoppingItems)
+        return {
+          ...current,
+          groceryItems: updateGroceryPurchased(current.groceryItems),
+          shoppingItems: nextShoppingItems,
+        }
+      },
       api.updateGroceryItem(itemId, { purchased }),
       'Grocery item updated',
       () => setGroceryPageItems((current) => (current ? updateGroceryPurchased(current) : current)),
@@ -483,11 +520,14 @@ export const useFamilyHub = (
       )
 
     return mutateWithRollback(
-      (current) => ({
-        ...current,
-        groceryItems: updateGroceryStock(current.groceryItems),
-        shoppingItems: updateShoppingPurchased(current.shoppingItems),
-      }),
+      (current) => {
+        const nextShoppingItems = updateShoppingPurchased(current.shoppingItems)
+        return {
+          ...current,
+          groceryItems: updateGroceryStock(current.groceryItems),
+          shoppingItems: nextShoppingItems,
+        }
+      },
       api.updateGroceryItem(itemId, { currentStock }),
       'Stock updated',
       () => setGroceryPageItems((current) => (current ? updateGroceryStock(current) : current)),
@@ -564,28 +604,36 @@ export const useFamilyHub = (
         }
       })
 
-    const updatedTarget = updateShoppingItems([target])[0]
-    const updateGroceryStatus = (items: GroceryItem[]) =>
-      items.map((item) =>
+    const aggregateGroceryStatus = (items: GroceryItem[], shoppingItems: ShoppingCycleItem[]) => {
+      const relatedRows = shoppingItems.filter((item) => item.itemId === target.itemId)
+      const hasOpenRows = relatedRows.some((item) => !item.isPurchased)
+      const hasPurchasedRows = relatedRows.some((item) => item.isPurchased)
+      const allRowsPurchased = relatedRows.length > 0 && relatedRows.every((item) => item.isPurchased)
+
+      return items.map((item) =>
         item.id === target.itemId
           ? {
               ...item,
-              purchased: updatedTarget.isPurchased,
-              currentStock: updatedTarget.isPurchased,
-              needsPurchase: !updatedTarget.isPurchased,
+              purchased: allRowsPurchased || (relatedRows.length === 0 ? item.purchased : hasPurchasedRows && !hasOpenRows),
+              currentStock: allRowsPurchased || (relatedRows.length === 0 ? item.currentStock : hasPurchasedRows && !hasOpenRows),
+              needsPurchase: relatedRows.length === 0 ? item.needsPurchase : hasOpenRows,
             }
           : item,
       )
+    }
 
     return mutateWithRollback(
-      (current) => ({
-        ...current,
-        shoppingItems: updateShoppingItems(current.shoppingItems),
-        groceryItems: updateGroceryStatus(current.groceryItems),
-      }),
+      (current) => {
+        const nextShoppingItems = updateShoppingItems(current.shoppingItems)
+        return {
+          ...current,
+          shoppingItems: nextShoppingItems,
+          groceryItems: aggregateGroceryStatus(current.groceryItems, nextShoppingItems),
+        }
+      },
       api.updateShoppingItem(subItemId, patch),
       'Shopping item updated',
-      () => setGroceryPageItems((current) => (current ? updateGroceryStatus(current) : current)),
+      () => setGroceryPageItems((current) => (current ? aggregateGroceryStatus(current, updateShoppingItems(state.shoppingItems)) : current)),
     )
   }
 
@@ -772,13 +820,14 @@ export const useFamilyHub = (
             {
               id: nextId(current.tasks),
               title: input.title,
-              description: `${input.category} reminder`,
+              description: input.description?.trim() || `${input.category} reminder`,
               priority: input.priority,
               status: 'pending',
               dueAt: dueDate,
-              reminderAt: input.reminderAt || dueDate,
+              reminderAt: input.reminderAt ?? null,
               recurrenceType: input.recurrenceType || 'none',
-              recurrenceInterval: 1,
+              recurrenceInterval: input.recurrenceInterval || 1,
+              recurrenceEndAt: input.recurrenceEndAt,
               assignedTo: input.assignedTo,
               category: input.category,
               actionLabel: 'New',
@@ -818,7 +867,29 @@ export const useFamilyHub = (
       return
     }
     const payload: MealUpdateInput = typeof input === 'string' ? { mealName: input } : input
-    const applyUpdate = (meal: MealPlanItem): MealPlanItem => (meal.id === mealId ? { ...meal, ...payload } : meal)
+    const mealScopeFromTargets = (targetMemberIds: number[]) => {
+      if (targetMemberIds.length === 0) return 'family'
+      if (targetMemberIds.length === 1) return `user:${targetMemberIds[0]}`
+      return `group:${[...targetMemberIds].sort((a, b) => a - b).join(',')}`
+    }
+    const applyUpdate = (meal: MealPlanItem): MealPlanItem =>
+      meal.id === mealId
+        ? (() => {
+            const targetMemberIds = payload.targetMemberIds !== undefined
+              ? payload.targetMemberIds
+              : (payload.assignedTo !== undefined ? (payload.assignedTo ? [payload.assignedTo] : []) : meal.targetMemberIds)
+            return {
+              ...meal,
+              ...payload,
+              assignedTo: targetMemberIds !== undefined
+                ? (targetMemberIds.length === 1 ? targetMemberIds[0] : null)
+                : meal.assignedTo,
+              mealPlanScope: targetMemberIds !== undefined ? mealScopeFromTargets(targetMemberIds) : meal.mealPlanScope,
+              targetMemberIds,
+              updatedAt: new Date().toISOString(),
+            }
+          })()
+        : meal
     mutateWithRollback(
       (current) => ({
         ...current,
@@ -889,8 +960,18 @@ export const useFamilyHub = (
         }))
         setMemberMeals((current) => {
           if (!current || current.length === 0) return current
-          const memberId = current[0]?.assignedTo
-          return memberId ? meals.filter((meal) => meal.assignedTo === memberId) : current
+          const memberIds = Array.from(
+            new Set(
+              current
+                .flatMap((meal) => meal.targetMemberIds ?? (meal.assignedTo ? [meal.assignedTo] : []))
+                .filter((memberId): memberId is number => Number.isFinite(memberId)),
+            ),
+          )
+          if (memberIds.length === 0) return current
+          return meals.filter((meal) => {
+            const targetIds = meal.targetMemberIds ?? (meal.assignedTo ? [meal.assignedTo] : [])
+            return targetIds.some((memberId) => memberIds.includes(memberId))
+          })
         })
       }),
       'Meal templates applied',
@@ -1222,25 +1303,52 @@ export const useFamilyHub = (
         setState((current) => ({
           ...current,
           assistantInsights: response.insights,
-          assistantMessages: current.assistantMessages.some(
-            (message) => message.sender === 'assistant' && message.content === response.answer,
-          )
-            ? current.assistantMessages
-            : [
-                ...current.assistantMessages,
-                {
-                  id: nextId(current.assistantMessages),
-                  sender: 'assistant',
-                  content: response.answer,
-                  createdAt: new Date().toISOString(),
-                },
-              ],
+          assistantMessages: [
+            ...current.assistantMessages,
+            {
+              id: nextId(current.assistantMessages),
+              sender: 'assistant',
+              content: response.answer,
+              createdAt: new Date().toISOString(),
+            },
+          ],
         }))
       })
       .catch((error: unknown) => {
         setFeedback({ type: 'error', message: error instanceof Error ? error.message : 'Assistant request failed' })
         throw error
       })
+  }
+
+  const refreshAssistantInsights = () => {
+    if (!guardPermission('use_assistant')) {
+      return Promise.resolve()
+    }
+
+    return api
+      .getAssistantInsights()
+      .then((insights) => {
+        setState((current) => ({
+          ...current,
+          assistantInsights: insights,
+        }))
+        setFeedback({ type: 'success', message: 'Assistant insights refreshed' })
+      })
+      .catch((error: unknown) => {
+        setFeedback({ type: 'error', message: error instanceof Error ? error.message : 'Unable to refresh assistant insights' })
+        throw error
+      })
+  }
+
+  const clearAssistantChat = () => {
+    if (!guardPermission('use_assistant')) {
+      return
+    }
+    setState((current) => ({
+      ...current,
+      assistantMessages: [],
+    }))
+    setFeedback({ type: 'success', message: 'Assistant chat cleared' })
   }
 
   const resetDemoData = () => {
@@ -1294,6 +1402,7 @@ export const useFamilyHub = (
     addListType,
     regenerateGroceryCycles,
     addTask,
+    updateTask,
     reassignTask,
     updateMeal,
     applyWeeklyTemplate,
@@ -1316,6 +1425,8 @@ export const useFamilyHub = (
     updateRecipe,
     deleteRecipe,
     askAssistant,
+    refreshAssistantInsights,
+    clearAssistantChat,
     resetDemoData,
   }
 }

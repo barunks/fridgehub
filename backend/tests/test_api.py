@@ -1,4 +1,6 @@
 import os
+from calendar import monthrange
+from datetime import date, timedelta
 from pathlib import Path
 from uuid import uuid4
 
@@ -13,13 +15,25 @@ from fastapi.testclient import TestClient  # noqa: E402
 from app.core.database import SessionLocal  # noqa: E402
 from app.core.security import decode_token, hash_password  # noqa: E402
 from app.main import app  # noqa: E402
-from app.models import Device, DeviceSession, FamilyInvite, FamilyMember, User  # noqa: E402
+from app.models import Device, DeviceSession, FamilyInvite, FamilyMember, MealPlan, User  # noqa: E402
 
 
 def auth_headers(client: TestClient, username: str = "meera") -> dict[str, str]:
     response = client.post("/api/v1/auth/login", json={"username": username, "password": "familyhub"})
     assert response.status_code == 200
     return {"Authorization": f"Bearer {response.json()['accessToken']}"}
+
+
+def add_months(value: date, months: int) -> date:
+    total_month = value.month - 1 + months
+    year = value.year + total_month // 12
+    month = total_month % 12 + 1
+    day = min(value.day, monthrange(year, month)[1])
+    return date(year, month, day)
+
+
+def meal_targets_member(meal: dict, member_id: int) -> bool:
+    return meal.get("assignedTo") == member_id or member_id in meal.get("targetMemberIds", [])
 
 
 def teardown_module() -> None:
@@ -68,6 +82,25 @@ def test_bootstrap_returns_full_state() -> None:
         assert "shoppingItems" in data
         assert len(data["shoppingItems"]) >= 1
         assert len(data["tasks"]) >= 1
+
+
+def test_bootstrap_materializes_default_weekly_meal_plan() -> None:
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+        family_id = client.get("/api/v1/family/bootstrap", headers=headers).json()["family"]["id"]
+
+        db = SessionLocal()
+        try:
+            db.query(MealPlan).filter_by(family_id=family_id, meal_plan_scope="family").update({"is_active": False})
+            db.commit()
+        finally:
+            db.close()
+
+        r = client.get("/api/v1/family/bootstrap", headers=headers)
+        assert r.status_code == 200
+        meals = [meal for meal in r.json()["meals"] if meal["assignedTo"] is None]
+        assert len(meals) >= 28
+        assert {meal["mealType"] for meal in meals}.issuperset({"breakfast", "lunch", "snacks", "dinner"})
 
 
 # --- Auth ---
@@ -463,6 +496,120 @@ def test_meal_update_full_payload_and_validation() -> None:
 
         invalid_recipe = client.patch(f"/api/v1/meal-plan/{meal_id}", json={"recipeId": 999999}, headers=headers)
         assert invalid_recipe.status_code == 400
+
+
+def test_meal_update_effective_scopes_materialize_target_dates() -> None:
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+        applied = client.post("/api/v1/meal-plan/apply-template", json={}, headers=headers)
+        assert applied.status_code == 200
+        family_meals = [
+            meal
+            for meal in applied.json()
+            if meal["assignedTo"] is None and meal["mealPlanScope"] == "family"
+        ]
+        assert family_meals
+        meal = sorted(family_meals, key=lambda item: (item["planDate"], item["id"]))[0]
+        start = date.fromisoformat(meal["planDate"])
+        meal_id = meal["id"]
+        meal_type = meal["mealType"]
+
+        daily_until = start + timedelta(days=2)
+        daily_name = f"Daily Scope {uuid4().hex[:8]}"
+        patched = client.patch(
+            f"/api/v1/meal-plan/{meal_id}",
+            json={"mealName": daily_name, "effectiveScope": "daily", "effectiveUntil": daily_until.isoformat()},
+            headers=headers,
+        )
+        assert patched.status_code == 200
+        meals = client.get("/api/v1/family/bootstrap", headers=headers).json()["meals"]
+        daily_dates = {(start + timedelta(days=offset)).isoformat() for offset in range(3)}
+        daily_rows = [
+            row
+            for row in meals
+            if row["mealType"] == meal_type and row["mealPlanScope"] == "family" and row["planDate"] in daily_dates
+        ]
+        assert {row["planDate"] for row in daily_rows} == daily_dates
+        assert all(row["mealName"] == daily_name for row in daily_rows)
+
+        weekly_until = start + timedelta(days=14)
+        weekly_name = f"Weekly Scope {uuid4().hex[:8]}"
+        patched = client.patch(
+            f"/api/v1/meal-plan/{meal_id}",
+            json={"mealName": weekly_name, "effectiveScope": "weekly", "effectiveUntil": weekly_until.isoformat()},
+            headers=headers,
+        )
+        assert patched.status_code == 200
+        meals = client.get("/api/v1/family/bootstrap", headers=headers).json()["meals"]
+        weekly_dates = {(start + timedelta(days=offset)).isoformat() for offset in (0, 7, 14)}
+        weekly_rows = [
+            row
+            for row in meals
+            if row["mealType"] == meal_type and row["mealPlanScope"] == "family" and row["planDate"] in weekly_dates
+        ]
+        assert {row["planDate"] for row in weekly_rows} == weekly_dates
+        assert all(row["mealName"] == weekly_name for row in weekly_rows)
+
+        monthly_until = add_months(start, 2)
+        monthly_name = f"Monthly Scope {uuid4().hex[:8]}"
+        patched = client.patch(
+            f"/api/v1/meal-plan/{meal_id}",
+            json={"mealName": monthly_name, "effectiveScope": "monthly", "effectiveUntil": monthly_until.isoformat()},
+            headers=headers,
+        )
+        assert patched.status_code == 200
+        meals = client.get("/api/v1/family/bootstrap", headers=headers).json()["meals"]
+        monthly_dates = {add_months(start, offset).isoformat() for offset in range(3)}
+        monthly_rows = [
+            row
+            for row in meals
+            if row["mealType"] == meal_type and row["mealPlanScope"] == "family" and row["planDate"] in monthly_dates
+        ]
+        assert {row["planDate"] for row in monthly_rows} == monthly_dates
+        assert all(row["mealName"] == monthly_name for row in monthly_rows)
+
+        invalid = client.patch(
+            f"/api/v1/meal-plan/{meal_id}",
+            json={"mealName": "Invalid Scope", "effectiveScope": "daily", "effectiveUntil": (start - timedelta(days=1)).isoformat()},
+            headers=headers,
+        )
+        assert invalid.status_code == 400
+
+
+def test_meal_update_group_audience_is_visible_to_each_target_member() -> None:
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+        bootstrap = client.get("/api/v1/family/bootstrap", headers=headers).json()
+        member_ids = [member["id"] for member in bootstrap["members"]]
+        assert len(member_ids) >= 3
+        target_member_ids = member_ids[:2]
+        excluded_member_id = member_ids[2]
+
+        meals = client.get("/api/v1/meal-plan/week", headers=headers).json()
+        meal = next(item for item in meals if item["mealPlanScope"] == "family")
+        meal_name = f"Group Meal {uuid4().hex[:8]}"
+        patched = client.patch(
+            f"/api/v1/meal-plan/{meal['id']}",
+            json={
+                "mealName": meal_name,
+                "targetMemberIds": target_member_ids,
+                "effectiveScope": "daily",
+                "effectiveUntil": meal["planDate"],
+            },
+            headers=headers,
+        )
+        assert patched.status_code == 200
+        body = patched.json()
+        assert body["assignedTo"] is None
+        assert body["mealPlanScope"] == f"group:{target_member_ids[0]},{target_member_ids[1]}"
+        assert body["targetMemberIds"] == target_member_ids
+
+        first_member_meals = client.get(f"/api/v1/meal-plan/week?member_id={target_member_ids[0]}", headers=headers).json()
+        second_member_meals = client.get(f"/api/v1/meal-plan/week?member_id={target_member_ids[1]}", headers=headers).json()
+        excluded_member_meals = client.get(f"/api/v1/meal-plan/week?member_id={excluded_member_id}", headers=headers).json()
+        assert any(item["mealName"] == meal_name for item in first_member_meals)
+        assert any(item["mealName"] == meal_name for item in second_member_meals)
+        assert all(item["mealName"] != meal_name for item in excluded_member_meals)
 
 
 def test_meal_template_row_crud_and_apply_named_template() -> None:
@@ -877,14 +1024,18 @@ def test_task_with_recurrence() -> None:
             "priority": "low",
             "dueAt": "2025-07-01T08:00:00",
             "assignedTo": 1,
-            "recurrenceType": "weekly",
-            "recurrenceInterval": 1,
+            "description": "Water balcony plants",
+            "recurrenceType": "quarterly",
+            "recurrenceInterval": 2,
+            "recurrenceEndAt": "2026-07-01T08:00:00",
         }
         created = client.post("/api/v1/tasks", json=payload, headers=headers)
         assert created.status_code == 200
         task = created.json()
-        assert task["recurrenceType"] == "weekly"
-        assert task["recurrenceInterval"] == 1
+        assert task["description"] == "Water balcony plants"
+        assert task["recurrenceType"] == "quarterly"
+        assert task["recurrenceInterval"] == 2
+        assert task["recurrenceEndAt"].startswith("2026-07-01T08:00:00")
         assert task["status"] == "pending"
 
         client.delete(f"/api/v1/tasks/{task['id']}", headers=headers)
@@ -1118,9 +1269,9 @@ def test_meal_plan_week_filter_by_member() -> None:
         r = client.get("/api/v1/meal-plan/week?member_id=1", headers=headers)
         assert r.status_code == 200
         member_meals = r.json()
-        # All returned meals should be assigned to member 1
+        # All returned meals should target member 1, either individually or through a group scope.
         for meal in member_meals:
-            assert meal["assignedTo"] == 1
+            assert meal_targets_member(meal, 1)
 
 
 def test_apply_template_for_specific_member() -> None:
@@ -1137,9 +1288,9 @@ def test_apply_template_for_specific_member() -> None:
         assert r.status_code == 200
         meals = r.json()
         assert len(meals) >= 1
-        # All returned meals should be assigned to member 1
+        # All returned meals should target member 1, either individually or through a group scope.
         for meal in meals:
-            assert meal["assignedTo"] == 1
+            assert meal_targets_member(meal, 1)
 
 
 def test_apply_template_for_different_members_creates_separate_plans() -> None:
@@ -1162,16 +1313,16 @@ def test_apply_template_for_different_members_creates_separate_plans() -> None:
         assert len(member2_meals) >= 1
 
         # Meal IDs should be different (separate rows)
-        member1_ids = {m["id"] for m in member1_meals}
-        member2_ids = {m["id"] for m in member2_meals}
+        member1_ids = {m["id"] for m in member1_meals if m["assignedTo"] == 1}
+        member2_ids = {m["id"] for m in member2_meals if m["assignedTo"] == 2}
         assert member1_ids.isdisjoint(member2_ids)
 
         # Verify via GET filter
         r = client.get("/api/v1/meal-plan/week?member_id=1", headers=headers)
-        assert all(m["assignedTo"] == 1 for m in r.json())
+        assert all(meal_targets_member(m, 1) for m in r.json())
 
         r = client.get("/api/v1/meal-plan/week?member_id=2", headers=headers)
-        assert all(m["assignedTo"] == 2 for m in r.json())
+        assert all(meal_targets_member(m, 2) for m in r.json())
 
 
 def test_apply_template_without_member_creates_family_wide_plan() -> None:
@@ -1210,8 +1361,9 @@ def test_member_meal_can_be_customized_independently() -> None:
         r = client.post("/api/v1/meal-plan/apply-template", json={"memberId": 1}, headers=headers)
         member1_meals = r.json()
         assert len(member1_meals) >= 1
-        meal_id = member1_meals[0]["id"]
-        original_name = member1_meals[0]["mealName"]
+        member1_meal = next(meal for meal in member1_meals if meal["assignedTo"] == 1)
+        meal_id = member1_meal["id"]
+        original_name = member1_meal["mealName"]
 
         # Generate for member 2
         r = client.post("/api/v1/meal-plan/apply-template", json={"memberId": 2}, headers=headers)
@@ -1243,7 +1395,7 @@ def test_member_meal_dietary_flags_independent() -> None:
 
         # Get member 1's meals and set dietary flags
         r = client.get("/api/v1/meal-plan/week?member_id=1", headers=headers)
-        m1_meals = r.json()
+        m1_meals = [meal for meal in r.json() if meal["assignedTo"] == 1]
         if m1_meals:
             client.patch(
                 f"/api/v1/meal-plan/{m1_meals[0]['id']}",
@@ -1252,7 +1404,7 @@ def test_member_meal_dietary_flags_independent() -> None:
             )
 
         # Get member 2's meals and set different flags
-        m2_meals = r2.json()
+        m2_meals = [meal for meal in r2.json() if meal["assignedTo"] == 2]
         if m2_meals:
             client.patch(
                 f"/api/v1/meal-plan/{m2_meals[0]['id']}",
@@ -1262,13 +1414,15 @@ def test_member_meal_dietary_flags_independent() -> None:
 
         # Verify independence
         r = client.get("/api/v1/meal-plan/week?member_id=1", headers=headers)
-        if r.json():
-            assert "gluten-free" in r.json()[0]["dietaryFlags"]
+        member1_rows = [meal for meal in r.json() if meal["assignedTo"] == 1]
+        if member1_rows:
+            assert "gluten-free" in member1_rows[0]["dietaryFlags"]
 
         r = client.get("/api/v1/meal-plan/week?member_id=2", headers=headers)
-        if r.json():
-            assert "nut-free" in r.json()[0]["dietaryFlags"]
-            assert "gluten-free" not in r.json()[0]["dietaryFlags"]
+        member2_rows = [meal for meal in r.json() if meal["assignedTo"] == 2]
+        if member2_rows:
+            assert "nut-free" in member2_rows[0]["dietaryFlags"]
+            assert "gluten-free" not in member2_rows[0]["dietaryFlags"]
 
 
 def test_apply_template_idempotent_for_same_member() -> None:
@@ -1332,9 +1486,9 @@ def test_meal_plan_week_valid_member_no_plan_returns_empty() -> None:
         # First ensure no personal plan exists by querying
         r = client.get("/api/v1/meal-plan/week?member_id=4", headers=headers)
         assert r.status_code == 200
-        # All returned meals (if any) should be assigned to member 4
+        # All returned meals (if any) should target member 4
         for meal in r.json():
-            assert meal["assignedTo"] == 4
+            assert meal_targets_member(meal, 4)
 
 
 def test_child_cannot_apply_template() -> None:
@@ -1674,7 +1828,7 @@ def test_apply_template_multiple_members_no_conflict() -> None:
             assert r.status_code == 200
             meals = r.json()
             for meal in meals:
-                assert meal["assignedTo"] == member["id"]
+                assert meal_targets_member(meal, member["id"])
 
         # Verify each member has independent meals
         for member in members[:3]:
@@ -2032,6 +2186,19 @@ def test_shopping_report_with_filters() -> None:
         )
         assert r.status_code == 200
         assert r.headers["content-type"] == "application/pdf"
+
+
+def test_shopping_report_with_multi_filters() -> None:
+    """Shopping report accepts multi-select filter query values."""
+    with TestClient(app) as client:
+        r = client.get(
+            "/api/v1/grocery/shopping-report",
+            params={"list_type_ids": "1,2", "stock_values": "yes,no", "item_names": "Rice,Tomato"},
+            headers=auth_headers(client),
+        )
+        assert r.status_code == 200
+        assert r.headers["content-type"] == "application/pdf"
+        assert r.content[:4] == b"%PDF"
 
 
 def test_shopping_report_requires_auth() -> None:

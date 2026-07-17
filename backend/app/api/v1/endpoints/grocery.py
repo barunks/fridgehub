@@ -195,20 +195,36 @@ def delete_item(
 @router.get("/shopping-report")
 def download_shopping_report(
     list_type_id: int | None = None,
+    list_type_ids: str | None = None,
     frequency: str | None = None,
     stock: str | None = None,
+    stock_values: str | None = None,
     item_name: str | None = None,
+    item_names: str | None = None,
     only_needed: bool = False,
     current_user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> Response:
+    parsed_list_type_ids = []
+    for value in (list_type_ids or "").split(","):
+        if not value:
+            continue
+        try:
+            parsed_list_type_ids.append(int(value))
+        except ValueError:
+            continue
+    parsed_stock_values = [value for value in (stock_values or "").split(",") if value]
+    parsed_item_names = [value for value in (item_names or "").split(",") if value]
     pdf_bytes = generate_shopping_report(
         db,
         current_user.family_id,
         list_type_id=list_type_id,
+        list_type_ids=parsed_list_type_ids or None,
         frequency=frequency,
         stock_filter=stock,
+        stock_filters=parsed_stock_values or None,
         item_name=item_name,
+        item_names=parsed_item_names or None,
         only_needed=only_needed,
     )
     return Response(

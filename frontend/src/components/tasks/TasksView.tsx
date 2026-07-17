@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   DndContext,
   DragOverlay,
@@ -24,10 +25,12 @@ import {
   ListFilter,
   Plus,
   RotateCcw,
+  Save,
   Sparkles,
   Target,
   Trash2,
   UserRound,
+  X,
 } from 'lucide-react'
 import { Avatar } from '@/components/ui/Avatar'
 import { Badge } from '@/components/ui/Badge'
@@ -35,8 +38,18 @@ import { Button } from '@/components/ui/Button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { FormField, inputClass } from '@/components/ui/FormField'
 import type { FamilyHubStore } from '@/hooks/useFamilyHub'
-import type { FamilyMember, NewTaskInput, Priority, RecurrenceType, Task, TaskStatus } from '@/types/familyHub'
-import { dateTimeOffsetIso, formatDueLabel } from '@/utils/date'
+import type { FamilyMember, NewTaskInput, Priority, RecurrenceType, Task, TaskStatus, TaskUpdateInput, TimeScope } from '@/types/familyHub'
+import {
+  addDaysToIsoDate,
+  daysBetweenIsoDates,
+  formatCompactDate,
+  formatDueLabel,
+  nextRecurringOccurrenceInRange,
+  recurringDateIntersectsRange,
+  todayIso,
+  weekEndIso,
+  weekStartIso,
+} from '@/utils/date'
 import { cn } from '@/utils/style'
 
 const priorityTone: Record<Priority, 'green' | 'amber' | 'rose'> = {
@@ -52,7 +65,22 @@ const statusLabel: Record<TaskStatus, string> = {
   cancelled: 'Cancelled',
 }
 
-const recurrenceOptions: RecurrenceType[] = ['none', 'daily', 'weekly', 'monthly', 'yearly']
+const recurrenceOptions: Array<{ label: string; unit: string; value: RecurrenceType }> = [
+  { value: 'none', label: 'No repeat', unit: 'time' },
+  { value: 'daily', label: 'Daily', unit: 'day' },
+  { value: 'weekly', label: 'Weekly', unit: 'week' },
+  { value: 'monthly', label: 'Monthly', unit: 'month' },
+  { value: 'quarterly', label: 'Quarterly', unit: 'quarter' },
+  { value: 'semi_annually', label: 'Semi-annually', unit: 'half-year' },
+  { value: 'yearly', label: 'Yearly', unit: 'year' },
+]
+
+const reminderLeadOptions = [
+  { label: 'At due time', minutes: 0 },
+  { label: '15 min before', minutes: 15 },
+  { label: '1 hour before', minutes: 60 },
+  { label: '1 day before', minutes: 1_440 },
+]
 
 const priorityWeight: Record<Priority, number> = {
   high: 0,
@@ -68,13 +96,177 @@ const chipClass = (active: boolean) =>
       : 'border-slate-200 bg-white/80 text-slate-500 hover:border-slate-300 hover:text-slate-700',
   )
 
+type ScheduledTask = Task & {
+  anchorDueAt?: string
+}
+
+type TaskEditDraft = NewTaskInput & {
+  status: TaskStatus
+}
+
+const scopeFromSearchParam = (value: string | null): TimeScope | null =>
+  value === 'today' || value === 'week' ? value : null
+
+const dateScopesFromSearchParam = (value: string | null): TimeScope[] => {
+  if (!value || value === 'all') return []
+  const scopes = value
+    .split(',')
+    .map((item) => scopeFromSearchParam(item))
+    .filter((item): item is TimeScope => Boolean(item))
+  return Array.from(new Set(scopes))
+}
+
+const statusesFromSearchParam = (value: string | null): TaskStatus[] => {
+  if (!value || value === 'all') return []
+  const values = new Set(Object.keys(statusLabel))
+  return Array.from(new Set(
+    value
+      .split(',')
+      .map((item) => item.trim())
+      .filter((item): item is TaskStatus => values.has(item)),
+  ))
+}
+
+const textListFromSearchParam = (value: string | null) =>
+  value && value !== 'all'
+    ? Array.from(new Set(value.split(',').map((item) => item.trim()).filter(Boolean)))
+    : []
+
+const numberListFromSearchParam = (value: string | null) =>
+  textListFromSearchParam(value)
+    .map((item) => Number(item))
+    .filter((item, index, items) => Number.isFinite(item) && items.indexOf(item) === index)
+
+const selectionsEqual = <T,>(left: T[], right: T[]) =>
+  left.length === right.length && left.every((item) => right.includes(item))
+
+const toggleSelection = <T,>(current: T[], value: T) =>
+  current.includes(value) ? current.filter((item) => item !== value) : [...current, value]
+
+type DateRange = {
+  endIso: string
+  startIso: string
+}
+
+const occurrenceInDateRanges = (task: Task, ranges: DateRange[]) =>
+  ranges
+    .map((range) =>
+      nextRecurringOccurrenceInRange(
+        task.dueAt,
+        task.recurrenceType,
+        task.recurrenceInterval,
+        range.startIso,
+        range.endIso,
+        task.recurrenceEndAt,
+      ),
+    )
+    .filter((item): item is string => Boolean(item))
+    .sort()[0] ?? null
+
+const taskMatchesDateRanges = (task: Task, ranges: DateRange[]) =>
+  ranges.length === 0 ||
+  ranges.some((range) =>
+    recurringDateIntersectsRange(
+      task.dueAt,
+      task.recurrenceType,
+      task.recurrenceInterval,
+      range.startIso,
+      range.endIso,
+      task.recurrenceEndAt,
+    ),
+  )
+
+const occurrenceDateTime = (dateTime: string, occurrenceIso: string) => `${occurrenceIso}${dateTime.slice(10)}`
+
+const occurrenceReminderDateTime = (task: Task, occurrenceIso: string) => {
+  const dueAt = new Date(task.dueAt).getTime()
+  const reminderAt = new Date(task.reminderAt || task.dueAt).getTime()
+  const occurrenceDueAt = new Date(occurrenceDateTime(task.dueAt, occurrenceIso)).getTime()
+  return new Date(occurrenceDueAt - (dueAt - reminderAt)).toISOString()
+}
+
+const toDateTimeLocalValue = (date: Date) => {
+  const pad = (value: number) => String(value).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
+const defaultDueLocalValue = () => {
+  const dueAt = new Date()
+  dueAt.setHours(18, 0, 0, 0)
+  return toDateTimeLocalValue(dueAt)
+}
+
+const taskToEditDraft = (task: ScheduledTask): TaskEditDraft => ({
+  title: task.title,
+  description: task.description,
+  category: task.category,
+  priority: task.priority,
+  dueAt: toDateTimeLocalValue(new Date(task.anchorDueAt ?? task.dueAt)),
+  reminderAt: task.reminderAt ? toDateTimeLocalValue(new Date(task.reminderAt)) : '',
+  assignedTo: task.assignedTo,
+  recurrenceType: task.recurrenceType,
+  recurrenceInterval: task.recurrenceInterval,
+  recurrenceEndAt: task.recurrenceEndAt ? toDateTimeLocalValue(new Date(task.recurrenceEndAt)) : '',
+  status: task.status,
+})
+
+const repeatLabel = (task: Pick<Task, 'recurrenceEndAt' | 'recurrenceInterval' | 'recurrenceType'>) => {
+  if (task.recurrenceType === 'none') return 'One-time'
+  const option = recurrenceOptions.find((item) => item.value === task.recurrenceType)
+  const interval = Math.max(1, Number(task.recurrenceInterval) || 1)
+  const base = interval === 1 ? option?.label ?? task.recurrenceType : `Every ${interval} ${option?.unit ?? 'period'}${interval === 1 ? '' : 's'}`
+  return task.recurrenceEndAt ? `${base} until ${formatCompactDate(task.recurrenceEndAt.slice(0, 10))}` : base
+}
+
+const isActiveTask = (task: Task) => task.status !== 'completed' && task.status !== 'cancelled'
+
+const countOpenOccurrencesBefore = (task: ScheduledTask, familyTodayIso: string) => {
+  if (!isActiveTask(task)) return 0
+  const anchorDueAt = task.anchorDueAt ?? task.dueAt
+  const anchorIso = anchorDueAt.slice(0, 10)
+  const stopIso = task.recurrenceEndAt && task.recurrenceEndAt.slice(0, 10) < familyTodayIso
+    ? task.recurrenceEndAt.slice(0, 10)
+    : addDaysToIsoDate(familyTodayIso, -1)
+
+  if (stopIso < anchorIso) return 0
+  if (task.recurrenceType === 'none') return anchorIso <= stopIso ? 1 : 0
+
+  let count = 0
+  let cursorIso = anchorIso
+  for (let guard = 0; guard < 500; guard += 1) {
+    const occurrenceIso = nextRecurringOccurrenceInRange(
+      anchorDueAt,
+      task.recurrenceType,
+      task.recurrenceInterval,
+      cursorIso,
+      stopIso,
+      task.recurrenceEndAt,
+    )
+    if (!occurrenceIso) break
+    count += 1
+    cursorIso = addDaysToIsoDate(occurrenceIso, 1)
+  }
+  return count
+}
+
+const reminderStateLabel = (task: Task, familyTodayIso: string, familyTimezone?: string) => {
+  if (!task.reminderAt) return 'No alert'
+  const reminderIso = task.reminderAt.slice(0, 10)
+  if (reminderIso < familyTodayIso) return 'Alert elapsed'
+  if (reminderIso === familyTodayIso) return `Alert today ${formatDueLabel(task.reminderAt, familyTimezone).replace(/^Today at /, '')}`
+  return `Alert ${formatDueLabel(task.reminderAt, familyTimezone)}`
+}
+
 interface TaskCardProps {
   canManageTasks: boolean
   deleteTask: (taskId: number) => void
+  familyTodayIso: string
+  familyTimezone?: string
   member?: FamilyMember
   members: FamilyMember[]
+  openTask: (task: ScheduledTask) => void
   reassignTask: (taskId: number, memberId: number) => void
-  task: Task
+  task: ScheduledTask
   toggleTaskStatus: (taskId: number) => void
 }
 
@@ -84,7 +276,18 @@ const priorityAccent: Record<Priority, { border: string; ring: string; icon: str
   low: { border: 'border-emerald-200/80', ring: 'ring-emerald-100', icon: 'text-emerald-500', glow: 'shadow-emerald-500/8' },
 }
 
-const TaskCard = ({ canManageTasks, deleteTask, member, members, reassignTask, task, toggleTaskStatus }: TaskCardProps) => {
+const TaskCard = ({
+  canManageTasks,
+  deleteTask,
+  familyTodayIso,
+  familyTimezone,
+  member,
+  members,
+  openTask,
+  reassignTask,
+  task,
+  toggleTaskStatus,
+}: TaskCardProps) => {
   const { attributes, isDragging, listeners, setNodeRef, transform } = useDraggable({
     id: `task-${task.id}`,
     data: { taskId: task.id },
@@ -93,6 +296,10 @@ const TaskCard = ({ canManageTasks, deleteTask, member, members, reassignTask, t
   const style = transform ? { transform: CSS.Translate.toString(transform) } : undefined
   const isCompleted = task.status === 'completed'
   const accent = priorityAccent[task.priority]
+  const missedOccurrences = countOpenOccurrencesBefore(task, familyTodayIso)
+  const daysOpen = isActiveTask(task) ? Math.max(0, daysBetweenIsoDates(task.dueAt.slice(0, 10), familyTodayIso)) : 0
+  const isCarryForward = missedOccurrences > 0 || daysOpen > 0
+  const isAlertDue = isActiveTask(task) && Boolean(task.reminderAt && task.reminderAt.slice(0, 10) <= familyTodayIso)
 
   return (
     <article
@@ -105,6 +312,15 @@ const TaskCard = ({ canManageTasks, deleteTask, member, members, reassignTask, t
             : cn(accent.border, accent.glow, 'bg-white shadow-[0_4px_20px_rgb(15_23_42/0.04)] hover:shadow-[0_12px_40px_rgb(15_23_42/0.08)] hover:-translate-y-0.5'),
       )}
       data-testid={`task-card-${task.id}`}
+      onClick={() => openTask(task)}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          openTask(task)
+        }
+      }}
+      role="button"
+      tabIndex={0}
       ref={setNodeRef}
       style={style}
     >
@@ -118,7 +334,10 @@ const TaskCard = ({ canManageTasks, deleteTask, member, members, reassignTask, t
       {canManageTasks && (
         <button
           className="absolute right-3 top-3 flex size-7 items-center justify-center rounded-lg bg-white/80 text-slate-300 opacity-0 shadow-sm backdrop-blur-sm transition-all duration-200 hover:bg-rose-50 hover:text-rose-500 hover:shadow-md group-hover:opacity-100"
-          onClick={() => { if (window.confirm(`Delete "${task.title}"?`)) deleteTask(task.id) }}
+          onClick={(event) => {
+            event.stopPropagation()
+            if (window.confirm(`Delete "${task.title}"?`)) deleteTask(task.id)
+          }}
           title="Delete task"
           type="button"
         >
@@ -134,6 +353,7 @@ const TaskCard = ({ canManageTasks, deleteTask, member, members, reassignTask, t
               className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg text-slate-300 transition-all duration-200 hover:bg-indigo-50 hover:text-indigo-500"
               data-testid={`drag-task-${task.id}`}
               disabled={!canManageTasks}
+              onClick={(event) => event.stopPropagation()}
               title={`Drag ${task.title}`}
               type="button"
               {...attributes}
@@ -158,12 +378,27 @@ const TaskCard = ({ canManageTasks, deleteTask, member, members, reassignTask, t
           <div className="ml-10 flex flex-wrap items-center gap-2">
             <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-50 border border-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-600 shadow-sm">
               <Clock3 className="size-3 text-indigo-400" aria-hidden="true" />
-              {formatDueLabel(task.dueAt)}
+              {formatDueLabel(task.dueAt, familyTimezone)}
+            </span>
+            <span
+              className={cn(
+                'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium',
+                isAlertDue ? 'border-amber-200 bg-amber-50 text-amber-700' : 'border-sky-100 bg-sky-50 text-sky-700',
+              )}
+            >
+              <AlertTriangle className="size-3" aria-hidden="true" />
+              {reminderStateLabel(task, familyTodayIso, familyTimezone)}
             </span>
             {task.recurrenceType !== 'none' && (
               <span className="inline-flex items-center gap-1.5 rounded-full bg-violet-50 border border-violet-100 px-2.5 py-1 text-[11px] font-medium text-violet-600">
                 <RotateCcw className="size-3" aria-hidden="true" />
-                {task.recurrenceType}
+                {repeatLabel(task)}
+              </span>
+            )}
+            {isCarryForward && (
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-rose-100 bg-rose-50 px-2.5 py-1 text-[11px] font-semibold text-rose-700">
+                <CalendarPlus className="size-3" aria-hidden="true" />
+                {missedOccurrences > 0 ? `${missedOccurrences} open occurrence${missedOccurrences === 1 ? '' : 's'}` : `${daysOpen} day${daysOpen === 1 ? '' : 's'} open`}
               </span>
             )}
             <span className="rounded-full bg-blue-50 border border-blue-100 px-2.5 py-1 text-[11px] font-medium text-blue-600">
@@ -177,6 +412,7 @@ const TaskCard = ({ canManageTasks, deleteTask, member, members, reassignTask, t
               aria-label={`Reassign ${task.title}`}
               className="min-h-8 rounded-lg border border-slate-200 bg-slate-50/80 px-2.5 py-1 text-xs font-medium text-slate-600 outline-none transition focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100"
               disabled={!canManageTasks}
+              onClick={(event) => event.stopPropagation()}
               onChange={(event) => reassignTask(task.id, Number(event.target.value))}
               value={task.assignedTo}
             >
@@ -192,7 +428,10 @@ const TaskCard = ({ canManageTasks, deleteTask, member, members, reassignTask, t
                   ? 'bg-emerald-100 text-emerald-700 border border-emerald-200 hover:bg-emerald-200/70 hover:shadow-sm'
                   : 'bg-gradient-to-r from-indigo-600 to-blue-600 text-white shadow-lg shadow-indigo-500/25 hover:shadow-xl hover:shadow-indigo-500/30 hover:from-indigo-500 hover:to-blue-500',
               )}
-              onClick={() => toggleTaskStatus(task.id)}
+              onClick={(event) => {
+                event.stopPropagation()
+                toggleTaskStatus(task.id)
+              }}
               disabled={!canManageTasks}
               type="button"
             >
@@ -217,10 +456,21 @@ const TaskCard = ({ canManageTasks, deleteTask, member, members, reassignTask, t
 
 interface TaskLaneProps extends TaskCardProps {
   member: FamilyMember
-  tasks: Task[]
+  tasks: ScheduledTask[]
 }
 
-const TaskLane = ({ canManageTasks, deleteTask, member, members, reassignTask, tasks, toggleTaskStatus }: Omit<TaskLaneProps, 'task'>) => {
+const TaskLane = ({
+  canManageTasks,
+  deleteTask,
+  familyTodayIso,
+  familyTimezone,
+  member,
+  members,
+  openTask,
+  reassignTask,
+  tasks,
+  toggleTaskStatus,
+}: Omit<TaskLaneProps, 'task'>) => {
   const { isOver, setNodeRef } = useDroppable({
     id: `member-${member.id}`,
     data: { memberId: member.id },
@@ -273,9 +523,12 @@ const TaskLane = ({ canManageTasks, deleteTask, member, members, reassignTask, t
             <TaskCard
               canManageTasks={canManageTasks}
               deleteTask={deleteTask}
+              familyTodayIso={familyTodayIso}
+              familyTimezone={familyTimezone}
               key={task.id}
               member={member}
               members={members}
+              openTask={openTask}
               reassignTask={reassignTask}
               task={task}
               toggleTaskStatus={toggleTaskStatus}
@@ -295,42 +548,161 @@ const TaskLane = ({ canManageTasks, deleteTask, member, members, reassignTask, t
 }
 
 export const TasksView = ({ store }: { store: FamilyHubStore }) => {
-  const { state, addTask, reassignTask, toggleTaskStatus, deleteTask, loadTaskPage } = store
+  const { state, addTask, updateTask, reassignTask, toggleTaskStatus, deleteTask, loadTaskPage } = store
   const canManageTasks = store.can('manage_tasks')
   const page = store.pagination.tasks
-  const pageTasks = store.paged.tasks ?? state.tasks
-  const [category, setCategory] = useState('all')
-  const [assignee, setAssignee] = useState<number | 'all'>('all')
-  const [status, setStatus] = useState<TaskStatus | 'all'>('all')
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [selectedCategories, setSelectedCategories] = useState<string[]>(() => textListFromSearchParam(searchParams.get('category')))
+  const [selectedAssignees, setSelectedAssignees] = useState<number[]>(() => numberListFromSearchParam(searchParams.get('assignee')))
+  const [selectedStatuses, setSelectedStatuses] = useState<TaskStatus[]>(() => statusesFromSearchParam(searchParams.get('status')))
+  const [selectedDateScopes, setSelectedDateScopes] = useState<TimeScope[]>(() => dateScopesFromSearchParam(searchParams.get('scope')))
+  const ownSearchWritesRef = useRef(new Set<string>())
   const [activeTaskId, setActiveTaskId] = useState<number | null>(null)
+  const [selectedTask, setSelectedTask] = useState<ScheduledTask | null>(null)
+  const [taskEditDraft, setTaskEditDraft] = useState<TaskEditDraft | null>(null)
   const sensors = useSensors(useSensor(PointerSensor), useSensor(KeyboardSensor))
   const [draft, setDraft] = useState<NewTaskInput>({
     title: '',
+    description: '',
     category: 'chore',
     priority: 'medium',
-    dueAt: dateTimeOffsetIso(0, 18).slice(0, 16),
-    assignedTo: state.members[0]?.id ?? 1,
+    dueAt: defaultDueLocalValue(),
+    reminderAt: '',
+    assignedTo: state.members[0]?.id ?? 0,
     recurrenceType: 'none',
+    recurrenceInterval: 1,
+    recurrenceEndAt: '',
   })
 
+  const taskPageStatus = selectedStatuses.length === 1 ? selectedStatuses[0] : 'all'
+
   useEffect(() => {
-    loadTaskPage(0, status)
-  }, [loadTaskPage, status])
+    loadTaskPage(0, taskPageStatus)
+  }, [loadTaskPage, taskPageStatus])
+
+  useEffect(() => {
+    const searchKey = searchParams.toString()
+    if (ownSearchWritesRef.current.delete(searchKey)) {
+      return
+    }
+
+    const nextScopes = dateScopesFromSearchParam(searchParams.get('scope'))
+    const nextStatuses = statusesFromSearchParam(searchParams.get('status'))
+    const nextCategories = textListFromSearchParam(searchParams.get('category'))
+    const nextAssignees = numberListFromSearchParam(searchParams.get('assignee'))
+    setSelectedDateScopes((current) => (selectionsEqual(nextScopes, current) ? current : nextScopes))
+    setSelectedStatuses((current) => (selectionsEqual(nextStatuses, current) ? current : nextStatuses))
+    setSelectedCategories((current) => (selectionsEqual(nextCategories, current) ? current : nextCategories))
+    setSelectedAssignees((current) => (selectionsEqual(nextAssignees, current) ? current : nextAssignees))
+  }, [searchParams])
+
+  useEffect(() => {
+    if (selectedTask) {
+      setTaskEditDraft(taskToEditDraft(selectedTask))
+    } else {
+      setTaskEditDraft(null)
+    }
+  }, [selectedTask])
+
+  const writeArrayParam = (params: URLSearchParams, key: string, values: Array<number | string>) => {
+    if (values.length === 0) {
+      params.delete(key)
+    } else {
+      params.set(key, values.join(','))
+    }
+  }
+
+  useEffect(() => {
+    const params = new URLSearchParams(searchParams)
+    writeArrayParam(params, 'scope', selectedDateScopes)
+    writeArrayParam(params, 'status', selectedStatuses)
+    writeArrayParam(params, 'category', selectedCategories)
+    writeArrayParam(params, 'assignee', selectedAssignees)
+    const nextSearch = params.toString()
+    if (nextSearch !== searchParams.toString()) {
+      ownSearchWritesRef.current.add(nextSearch)
+      setSearchParams(params, { replace: true })
+    }
+  }, [searchParams, selectedAssignees, selectedCategories, selectedDateScopes, selectedStatuses, setSearchParams])
+
+  const updateDateScopes = (nextScopes: TimeScope[]) => setSelectedDateScopes(nextScopes)
+
+  const toggleDateScope = (value: TimeScope) => {
+    setSelectedDateScopes((current) => toggleSelection(current, value))
+  }
+
+  const updateStatuses = (nextStatuses: TaskStatus[]) => setSelectedStatuses(nextStatuses)
+
+  const toggleStatus = (value: TaskStatus) => {
+    setSelectedStatuses((current) => toggleSelection(current, value))
+  }
+
+  const updateCategories = (nextCategories: string[]) => setSelectedCategories(nextCategories)
+
+  const toggleCategory = (value: string) => {
+    setSelectedCategories((current) => toggleSelection(current, value))
+  }
+
+  const updateAssignees = (nextAssignees: number[]) => setSelectedAssignees(nextAssignees)
+
+  const toggleAssignee = (value: number) => {
+    setSelectedAssignees((current) => toggleSelection(current, value))
+  }
+
+  const familyToday = useMemo(() => todayIso(state.family.timezone), [state.family.timezone])
+
+  const dateScopeRanges = useMemo(
+    () =>
+      selectedDateScopes.map((scope) =>
+        scope === 'week'
+          ? {
+              endIso: weekEndIso(familyToday),
+              startIso: weekStartIso(familyToday),
+            }
+          : {
+              endIso: familyToday,
+              startIso: familyToday,
+            },
+      ),
+    [familyToday, selectedDateScopes],
+  )
 
   const categories = useMemo(() => Array.from(new Set(state.tasks.map((task) => task.category))), [state.tasks])
 
   const filteredTasks = useMemo(() => {
-    return pageTasks.filter((task) => {
-      const matchesCategory = category === 'all' || task.category === category
-      const matchesAssignee = assignee === 'all' || task.assignedTo === assignee
-      const matchesStatus = status === 'all' || task.status === status
-      return matchesCategory && matchesAssignee && matchesStatus
-    })
-  }, [assignee, category, pageTasks, status])
+    return state.tasks
+      .filter((task) => {
+        const matchesCategory = selectedCategories.length === 0 || selectedCategories.includes(task.category)
+        const matchesAssignee = selectedAssignees.length === 0 || selectedAssignees.includes(task.assignedTo)
+        const matchesStatus = selectedStatuses.length === 0 || selectedStatuses.includes(task.status)
+        const matchesDate = taskMatchesDateRanges(task, dateScopeRanges)
+        return matchesCategory && matchesAssignee && matchesStatus && matchesDate
+      })
+      .map((task) => {
+        if (dateScopeRanges.length === 0) return task
+        const occurrenceIso = occurrenceInDateRanges(task, dateScopeRanges)
+        return occurrenceIso
+          ? {
+              ...task,
+              anchorDueAt: task.dueAt,
+              dueAt: occurrenceDateTime(task.dueAt, occurrenceIso),
+              reminderAt: occurrenceReminderDateTime(task, occurrenceIso),
+            }
+          : task
+      })
+  }, [dateScopeRanges, selectedAssignees, selectedCategories, selectedStatuses, state.tasks])
+
+  useEffect(() => {
+    if (state.members.length === 0) return
+    const hasAssignedMember = state.members.some((member) => member.id === draft.assignedTo)
+    if (!hasAssignedMember) {
+      setDraft((current) => ({ ...current, assignedTo: state.members[0].id }))
+    }
+  }, [draft.assignedTo, state.members])
 
   const statusOptions = useMemo(
     () => [
-      { value: 'all' as const, label: 'All statuses' },
+      { value: 'all' as const, label: 'All Statuses' },
       ...Object.entries(statusLabel).map(([value, label]) => ({ value: value as TaskStatus, label })),
     ],
     [],
@@ -348,7 +720,7 @@ export const TasksView = ({ store }: { store: FamilyHubStore }) => {
   }, [filteredTasks])
 
   const tasksByMember = useMemo(() => {
-    return state.members.reduce<Record<number, Task[]>>((accumulator, member) => {
+    return state.members.reduce<Record<number, ScheduledTask[]>>((accumulator, member) => {
       accumulator[member.id] = filteredTasks.filter((task) => task.assignedTo === member.id)
       return accumulator
     }, {})
@@ -376,48 +748,145 @@ export const TasksView = ({ store }: { store: FamilyHubStore }) => {
     setActiveTaskId(null)
   }
 
+  const applyReminderLead = (minutes: number) => {
+    if (!draft.dueAt) return
+    const reminderAt = new Date(draft.dueAt)
+    reminderAt.setMinutes(reminderAt.getMinutes() - minutes)
+    setDraft((current) => ({ ...current, reminderAt: toDateTimeLocalValue(reminderAt) }))
+  }
+
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    if (!draft.title.trim()) return
+    if (!draft.title.trim() || state.members.length === 0) return
+    const recurrenceType = draft.recurrenceType ?? 'none'
     addTask({
       ...draft,
       title: draft.title.trim(),
+      category: draft.category.trim() || 'general',
+      description: draft.description?.trim(),
       dueAt: new Date(draft.dueAt).toISOString(),
+      reminderAt: draft.reminderAt ? new Date(draft.reminderAt).toISOString() : null,
+      recurrenceType,
+      recurrenceInterval: recurrenceType === 'none' ? 1 : Math.max(1, Number(draft.recurrenceInterval) || 1),
+      recurrenceEndAt: recurrenceType !== 'none' && draft.recurrenceEndAt ? new Date(draft.recurrenceEndAt).toISOString() : null,
     })
-    setDraft((current) => ({ ...current, title: '' }))
+    setDraft((current) => ({ ...current, title: '', description: '' }))
   }
 
-  const totalActive = state.tasks.filter((t) => t.status !== 'completed' && t.status !== 'cancelled').length
-  const totalCompleted = state.tasks.filter((t) => t.status === 'completed').length
+  const closeTaskDetails = () => {
+    setSelectedTask(null)
+    setTaskEditDraft(null)
+  }
+
+  const handleTaskEditSave = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!selectedTask || !taskEditDraft || !taskEditDraft.title.trim()) return
+    const recurrenceType = taskEditDraft.recurrenceType ?? 'none'
+    const payload: TaskUpdateInput = {
+      title: taskEditDraft.title.trim(),
+      description: taskEditDraft.description?.trim() || '',
+      category: taskEditDraft.category.trim() || 'general',
+      priority: taskEditDraft.priority,
+      status: taskEditDraft.status,
+      assignedTo: taskEditDraft.assignedTo,
+      dueAt: new Date(taskEditDraft.dueAt).toISOString(),
+      reminderAt: taskEditDraft.reminderAt ? new Date(taskEditDraft.reminderAt).toISOString() : null,
+      recurrenceType,
+      recurrenceInterval: recurrenceType === 'none' ? 1 : Math.max(1, Number(taskEditDraft.recurrenceInterval) || 1),
+      recurrenceEndAt: recurrenceType !== 'none' && taskEditDraft.recurrenceEndAt
+        ? new Date(taskEditDraft.recurrenceEndAt).toISOString()
+        : null,
+    }
+    updateTask(selectedTask.id, payload)
+    closeTaskDetails()
+  }
+
+  const totalActive = filteredTasks.filter((t) => t.status !== 'completed' && t.status !== 'cancelled').length
+  const totalCompleted = filteredTasks.filter((t) => t.status === 'completed').length
+  const carryForwardCount = filteredTasks.filter((task) => countOpenOccurrencesBefore(task, familyToday) > 0).length
+  const alertDueCount = filteredTasks.filter((task) => isActiveTask(task) && task.reminderAt && task.reminderAt.slice(0, 10) <= familyToday).length
+  const recurringCount = filteredTasks.filter((task) => task.recurrenceType !== 'none').length
+  const activeThreshold = Math.max(8, state.members.length * 3)
+  const selectedRecurrence = recurrenceOptions.find((option) => option.value === (draft.recurrenceType ?? 'none')) ?? recurrenceOptions[0]
+  const repeatUnitLabel = `${selectedRecurrence.unit}${Number(draft.recurrenceInterval || 1) === 1 ? '' : 's'}`
+  const selectedTaskMember = selectedTask ? state.members.find((member) => member.id === selectedTask.assignedTo) : undefined
+  const selectedTaskMissed = selectedTask ? countOpenOccurrencesBefore(selectedTask, familyToday) : 0
 
   return (
     <div className="grid gap-6">
-      {/* Hero banner */}
-      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-emerald-600 via-teal-600 to-cyan-600 px-6 py-8 text-white shadow-xl shadow-emerald-400/20 sm:px-8">
-        <div className="pointer-events-none absolute inset-0 overflow-hidden">
-          <div className="absolute -right-16 -top-16 size-64 rounded-full bg-white/[0.06] blur-2xl animate-[moonFloat_7s_ease-in-out_infinite]" />
-          <div className="absolute -bottom-20 -left-20 size-72 rounded-full bg-amber-300/[0.07] blur-3xl animate-[moonFloat_9s_ease-in-out_infinite_2s]" />
-          <div className="absolute left-[20%] top-[25%] size-2 rounded-full bg-amber-300/70 animate-[starTwinkle_2s_ease-in-out_infinite]" />
-          <div className="absolute left-[65%] top-[60%] size-1.5 rounded-full bg-white/50 animate-[starTwinkle_2.8s_ease-in-out_infinite_1s]" />
-        </div>
+      <div className="relative overflow-hidden rounded-2xl border-0 bg-gradient-to-r from-violet-600 via-indigo-600 to-blue-600 px-5 py-4 shadow-[0_20px_60px_rgb(139_92_246/0.35)]" style={{ backgroundSize: '200% 200%', animation: 'gradientShift 6s ease infinite' }}>
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_60%_40%_at_70%_-10%,rgb(255_255_255/0.12),transparent)]" />
         <div className="relative flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center gap-4">
-            <div className="flex size-12 items-center justify-center rounded-2xl bg-white/15 shadow-lg backdrop-blur-sm">
-              <ClipboardList className="size-6" aria-hidden="true" />
-            </div>
+          <div className="flex items-center gap-3">
+            <span className="flex size-11 items-center justify-center rounded-xl bg-white/15 text-white backdrop-blur-sm">
+              <ClipboardList className="size-5" aria-hidden="true" />
+            </span>
             <div>
-              <h2 className="text-2xl font-bold tracking-tight">Tasks & Reminders</h2>
-              <p className="mt-0.5 text-sm text-emerald-100">Manage assignments, track progress, and stay on schedule</p>
+              <h2 className="text-2xl font-bold tracking-tight text-white">Tasks & Reminders</h2>
+              <p className="mt-0.5 text-sm text-white/75">{formatCompactDate(familyToday)} family task queue</p>
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
-            <div className="flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-3.5 py-1.5 backdrop-blur-sm">
-              <div className="size-2 rounded-full bg-amber-300 animate-[starTwinkle_2s_ease-in-out_infinite]" />
-              <span className="text-xs font-semibold text-white/90">{totalActive} active</span>
+            <Badge className="border-white/20 bg-white/15 text-white">{totalActive}/{activeThreshold} active</Badge>
+            <Badge className="border-white/20 bg-white/15 text-white">{totalCompleted} completed</Badge>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="kpi-card p-5" style={{ '--kpi-accent': '99 102 241', '--kpi-glow': 'rgb(99 102 241 / 0.06)', '--kpi-shadow': 'rgb(99 102 241 / 0.10)' } as React.CSSProperties}>
+          <div className="kpi-shimmer" />
+          <div className="kpi-glow-line" />
+          <div className="relative flex items-center gap-4">
+            <div className="kpi-icon flex size-12 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500 to-blue-600 shadow-lg shadow-indigo-500/25">
+              <ClipboardList className="size-5 text-white" aria-hidden="true" />
             </div>
-            <div className="flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-3.5 py-1.5 backdrop-blur-sm">
-              <CheckCircle2 className="size-3.5 text-emerald-200" />
-              <span className="text-xs font-semibold text-white/90">{totalCompleted} done</span>
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Active load</p>
+              <p className="kpi-value mt-0.5 text-2xl font-extrabold text-slate-900">{filteredTasks.filter(isActiveTask).length}</p>
+              <p className="mt-0.5 text-[11px] text-slate-400">Visible in this view</p>
+            </div>
+          </div>
+        </div>
+        <div className="kpi-card p-5" style={{ '--kpi-accent': '244 63 94', '--kpi-glow': 'rgb(244 63 94 / 0.06)', '--kpi-shadow': 'rgb(244 63 94 / 0.10)' } as React.CSSProperties}>
+          <div className="kpi-shimmer" />
+          <div className="kpi-glow-line" />
+          <div className="relative flex items-center gap-4">
+            <div className="kpi-icon flex size-12 items-center justify-center rounded-2xl bg-gradient-to-br from-rose-500 to-pink-600 shadow-lg shadow-rose-500/25">
+              <CalendarPlus className="size-5 text-white" aria-hidden="true" />
+            </div>
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Carry-forward</p>
+              <p className="kpi-value mt-0.5 text-2xl font-extrabold text-slate-900">{carryForwardCount}</p>
+              <p className="mt-0.5 text-[11px] text-slate-400">Open past occurrences</p>
+            </div>
+          </div>
+        </div>
+        <div className="kpi-card p-5" style={{ '--kpi-accent': '245 158 11', '--kpi-glow': 'rgb(245 158 11 / 0.06)', '--kpi-shadow': 'rgb(245 158 11 / 0.10)' } as React.CSSProperties}>
+          <div className="kpi-shimmer" />
+          <div className="kpi-glow-line" />
+          <div className="relative flex items-center gap-4">
+            <div className="kpi-icon flex size-12 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-500 to-orange-600 shadow-lg shadow-amber-500/25">
+              <AlertTriangle className="size-5 text-white" aria-hidden="true" />
+            </div>
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Alerts due</p>
+              <p className="kpi-value mt-0.5 text-2xl font-extrabold text-slate-900">{alertDueCount}</p>
+              <p className="mt-0.5 text-[11px] text-slate-400">Reminder times reached</p>
+            </div>
+          </div>
+        </div>
+        <div className="kpi-card p-5" style={{ '--kpi-accent': '139 92 246', '--kpi-glow': 'rgb(139 92 246 / 0.06)', '--kpi-shadow': 'rgb(139 92 246 / 0.10)' } as React.CSSProperties}>
+          <div className="kpi-shimmer" />
+          <div className="kpi-glow-line" />
+          <div className="relative flex items-center gap-4">
+            <div className="kpi-icon flex size-12 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-500 to-purple-600 shadow-lg shadow-violet-500/25">
+              <RotateCcw className="size-5 text-white" aria-hidden="true" />
+            </div>
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Recurring</p>
+              <p className="kpi-value mt-0.5 text-2xl font-extrabold text-slate-900">{recurringCount}</p>
+              <p className="mt-0.5 text-[11px] text-slate-400">Repeating rules in view</p>
             </div>
           </div>
         </div>
@@ -445,29 +914,80 @@ export const TasksView = ({ store }: { store: FamilyHubStore }) => {
 
               <div className="grid gap-4">
                 <div className="grid gap-2">
+                  <p className="text-[11px] font-bold uppercase text-slate-400">Date</p>
+                  <div className="flex flex-wrap gap-2">
+                    {[
+                      { value: 'all' as const, label: 'All dates' },
+                      { value: 'today' as const, label: 'Today' },
+                      { value: 'week' as const, label: 'This week' },
+                    ].map((option) => {
+                      const isActive = option.value === 'all' ? selectedDateScopes.length === 0 : selectedDateScopes.includes(option.value)
+                      return (
+                        <button
+                          aria-pressed={isActive}
+                          className={chipClass(isActive)}
+                          data-testid={`task-filter-date-${option.value}`}
+                          key={option.value}
+	                          onClick={() =>
+	                            option.value === 'all'
+	                              ? updateDateScopes([])
+	                              : toggleDateScope(option.value)
+	                          }
+                          type="button"
+                        >
+                          {option.label}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+
+                <div className="grid gap-2">
                   <p className="text-[11px] font-bold uppercase text-slate-400">Status</p>
                   <div className="flex flex-wrap gap-2">
-                    {statusOptions.map((option) => (
-                      <button
-                        className={chipClass(status === option.value)}
-                        key={option.value}
-                        onClick={() => setStatus(option.value)}
-                        type="button"
-                      >
-                        {option.label}
-                      </button>
-                    ))}
+                    {statusOptions.map((option) => {
+                      const isActive = option.value === 'all' ? selectedStatuses.length === 0 : selectedStatuses.includes(option.value)
+                      return (
+                        <button
+                          aria-pressed={isActive}
+                          className={chipClass(isActive)}
+                          data-testid={`task-filter-status-${option.value}`}
+                          key={option.value}
+	                          onClick={() =>
+	                            option.value === 'all'
+	                              ? updateStatuses([])
+	                              : toggleStatus(option.value)
+	                          }
+                          type="button"
+                        >
+                          {option.label}
+                        </button>
+                      )
+                    })}
                   </div>
                 </div>
 
                 <div className="grid gap-2">
                   <p className="text-[11px] font-bold uppercase text-slate-400">Category</p>
                   <div className="flex flex-wrap gap-2">
-                    <button className={chipClass(category === 'all')} onClick={() => setCategory('all')} type="button">
-                      All categories
+                    <button
+                      aria-pressed={selectedCategories.length === 0}
+                      className={chipClass(selectedCategories.length === 0)}
+                      data-testid="task-filter-category-all"
+                      onClick={() => updateCategories([])}
+                      type="button"
+                    >
+                      All Catagories
                     </button>
                     {categories.map((item) => (
-                      <button className={chipClass(category === item)} key={item} onClick={() => setCategory(item)} type="button">
+                      <button
+                        aria-pressed={selectedCategories.includes(item)}
+                        className={chipClass(selectedCategories.includes(item))}
+                        data-testid={`task-filter-category-${item}`}
+                        key={item}
+                        onClick={() => toggleCategory(item)}
+                        type="button"
+                      >
                         {item}
                       </button>
                     ))}
@@ -477,15 +997,23 @@ export const TasksView = ({ store }: { store: FamilyHubStore }) => {
                 <div className="grid gap-2">
                   <p className="text-[11px] font-bold uppercase text-slate-400">Assignee</p>
                   <div className="flex flex-wrap gap-2">
-                    <button className={chipClass(assignee === 'all')} onClick={() => setAssignee('all')} type="button">
+                    <button
+                      aria-pressed={selectedAssignees.length === 0}
+                      className={chipClass(selectedAssignees.length === 0)}
+                      data-testid="task-filter-assignee-all"
+                      onClick={() => updateAssignees([])}
+                      type="button"
+                    >
                       <UserRound className="size-4" aria-hidden="true" />
                       Everyone
                     </button>
                     {state.members.map((member) => (
                       <button
-                        className={chipClass(assignee === member.id)}
+                        aria-pressed={selectedAssignees.includes(member.id)}
+                        className={chipClass(selectedAssignees.includes(member.id))}
+                        data-testid={`task-filter-assignee-${member.id}`}
                         key={member.id}
-                        onClick={() => setAssignee(member.id)}
+                        onClick={() => toggleAssignee(member.id)}
                         type="button"
                       >
                         <Avatar className="size-5 text-[10px]" colorClass={member.colorClass} initial={member.initial} label={member.name} />
@@ -514,9 +1042,12 @@ export const TasksView = ({ store }: { store: FamilyHubStore }) => {
                     <TaskLane
                       canManageTasks={canManageTasks}
                       deleteTask={deleteTask}
+                      familyTodayIso={familyToday}
+                      familyTimezone={state.family.timezone}
                       key={member.id}
                       member={member}
                       members={state.members}
+                      openTask={setSelectedTask}
                       reassignTask={reassignTask}
                       tasks={tasksByMember[member.id] ?? []}
                       toggleTaskStatus={toggleTaskStatus}
@@ -547,14 +1078,14 @@ export const TasksView = ({ store }: { store: FamilyHubStore }) => {
                 <div className="flex items-center gap-2">
                   <Button
                     disabled={page.offset === 0 || page.isLoading}
-                    onClick={() => loadTaskPage(page.offset - page.limit, status)}
+                    onClick={() => loadTaskPage(page.offset - page.limit, taskPageStatus)}
                     variant="secondary"
                   >
                     Previous
                   </Button>
                   <Button
                     disabled={!page.hasNext || page.isLoading}
-                    onClick={() => loadTaskPage(page.offset + page.limit, status)}
+                    onClick={() => loadTaskPage(page.offset + page.limit, taskPageStatus)}
                     variant="secondary"
                   >
                     Next
@@ -575,7 +1106,7 @@ export const TasksView = ({ store }: { store: FamilyHubStore }) => {
             </CardHeader>
             <CardContent>
               <form className="grid gap-3.5" onSubmit={handleSubmit}>
-                <fieldset className="m-0 grid gap-3.5 border-0 p-0" disabled={!canManageTasks}>
+	                <fieldset className="m-0 grid gap-3.5 border-0 p-0" disabled={!canManageTasks || state.members.length === 0}>
                   <FormField label="Title">
                     <input
                       className={inputClass}
@@ -584,16 +1115,24 @@ export const TasksView = ({ store }: { store: FamilyHubStore }) => {
                       value={draft.title}
                     />
                   </FormField>
-                  <FormField label="Category">
-                    <input
-                      className={inputClass}
-                      onChange={(event) => setDraft((current) => ({ ...current, category: event.target.value }))}
-                      value={draft.category}
+                  <FormField label="Note">
+                    <textarea
+                      className={cn(inputClass, 'min-h-20 resize-y leading-relaxed')}
+                      onChange={(event) => setDraft((current) => ({ ...current, description: event.target.value }))}
+                      placeholder="Short instruction, carry-forward note, or alert context"
+                      value={draft.description ?? ''}
                     />
                   </FormField>
                   <div className="grid grid-cols-2 gap-3">
+                    <FormField label="Category">
+                      <input
+                        className={inputClass}
+                        onChange={(event) => setDraft((current) => ({ ...current, category: event.target.value }))}
+                        value={draft.category}
+                      />
+                    </FormField>
                     <FormField label="Priority">
-                      <select
+	                      <select
                         className={inputClass}
                         onChange={(event) => setDraft((current) => ({ ...current, priority: event.target.value as Priority }))}
                         value={draft.priority}
@@ -603,41 +1142,99 @@ export const TasksView = ({ store }: { store: FamilyHubStore }) => {
                         <option value="high">High</option>
                       </select>
                     </FormField>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 [&_input]:min-w-0">
                     <FormField label="Assign to">
                       <select
                         className={inputClass}
                         onChange={(event) => setDraft((current) => ({ ...current, assignedTo: Number(event.target.value) }))}
                         value={draft.assignedTo}
-                      >
-                        {state.members.map((member) => (
-                          <option key={member.id} value={member.id}>{member.name}</option>
-                        ))}
-                      </select>
+	                      >
+	                        {state.members.length === 0 && <option value={0}>No active members</option>}
+	                        {state.members.map((member) => (
+	                          <option key={member.id} value={member.id}>{member.name}</option>
+	                        ))}
+	                      </select>
+                    </FormField>
+                    <FormField label="Due / end">
+                      <input
+                        className={cn(inputClass, 'min-w-0')}
+                        onChange={(event) => setDraft((current) => ({ ...current, dueAt: event.target.value }))}
+                        type="datetime-local"
+                        value={draft.dueAt}
+                      />
                     </FormField>
                   </div>
-                  <FormField label="Due date">
-                    <input
-                      className={inputClass}
-                      onChange={(event) => setDraft((current) => ({ ...current, dueAt: event.target.value }))}
-                      type="datetime-local"
-                      value={draft.dueAt}
-                    />
-                  </FormField>
-                  <FormField label="Recurrence">
-                    <select
-                      className={inputClass}
-                      onChange={(event) =>
-                        setDraft((current) => ({ ...current, recurrenceType: event.target.value as RecurrenceType }))
-                      }
-                      value={draft.recurrenceType ?? 'none'}
-                    >
-                      {recurrenceOptions.map((option) => (
-                        <option key={option} value={option}>
-                          {option === 'none' ? 'None (one-time)' : option}
-                        </option>
+                  <div className="rounded-2xl border border-slate-100 bg-slate-50/70 p-3">
+                    <FormField label="Reminder time">
+                      <input
+                        className={inputClass}
+                        onChange={(event) => setDraft((current) => ({ ...current, reminderAt: event.target.value }))}
+                        type="datetime-local"
+                        value={draft.reminderAt ?? ''}
+                      />
+                    </FormField>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {reminderLeadOptions.map((option) => (
+                        <button
+                          className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-slate-600 transition hover:border-indigo-200 hover:text-indigo-700"
+                          key={option.minutes}
+                          onClick={() => applyReminderLead(option.minutes)}
+                          type="button"
+                        >
+                          {option.label}
+                        </button>
                       ))}
-                    </select>
-                  </FormField>
+                    </div>
+                  </div>
+                  <div className="rounded-2xl border border-violet-100 bg-violet-50/50 p-3">
+                    <div className="grid grid-cols-[minmax(0,1fr)_96px] gap-3">
+                      <FormField label="Repeat">
+                        <select
+                          className={inputClass}
+                          onChange={(event) =>
+                            setDraft((current) => ({
+                              ...current,
+                              recurrenceType: event.target.value as RecurrenceType,
+                              recurrenceInterval: event.target.value === 'none' ? 1 : current.recurrenceInterval || 1,
+                              recurrenceEndAt: event.target.value === 'none' ? null : current.recurrenceEndAt,
+                            }))
+                          }
+                          value={draft.recurrenceType ?? 'none'}
+                        >
+                          {recurrenceOptions.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </FormField>
+                      <FormField label="Every">
+                        <input
+                          className={inputClass}
+                          disabled={(draft.recurrenceType ?? 'none') === 'none'}
+                          min={1}
+                          onChange={(event) =>
+                            setDraft((current) => ({ ...current, recurrenceInterval: Number(event.target.value) || 1 }))
+                          }
+                          type="number"
+                          value={draft.recurrenceInterval ?? 1}
+                        />
+                      </FormField>
+                    </div>
+                    <div className="mt-2 grid grid-cols-[minmax(0,1fr)_auto] items-end gap-3">
+                      <FormField label="Repeat ends">
+                        <input
+                          className={inputClass}
+                          disabled={(draft.recurrenceType ?? 'none') === 'none'}
+                          onChange={(event) => setDraft((current) => ({ ...current, recurrenceEndAt: event.target.value }))}
+                          type="datetime-local"
+                          value={draft.recurrenceEndAt ?? ''}
+                        />
+                      </FormField>
+                      <span className="pb-2 text-[11px] font-semibold text-violet-600">{repeatUnitLabel}</span>
+                    </div>
+                  </div>
                   <Button type="submit" className="mt-1">
                     <Plus className="size-4" aria-hidden="true" />
                     Add task
@@ -675,7 +1272,7 @@ export const TasksView = ({ store }: { store: FamilyHubStore }) => {
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
                           <p className="truncate text-sm font-bold text-slate-900">{task.title}</p>
-                          <p className="mt-1 text-xs text-slate-400">{member?.name ?? 'Unassigned'} - {formatDueLabel(task.dueAt)}</p>
+                          <p className="mt-1 text-xs text-slate-400">{member?.name ?? 'Unassigned'} - {formatDueLabel(task.dueAt, state.family.timezone)}</p>
                         </div>
                         <Badge tone={priorityTone[task.priority]}>{task.priority}</Badge>
                       </div>
@@ -715,6 +1312,222 @@ export const TasksView = ({ store }: { store: FamilyHubStore }) => {
           </Card>
         </aside>
       </div>
+
+      {selectedTask && (
+        <div
+          className="fixed inset-0 z-50 grid place-items-center bg-slate-950/45 p-4 backdrop-blur-sm"
+          onClick={closeTaskDetails}
+        >
+          <section
+            aria-modal="true"
+            className="max-h-[90vh] w-full max-w-2xl overflow-auto rounded-2xl border border-slate-200 bg-white shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+            role="dialog"
+          >
+            <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-5 py-4">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge tone={priorityTone[selectedTask.priority]}>{selectedTask.priority}</Badge>
+                  <Badge tone={selectedTask.status === 'completed' ? 'green' : 'indigo'}>{statusLabel[selectedTask.status]}</Badge>
+                  {selectedTaskMissed > 0 && <Badge tone="rose">{selectedTaskMissed} carried</Badge>}
+                </div>
+                <h3 className="mt-2 text-xl font-bold text-slate-950">{selectedTask.title}</h3>
+                <p className="mt-1 text-sm text-slate-500">{selectedTask.description || 'No note added'}</p>
+              </div>
+              <button
+                className="flex size-9 shrink-0 items-center justify-center rounded-xl border border-slate-200 text-slate-500 transition hover:bg-slate-50"
+                onClick={closeTaskDetails}
+                type="button"
+              >
+                <span className="sr-only">Close task details</span>
+                <X className="size-4" aria-hidden="true" />
+              </button>
+            </div>
+
+            <div className="grid gap-4 px-5 py-5 sm:grid-cols-2">
+              <div className="rounded-2xl border border-slate-100 bg-slate-50/70 p-4">
+                <p className="text-xs font-bold uppercase text-slate-400">Assigned alert</p>
+                <div className="mt-3 flex items-center gap-3">
+                  {selectedTaskMember && (
+                    <Avatar
+                      className="size-10"
+                      colorClass={selectedTaskMember.colorClass}
+                      initial={selectedTaskMember.initial}
+                      label={selectedTaskMember.name}
+                    />
+                  )}
+                  <div>
+                    <p className="text-sm font-bold text-slate-900">{selectedTaskMember?.name ?? 'Unassigned'}</p>
+                    <p className="text-xs text-slate-500">{reminderStateLabel(selectedTask, familyToday, state.family.timezone)}</p>
+                  </div>
+                </div>
+              </div>
+              <div className="rounded-2xl border border-slate-100 bg-slate-50/70 p-4">
+                <p className="text-xs font-bold uppercase text-slate-400">Due / end</p>
+                <p className="mt-3 text-sm font-bold text-slate-900">{formatDueLabel(selectedTask.dueAt, state.family.timezone)}</p>
+                <p className="mt-1 text-xs text-slate-500">{selectedTask.category}</p>
+              </div>
+              <div className="rounded-2xl border border-violet-100 bg-violet-50/60 p-4">
+                <p className="text-xs font-bold uppercase text-violet-500">Repeat rule</p>
+                <p className="mt-3 text-sm font-bold text-violet-800">{repeatLabel(selectedTask)}</p>
+                <p className="mt-1 text-xs text-violet-600">
+                  {selectedTask.anchorDueAt ? `Anchored from ${formatCompactDate(selectedTask.anchorDueAt.slice(0, 10))}` : 'Single scheduled date'}
+                </p>
+              </div>
+              <div className="rounded-2xl border border-rose-100 bg-rose-50/60 p-4">
+                <p className="text-xs font-bold uppercase text-rose-500">Open window</p>
+                <p className="mt-3 text-sm font-bold text-rose-800">
+                  {selectedTaskMissed > 0 ? `${selectedTaskMissed} prior occurrence${selectedTaskMissed === 1 ? '' : 's'} still open` : 'No prior open occurrence'}
+                </p>
+                <p className="mt-1 text-xs text-rose-600">Status remains visible until completed or cancelled</p>
+              </div>
+            </div>
+
+            {taskEditDraft && (
+              <form className="border-t border-slate-100 px-5 py-5" onSubmit={handleTaskEditSave}>
+                <fieldset className="m-0 grid gap-4 border-0 p-0" disabled={!canManageTasks || state.members.length === 0}>
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-bold text-slate-950">Edit task rule</p>
+                      <p className="mt-0.5 text-xs text-slate-400">Changes update the task and its future recurrence matching this rule.</p>
+                    </div>
+                    <Button type="submit">
+                      <Save className="size-4" aria-hidden="true" />
+                      Save task
+                    </Button>
+                  </div>
+
+                  <div className="grid gap-3 sm:grid-cols-[1.4fr_0.8fr_0.8fr]">
+                    <FormField label="Title">
+                      <input
+                        className={inputClass}
+                        onChange={(event) => setTaskEditDraft((current) => current ? { ...current, title: event.target.value } : current)}
+                        value={taskEditDraft.title}
+                      />
+                    </FormField>
+                    <FormField label="Status">
+                      <select
+                        className={inputClass}
+                        onChange={(event) => setTaskEditDraft((current) => current ? { ...current, status: event.target.value as TaskStatus } : current)}
+                        value={taskEditDraft.status}
+                      >
+                        {Object.entries(statusLabel).map(([value, label]) => (
+                          <option key={value} value={value}>{label}</option>
+                        ))}
+                      </select>
+                    </FormField>
+                    <FormField label="Priority">
+                      <select
+                        className={inputClass}
+                        onChange={(event) => setTaskEditDraft((current) => current ? { ...current, priority: event.target.value as Priority } : current)}
+                        value={taskEditDraft.priority}
+                      >
+                        <option value="low">Low</option>
+                        <option value="medium">Medium</option>
+                        <option value="high">High</option>
+                      </select>
+                    </FormField>
+                  </div>
+
+                  <FormField label="Note">
+                    <textarea
+                      className={cn(inputClass, 'min-h-20 resize-y leading-relaxed')}
+                      onChange={(event) => setTaskEditDraft((current) => current ? { ...current, description: event.target.value } : current)}
+                      value={taskEditDraft.description ?? ''}
+                    />
+                  </FormField>
+
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <FormField label="Category">
+                      <input
+                        className={inputClass}
+                        onChange={(event) => setTaskEditDraft((current) => current ? { ...current, category: event.target.value } : current)}
+                        value={taskEditDraft.category}
+                      />
+                    </FormField>
+                    <FormField label="Assign to">
+                      <select
+                        className={inputClass}
+                        onChange={(event) => setTaskEditDraft((current) => current ? { ...current, assignedTo: Number(event.target.value) } : current)}
+                        value={taskEditDraft.assignedTo}
+                      >
+                        {state.members.map((member) => (
+                          <option key={member.id} value={member.id}>{member.name}</option>
+                        ))}
+                      </select>
+                    </FormField>
+                  </div>
+
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <FormField label="Due / end">
+                      <input
+                        className={inputClass}
+                        onChange={(event) => setTaskEditDraft((current) => current ? { ...current, dueAt: event.target.value } : current)}
+                        type="datetime-local"
+                        value={taskEditDraft.dueAt}
+                      />
+                    </FormField>
+                    <FormField label="Reminder time">
+                      <input
+                        className={inputClass}
+                        onChange={(event) => setTaskEditDraft((current) => current ? { ...current, reminderAt: event.target.value } : current)}
+                        type="datetime-local"
+                        value={taskEditDraft.reminderAt ?? ''}
+                      />
+                    </FormField>
+                  </div>
+
+                  <div className="grid gap-3 rounded-2xl border border-violet-100 bg-violet-50/50 p-3 sm:grid-cols-[1fr_120px_1fr]">
+                    <FormField label="Repeat">
+                      <select
+                        className={inputClass}
+                        data-testid="task-edit-repeat"
+                        onChange={(event) =>
+                          setTaskEditDraft((current) =>
+                            current
+                              ? {
+                                  ...current,
+                                  recurrenceType: event.target.value as RecurrenceType,
+                                  recurrenceInterval: event.target.value === 'none' ? 1 : current.recurrenceInterval || 1,
+                                  recurrenceEndAt: event.target.value === 'none' ? null : current.recurrenceEndAt,
+                                }
+                              : current,
+                          )
+                        }
+                        value={taskEditDraft.recurrenceType ?? 'none'}
+                      >
+                        {recurrenceOptions.map((option) => (
+                          <option key={option.value} value={option.value}>{option.label}</option>
+                        ))}
+                      </select>
+                    </FormField>
+                    <FormField label="Every">
+                      <input
+                        className={inputClass}
+                        data-testid="task-edit-interval"
+                        disabled={(taskEditDraft.recurrenceType ?? 'none') === 'none'}
+                        min={1}
+                        onChange={(event) => setTaskEditDraft((current) => current ? { ...current, recurrenceInterval: Number(event.target.value) || 1 } : current)}
+                        type="number"
+                        value={taskEditDraft.recurrenceInterval ?? 1}
+                      />
+                    </FormField>
+                    <FormField label="Repeat ends">
+                      <input
+                        className={inputClass}
+                        disabled={(taskEditDraft.recurrenceType ?? 'none') === 'none'}
+                        onChange={(event) => setTaskEditDraft((current) => current ? { ...current, recurrenceEndAt: event.target.value } : current)}
+                        type="datetime-local"
+                        value={taskEditDraft.recurrenceEndAt ?? ''}
+                      />
+                    </FormField>
+                  </div>
+                </fieldset>
+              </form>
+            )}
+          </section>
+        </div>
+      )}
     </div>
   )
 }

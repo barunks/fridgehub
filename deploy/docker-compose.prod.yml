@@ -1,0 +1,211 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# FamilyHub — Production Docker Compose (VastSpace VPS)
+#
+# Usage:
+#   cp deploy/.env.production .env   # fill in all values first
+#   docker compose -f deploy/docker-compose.prod.yml up -d
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  # ── MySQL 8 ────────────────────────────────────────────────────────────────
+  mysql:
+    image: mysql:8.0
+    container_name: familyhub-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-familyhub_db}
+      MYSQL_USER: ${MYSQL_USER:-familyhub_user}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?set MYSQL_PASSWORD}
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ../backend/sql/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+    command: >
+      --default-authentication-plugin=mysql_native_password
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+      --innodb-buffer-pool-size=256M
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -p$${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - internal
+
+  # ── Redis 7 ────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: familyhub-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 128mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - internal
+
+  # ── DB Migrations (runs once, then exits) ──────────────────────────────────
+  backend_migrate:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: familyhub-migrate
+    restart: "no"
+    command: alembic upgrade head
+    environment:
+      DATABASE_URL: mysql+mysqlconnector://${MYSQL_USER:-familyhub_user}:${MYSQL_PASSWORD}@mysql:3306/${MYSQL_DATABASE:-familyhub_db}
+      SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY}
+      ENVIRONMENT: production
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - internal
+
+  # ── FastAPI Backend ────────────────────────────────────────────────────────
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: familyhub-backend
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: mysql+mysqlconnector://${MYSQL_USER:-familyhub_user}:${MYSQL_PASSWORD}@mysql:3306/${MYSQL_DATABASE:-familyhub_db}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY}
+      ENVIRONMENT: production
+      APP_DEBUG: "false"
+      CORS_ORIGINS: ${CORS_ORIGINS:?set CORS_ORIGINS}
+      AUTH_COOKIE_SECURE: "true"
+      AUTH_COOKIE_SAMESITE: ${AUTH_COOKIE_SAMESITE:-lax}
+      SEED_ON_STARTUP: "false"
+      RUN_MIGRATIONS_ON_STARTUP: "false"
+      REQUIRE_DEVICE_ID_ON_LOGIN: ${REQUIRE_DEVICE_ID_ON_LOGIN:-true}
+      CACHE_ENABLED: ${CACHE_ENABLED:-true}
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
+      REFRESH_TOKEN_EXPIRE_DAYS: ${REFRESH_TOKEN_EXPIRE_DAYS:-7}
+    depends_on:
+      backend_migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+    networks:
+      - internal
+
+  # ── Celery Worker ──────────────────────────────────────────────────────────
+  celery_worker:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: familyhub-celery-worker
+    restart: unless-stopped
+    command: celery -A app.tasks.celery_app worker --loglevel=info --concurrency=2
+    environment:
+      DATABASE_URL: mysql+mysqlconnector://${MYSQL_USER:-familyhub_user}:${MYSQL_PASSWORD}@mysql:3306/${MYSQL_DATABASE:-familyhub_db}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/1}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/2}
+      SECRET_KEY: ${SECRET_KEY}
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - internal
+
+  # ── Celery Beat (scheduler) ────────────────────────────────────────────────
+  celery_beat:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: familyhub-celery-beat
+    restart: unless-stopped
+    command: celery -A app.tasks.celery_app beat --loglevel=info
+    environment:
+      DATABASE_URL: mysql+mysqlconnector://${MYSQL_USER:-familyhub_user}:${MYSQL_PASSWORD}@mysql:3306/${MYSQL_DATABASE:-familyhub_db}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/1}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/2}
+      SECRET_KEY: ${SECRET_KEY}
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - internal
+
+  # ── React Frontend (Nginx) ─────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: ""
+    container_name: familyhub-frontend
+    restart: unless-stopped
+    networks:
+      - internal
+
+  # ── Nginx Reverse Proxy + SSL ──────────────────────────────────────────────
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: familyhub-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - certbot_www:/var/www/certbot:ro
+      - certbot_certs:/etc/letsencrypt:ro
+      - nginx_logs:/var/log/nginx
+    depends_on:
+      - frontend
+      - backend
+    networks:
+      - internal
+      - external
+
+  # ── Certbot (SSL certificate manager) ─────────────────────────────────────
+  certbot:
+    image: certbot/certbot:latest
+    container_name: familyhub-certbot
+    volumes:
+      - certbot_www:/var/www/certbot
+      - certbot_certs:/etc/letsencrypt
+    # Run manually: docker compose run --rm certbot certonly ...
+    # Auto-renewal handled by deploy/renew-ssl.sh cron
+    entrypoint: /bin/sh -c "trap exit TERM; while :; do certbot renew --quiet --webroot -w /var/www/certbot; sleep 12h & wait $${!}; done"
+    networks:
+      - external
+
+volumes:
+  mysql_data:
+    driver: local
+  redis_data:
+    driver: local
+  certbot_www:
+    driver: local
+  certbot_certs:
+    driver: local
+  nginx_logs:
+    driver: local
+
+networks:
+  internal:
+    driver: bridge
+    internal: true
+  external:
+    driver: bridge

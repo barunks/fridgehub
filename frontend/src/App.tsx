@@ -18,7 +18,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { useFamilyHub } from '@/hooks/useFamilyHub'
 import { useTheme } from '@/hooks/useTheme'
 import { viewForPath, viewPaths } from '@/navigation'
-import type { ViewKey } from '@/types/familyHub'
+import type { ScopedNavigationOptions, ViewKey } from '@/types/familyHub'
 
 const App = () => {
   const auth = useAuth()
@@ -28,8 +28,9 @@ const App = () => {
   const navigate = useNavigate()
   const activeView = viewForPath(location.pathname)
 
-  const navigateTo = (view: ViewKey) => {
-    navigate(viewPaths[view])
+  const navigateTo = (view: ViewKey, options?: ScopedNavigationOptions) => {
+    const query = options?.scope ? `?scope=${options.scope}` : ''
+    navigate(`${viewPaths[view]}${query}`)
   }
 
   if (!auth.isAuthenticated) {

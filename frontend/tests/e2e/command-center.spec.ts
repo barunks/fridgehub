@@ -1,11 +1,12 @@
 import { expect, test } from '@playwright/test'
 
 const signIn = async (page: import('@playwright/test').Page, path = '/') => {
+  const deviceId = `familyhub-e2e-device-${test.info().parallelIndex}`
   await page.goto(path)
-  await page.evaluate(() => {
-    localStorage.setItem('familyhub-device-id', 'familyhub-e2e-shared-device')
+  await page.evaluate((id) => {
+    localStorage.setItem('familyhub-device-id', id)
     localStorage.setItem('familyhub-device-name', 'Playwright E2E Browser')
-  })
+  }, deviceId)
   await page.getByLabel('Username').fill('meera')
   await page.getByLabel('Password').fill('familyhub')
   await page.getByRole('button', { name: /^Sign in$/i }).click()
@@ -35,7 +36,7 @@ test.describe('Command Center', () => {
   test('members tab shows family members', async ({ page }) => {
     await signIn(page, '/command-center')
     await expect(page.getByText(/Family Members/i)).toBeVisible()
-    await expect(page.getByText('Meera', { exact: true })).toBeVisible()
+    await expect(page.getByRole('paragraph').filter({ hasText: /^Meera$/ })).toBeVisible()
   })
 
   test('contacts tab shows emergency contacts', async ({ page }) => {
@@ -62,7 +63,7 @@ test.describe('Command Center', () => {
     await page.getByRole('button', { name: /Tasks/i }).click()
     await expect(page.getByText(/Tasks/i).first()).toBeVisible()
     // Status filter dropdown should be present
-    await expect(page.getByRole('combobox')).toBeVisible()
+    await expect(page.getByRole('combobox', { name: /Task status filter/i })).toBeVisible()
   })
 
   test('security tab shows change password form', async ({ page }) => {
@@ -105,7 +106,7 @@ test.describe('Per-Member Meal Plans', () => {
     await expect(page.getByText(/Per-Member Meal Plans/i)).toBeVisible()
     await expect(page.getByRole('button', { name: /Generate for all members/i })).toBeVisible()
     // Should show member cards
-    await expect(page.getByText('Meera', { exact: true })).toBeVisible()
+    await expect(page.getByRole('paragraph').filter({ hasText: /^Meera$/ })).toBeVisible()
   })
 
   test('clicking a member in meal plans tab shows their grid', async ({ page }) => {
