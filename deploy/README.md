@@ -137,6 +137,28 @@ This pulls the latest code, rebuilds images, runs migrations, and restarts servi
 
 ---
 
+## Database Rename (FamilyHub → FridgeHub)
+
+If you have an existing installation with the old `familyhub_db` database, run the rename script:
+
+```bash
+# Local SQLite (dev)
+./scripts/rename-db.sh --sqlite
+
+# Local MySQL
+./scripts/rename-db.sh --mysql
+
+# MySQL inside Docker Compose
+./scripts/rename-db.sh --docker
+
+# Production VPS (reads REMOTE_HOST + MYSQL_ROOT_PASSWORD from .env)
+./scripts/rename-db.sh --production
+```
+
+The script handles: creating the new DB, moving all tables, dropping the old DB, renaming the user, and re-granting privileges.
+
+---
+
 ## Common Commands
 
 ```bash
