@@ -33,7 +33,7 @@ export const DemoHero = () => (
         </div>
 
         <h1 className="text-4xl font-extrabold tracking-tight sm:text-5xl">
-          <span className="bg-gradient-to-r from-amber-200 via-yellow-200 to-teal-200 bg-clip-text text-transparent">FamilyHub</span>
+          <span className="bg-gradient-to-r from-amber-200 via-yellow-200 to-teal-200 bg-clip-text text-transparent">FridgeHub</span>
           <span className="ml-3 text-white">Guide</span>
         </h1>
 

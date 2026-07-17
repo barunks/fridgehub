@@ -14,7 +14,7 @@ import {
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
-import type { FamilyHubStore } from '@/hooks/useFamilyHub'
+import type { FridgeHubStore } from '@/hooks/useFridgeHub'
 import type { AuditLogEntry } from '@/types/familyHub'
 import { cn } from '@/utils/style'
 
@@ -64,7 +64,7 @@ const historyTone = (entry: AuditLogEntry): 'green' | 'amber' | 'rose' | 'indigo
   return 'slate'
 }
 
-export const HistoryView = ({ store }: { store: FamilyHubStore }) => {
+export const HistoryView = ({ store }: { store: FridgeHubStore }) => {
   const { auditLogs, loadAuditLogs } = store
   const [entityType, setEntityType] = useState('')
   const page = store.pagination.auditLogs

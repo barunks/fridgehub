@@ -26,7 +26,7 @@ import { Button } from '@/components/ui/Button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { FormField, inputClass } from '@/components/ui/FormField'
-import type { FamilyHubStore } from '@/hooks/useFamilyHub'
+import type { FridgeHubStore } from '@/hooks/useFridgeHub'
 import { api } from '@/services/api'
 import type {
   DeviceInfo,
@@ -58,7 +58,7 @@ const tabs: { key: Tab; label: string; icon: typeof Users }[] = [
 ]
 
 interface Props {
-  store: FamilyHubStore
+  store: FridgeHubStore
 }
 
 const toDateTimeLocalValue = (date: Date) => {
@@ -1376,7 +1376,7 @@ const SecurityPanel = ({ store: _store }: Props) => {
                 {devicePolicy?.activeDeviceCount ?? devices.length} of {devicePolicy?.maxDevices ?? deviceLimitDraft} devices registered
               </p>
               <p className="mt-1 text-xs leading-5 text-slate-500">
-                Open FamilyHub on another device or scan this QR code, then sign in with the same account. The device is registered automatically after sign-in.
+                Open FridgeHub on another device or scan this QR code, then sign in with the same account. The device is registered automatically after sign-in.
               </p>
               <div className="mt-3 flex flex-wrap gap-2">
                 <Button onClick={() => navigator.clipboard?.writeText(`${window.location.origin}/`)} variant="secondary">

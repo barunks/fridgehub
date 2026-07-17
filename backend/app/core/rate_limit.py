@@ -32,7 +32,7 @@ class LoginRateLimitMiddleware(BaseHTTPMiddleware):
 
         client_ip = request.client.host if request.client else "unknown"
         key = f"{client_ip}:{request.url.path}"
-        shared_key = f"familyhub:rate-limit:auth:{key}"
+        shared_key = f"fridgehub:rate-limit:auth:{key}"
         try:
             if cache.increment_window(shared_key, self.window_seconds) > self.limit:
                 self._audit_rate_limit(request)

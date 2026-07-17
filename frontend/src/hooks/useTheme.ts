@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 
 export type ThemeMode = 'light' | 'dark'
 
-const STORAGE_KEY = 'familyhub-theme'
+const STORAGE_KEY = 'fridgehub-theme'
 
 const readInitialTheme = (): ThemeMode => {
   if (typeof window === 'undefined') {

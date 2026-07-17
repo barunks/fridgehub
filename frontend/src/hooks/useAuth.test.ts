@@ -51,7 +51,7 @@ describe('useAuth', () => {
     expect(result.current.username).toBe('meera')
     expect(result.current.role).toBe('Mom')
     expect(result.current.isParent).toBe(true)
-    expect(localStorage.getItem('familyhub-access-token')).toBeNull()
+    expect(localStorage.getItem('fridgehub-access-token')).toBeNull()
   })
 
   it('login stores the access token in memory only', async () => {
@@ -60,12 +60,12 @@ describe('useAuth', () => {
     await waitFor(() => expect(result.current.isCheckingAuth).toBe(false))
 
     await act(async () => {
-      await result.current.login('meera', 'familyhub')
+      await result.current.login('meera', 'fridgehub')
     })
 
     expect(result.current.isAuthenticated).toBe(true)
     expect(getAccessToken()).toBe(token)
-    expect(localStorage.getItem('familyhub-refresh-token')).toBeNull()
+    expect(localStorage.getItem('fridgehub-refresh-token')).toBeNull()
   })
 
   it('logout clears the in-memory access token', async () => {
@@ -98,7 +98,7 @@ describe('useAuth', () => {
     await waitFor(() => expect(result.current.isAuthenticated).toBe(true))
 
     act(() => {
-      window.dispatchEvent(new Event('familyhub:auth-required'))
+      window.dispatchEvent(new Event('fridgehub:auth-required'))
     })
 
     expect(result.current.isAuthenticated).toBe(false)

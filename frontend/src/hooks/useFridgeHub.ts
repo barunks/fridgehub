@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { createEmptyFamilyHubState, createInitialFamilyHubState } from '@/data/seed'
+import { createEmptyFridgeHubState, createInitialFridgeHubState } from '@/data/seed'
 import { api } from '@/services/api'
 import type {
   AuditLogEntry,
-  FamilyHubState,
+  FridgeHubState,
   GroceryItem,
   GroceryItemUpdateInput,
   MealPlanItem,
@@ -70,13 +70,13 @@ const createPagination = (): Record<PaginationKey, PaginationState> => ({
   auditLogs: defaultPaginationState(),
 })
 
-export const useFamilyHub = (
+export const useFridgeHub = (
   isAuthenticated = true,
   currentUserId: number | null = null,
   authCapabilities: Permission[] = [],
   authRole: string | null = null,
 ) => {
-  const [state, setState] = useState<FamilyHubState>(createEmptyFamilyHubState)
+  const [state, setState] = useState<FridgeHubState>(createEmptyFridgeHubState)
   const [isLoading, setIsLoading] = useState(false)
   const [isBackendUnavailable, setIsBackendUnavailable] = useState(false)
   const [isBrowserOffline, setIsBrowserOffline] = useState(() => (typeof navigator === 'undefined' ? false : !navigator.onLine))
@@ -137,7 +137,7 @@ export const useFamilyHub = (
 
   const refreshFromApi = useCallback((): Promise<void> => {
     if (!isAuthenticated) {
-      setState(createEmptyFamilyHubState())
+      setState(createEmptyFridgeHubState())
       setIsLoading(false)
       return Promise.resolve()
     }
@@ -178,12 +178,12 @@ export const useFamilyHub = (
   }
 
   const mutateWithRollback = (
-    update: (current: FamilyHubState) => FamilyHubState,
+    update: (current: FridgeHubState) => FridgeHubState,
     operation: Promise<unknown>,
     successMessage: string,
     updatePageCaches?: () => void,
   ) => {
-    let snapshot: FamilyHubState | null = null
+    let snapshot: FridgeHubState | null = null
     const groceryPageSnapshot = groceryPageItems
     const taskPageSnapshot = taskPageItems
     const recipePageSnapshot = recipePageItems
@@ -1352,7 +1352,7 @@ export const useFamilyHub = (
   }
 
   const resetDemoData = () => {
-    const freshState = createInitialFamilyHubState()
+    const freshState = createInitialFridgeHubState()
     setState(freshState)
   }
 
@@ -1431,4 +1431,4 @@ export const useFamilyHub = (
   }
 }
 
-export type FamilyHubStore = ReturnType<typeof useFamilyHub>
+export type FridgeHubStore = ReturnType<typeof useFridgeHub>

@@ -87,30 +87,30 @@ def seed_demo_data(db: Session) -> None:
 
     users = [
         User(
-            email="meera@familyhub.local",
+            email="meera@fridgehub.local",
             username="meera",
-            password_hash=hash_password("familyhub"),
+            password_hash=hash_password("fridgehub"),
             full_name="Meera",
             family_role="Mom",
         ),
         User(
-            email="dad@familyhub.local",
+            email="dad@fridgehub.local",
             username="dad",
-            password_hash=hash_password("familyhub"),
+            password_hash=hash_password("fridgehub"),
             full_name="Dad",
             family_role="Parent",
         ),
         User(
-            email="ava@familyhub.local",
+            email="ava@fridgehub.local",
             username="ava",
-            password_hash=hash_password("familyhub"),
+            password_hash=hash_password("fridgehub"),
             full_name="Ava",
             family_role="Child",
         ),
         User(
-            email="noah@familyhub.local",
+            email="noah@fridgehub.local",
             username="noah",
-            password_hash=hash_password("familyhub"),
+            password_hash=hash_password("fridgehub"),
             full_name="Noah",
             family_role="Child",
         ),
@@ -118,7 +118,7 @@ def seed_demo_data(db: Session) -> None:
     db.add_all(users)
     db.flush()
 
-    family = Family(family_name="FamilyHub", home_base="Singapore", timezone="Asia/Singapore", created_by=users[0].id)
+    family = Family(family_name="FridgeHub", home_base="Singapore", timezone="Asia/Singapore", created_by=users[0].id)
     db.add(family)
     db.flush()
 

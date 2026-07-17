@@ -6,7 +6,7 @@ from app.core.dependencies import CurrentUser, get_current_user, require_permiss
 from app.core.database import get_db
 from app.core.permissions import Permission
 from app.core.security import decode_token
-from app.schemas.familyhub import (
+from app.schemas.fridgehub import (
     BootstrapSignupRequest,
     ChangePasswordRequest,
     ErrorResponse,

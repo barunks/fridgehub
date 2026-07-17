@@ -5,7 +5,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.models import Family, FrequencyType, GroceryItem, GroceryListType, GroceryPurchaseCycle, GrocerySubList, GroceryType
-from app.schemas.familyhub import (
+from app.schemas.fridgehub import (
     GroceryItemCreate,
     GroceryItemUpdate,
     GroceryTypeCreate,

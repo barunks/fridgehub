@@ -4,7 +4,7 @@ from datetime import date, timedelta
 from pathlib import Path
 from uuid import uuid4
 
-os.environ["DATABASE_URL"] = "sqlite:///./test_familyhub.db"
+os.environ["DATABASE_URL"] = "sqlite:///./test_fridgehub.db"
 os.environ["SEED_ON_STARTUP"] = "true"
 os.environ["CACHE_ENABLED"] = "false"
 os.environ["SECRET_KEY"] = "test-secret-key-that-is-long-enough-for-jwt-tests"
@@ -19,7 +19,7 @@ from app.models import Device, DeviceSession, FamilyInvite, FamilyMember, MealPl
 
 
 def auth_headers(client: TestClient, username: str = "meera") -> dict[str, str]:
-    response = client.post("/api/v1/auth/login", json={"username": username, "password": "familyhub"})
+    response = client.post("/api/v1/auth/login", json={"username": username, "password": "fridgehub"})
     assert response.status_code == 200
     return {"Authorization": f"Bearer {response.json()['accessToken']}"}
 
@@ -37,10 +37,10 @@ def meal_targets_member(meal: dict, member_id: int) -> bool:
 
 
 def teardown_module() -> None:
-    Path("test_familyhub.db").unlink(missing_ok=True)
+    Path("test_fridgehub.db").unlink(missing_ok=True)
 
 
-def restore_demo_password(username: str = "meera", password: str = "familyhub") -> None:
+def restore_demo_password(username: str = "meera", password: str = "fridgehub") -> None:
     db = SessionLocal()
     try:
         user = db.query(User).filter_by(username=username).one()
@@ -74,7 +74,7 @@ def test_bootstrap_returns_full_state() -> None:
         r = client.get("/api/v1/family/bootstrap", headers=auth_headers(client))
         assert r.status_code == 200
         data = r.json()
-        assert data["family"]["familyName"] == "FamilyHub"
+        assert data["family"]["familyName"] == "FridgeHub"
         assert len(data["listTypes"]) == 4
         assert len(data["meals"]) == 28
         assert len(data["members"]) >= 2
@@ -108,11 +108,11 @@ def test_bootstrap_materializes_default_weekly_meal_plan() -> None:
 
 def test_login_success_and_failure() -> None:
     with TestClient(app) as client:
-        r = client.post("/api/v1/auth/login", json={"username": "meera", "password": "familyhub"})
+        r = client.post("/api/v1/auth/login", json={"username": "meera", "password": "fridgehub"})
         assert r.status_code == 200
         assert "accessToken" in r.json()
         assert "refreshToken" not in r.json()
-        assert "familyhub_refresh" in r.headers["set-cookie"]
+        assert "fridgehub_refresh" in r.headers["set-cookie"]
 
         r = client.post("/api/v1/auth/login", json={"username": "meera", "password": "wrong"})
         assert r.status_code == 401
@@ -120,7 +120,7 @@ def test_login_success_and_failure() -> None:
 
 def test_refresh_and_logout() -> None:
     with TestClient(app) as client:
-        login = client.post("/api/v1/auth/login", json={"username": "meera", "password": "familyhub"})
+        login = client.post("/api/v1/auth/login", json={"username": "meera", "password": "fridgehub"})
         tokens = login.json()
         db = SessionLocal()
         try:
@@ -147,7 +147,7 @@ def test_change_password() -> None:
     with TestClient(app) as client:
         headers = auth_headers(client)
 
-        r = client.post("/api/v1/auth/change-password", json={"currentPassword": "familyhub", "newPassword": "newpass123"}, headers=headers)
+        r = client.post("/api/v1/auth/change-password", json={"currentPassword": "fridgehub", "newPassword": "newpass123"}, headers=headers)
         assert r.status_code == 200
 
         r = client.post("/api/v1/auth/login", json={"username": "meera", "password": "newpass123"})
@@ -176,7 +176,7 @@ def test_invite_signup_registers_device_and_closes_invite() -> None:
         headers = auth_headers(client)
         invite = client.post(
             "/api/v1/auth/invites",
-            json={"email": f"join-{unique}@familyhub.local", "role": "member", "expiresInDays": 3, "maxUses": 1},
+            json={"email": f"join-{unique}@fridgehub.local", "role": "member", "expiresInDays": 3, "maxUses": 1},
             headers=headers,
         )
         assert invite.status_code == 201
@@ -186,14 +186,14 @@ def test_invite_signup_registers_device_and_closes_invite() -> None:
 
         preview = client.get(f"/api/v1/auth/invites/{invite_token}")
         assert preview.status_code == 200
-        assert preview.json()["email"] == f"join-{unique}@familyhub.local"
+        assert preview.json()["email"] == f"join-{unique}@fridgehub.local"
 
         signup = client.post(
             "/api/v1/auth/signup",
             json={
                 "inviteToken": invite_token,
                 "fullName": "Invite User",
-                "email": f"join-{unique}@familyhub.local",
+                "email": f"join-{unique}@fridgehub.local",
                 "username": f"join{unique}",
                 "password": "joinpass1",
                 "deviceId": f"invite-device-{unique}",
@@ -223,7 +223,7 @@ def test_invite_signup_registers_device_and_closes_invite() -> None:
             json={
                 "inviteToken": invite_token,
                 "fullName": "Second User",
-                "email": f"second-{unique}@familyhub.local",
+                "email": f"second-{unique}@fridgehub.local",
                 "username": f"second{unique}",
                 "password": "joinpass1",
                 "deviceId": f"invite-device-second-{unique}",
@@ -682,7 +682,7 @@ def test_recipe_crud() -> None:
 def test_member_crud() -> None:
     with TestClient(app) as client:
         headers = auth_headers(client)
-        payload = {"name": "TestUser", "email": "test@familyhub.local", "username": "testuser", "password": "familyhub1", "role": "Child", "status": "Active", "colorClass": "bg-pink-500"}
+        payload = {"name": "TestUser", "email": "test@fridgehub.local", "username": "testuser", "password": "fridgehub1", "role": "Child", "status": "Active", "colorClass": "bg-pink-500"}
         created = client.post("/api/v1/family/members", json=payload, headers=headers)
         assert created.status_code == 200
         member_id = created.json()["id"]
@@ -1543,8 +1543,8 @@ def test_apply_template_creates_audit_log() -> None:
         logs = r.json()
         template_logs = [log for log in logs if log["action"] == "apply_template" and log["entityType"] == "meal_plan"]
         assert len(template_logs) >= 1
-        # Should record member_id in changes
-        latest = template_logs[0]
+        # Should record member_id in changes — pick the most recent log
+        latest = max(template_logs, key=lambda log: log["id"])
         assert latest["changes"] is not None
         assert latest["changes"].get("member_id") == 1
 
@@ -1682,7 +1682,7 @@ def test_member_role_change() -> None:
         headers = auth_headers(client)
 
         # Create a test member
-        payload = {"name": "RoleTest", "email": "roletest@test.local", "username": "roletest", "password": "familyhub1", "role": "child", "colorClass": "bg-green-500"}
+        payload = {"name": "RoleTest", "email": "roletest@test.local", "username": "roletest", "password": "fridgehub1", "role": "child", "colorClass": "bg-green-500"}
         created = client.post("/api/v1/family/members", json=payload, headers=headers)
         member_id = created.json()["id"]
         assert created.json()["role"] == "child"
@@ -1736,7 +1736,7 @@ def test_change_password_too_short() -> None:
     """New password must be at least 8 characters."""
     with TestClient(app) as client:
         headers = auth_headers(client)
-        r = client.post("/api/v1/auth/change-password", json={"currentPassword": "familyhub", "newPassword": "short1"}, headers=headers)
+        r = client.post("/api/v1/auth/change-password", json={"currentPassword": "fridgehub", "newPassword": "short1"}, headers=headers)
         assert r.status_code == 422
 
 
@@ -1744,7 +1744,7 @@ def test_change_password_no_digit() -> None:
     """New password must include at least one digit."""
     with TestClient(app) as client:
         headers = auth_headers(client)
-        r = client.post("/api/v1/auth/change-password", json={"currentPassword": "familyhub", "newPassword": "nolettersonlyletters"}, headers=headers)
+        r = client.post("/api/v1/auth/change-password", json={"currentPassword": "fridgehub", "newPassword": "nolettersonlyletters"}, headers=headers)
         assert r.status_code == 422
 
 
@@ -1987,7 +1987,7 @@ def test_login_with_revoked_device() -> None:
     """Login from a revoked device should return 403."""
     with TestClient(app) as client:
         # Login with a specific device ID
-        r = client.post("/api/v1/auth/login", json={"username": "meera", "password": "familyhub", "deviceId": "revoke-login-test-device"})
+        r = client.post("/api/v1/auth/login", json={"username": "meera", "password": "fridgehub", "deviceId": "revoke-login-test-device"})
         assert r.status_code == 200
         headers = {"Authorization": f"Bearer {r.json()['accessToken']}"}
 
@@ -2001,7 +2001,7 @@ def test_login_with_revoked_device() -> None:
         client.delete(f"/api/v1/auth/devices/{target['id']}", headers=headers)
 
         # Attempt login again with the same device ID — should be rejected
-        r = client.post("/api/v1/auth/login", json={"username": "meera", "password": "familyhub", "deviceId": "revoke-login-test-device"})
+        r = client.post("/api/v1/auth/login", json={"username": "meera", "password": "fridgehub", "deviceId": "revoke-login-test-device"})
         assert r.status_code == 403
         assert "revoked" in r.json()["error"]["detail"].lower()
 
@@ -2010,7 +2010,7 @@ def test_refresh_with_revoked_device() -> None:
     """Refresh from a revoked device should fail."""
     with TestClient(app) as client:
         # Login as ava to get a fresh device
-        login_r = client.post("/api/v1/auth/login", json={"username": "ava", "password": "familyhub", "deviceId": "revoke-refresh-test-device"})
+        login_r = client.post("/api/v1/auth/login", json={"username": "ava", "password": "fridgehub", "deviceId": "revoke-refresh-test-device"})
         assert login_r.status_code == 200
         token = login_r.json()["accessToken"]
         headers = {"Authorization": f"Bearer {token}"}
@@ -2035,7 +2035,7 @@ def test_device_registered_audit_event() -> None:
         # Login with a unique device ID to force new device registration
         r = client.post(
             "/api/v1/auth/login",
-            json={"username": "meera", "password": "familyhub", "deviceId": unique_device_id, "deviceName": "Audit Test Device"},
+            json={"username": "meera", "password": "fridgehub", "deviceId": unique_device_id, "deviceName": "Audit Test Device"},
         )
         assert r.status_code == 200
         headers = {"Authorization": f"Bearer {r.json()['accessToken']}"}
@@ -2060,7 +2060,7 @@ def test_max_devices_per_user_limit() -> None:
 
     with TestClient(app) as client:
         # Check how many active devices ava currently has
-        login_r = client.post("/api/v1/auth/login", json={"username": "ava", "password": "familyhub"})
+        login_r = client.post("/api/v1/auth/login", json={"username": "ava", "password": "fridgehub"})
         assert login_r.status_code == 200
         headers = {"Authorization": f"Bearer {login_r.json()['accessToken']}"}
         r = client.get("/api/v1/auth/devices", headers=headers)
@@ -2073,17 +2073,17 @@ def test_max_devices_per_user_limit() -> None:
         try:
             # Register one more device — should succeed
             did1 = f"limit-ok-{uuid.uuid4().hex[:8]}"
-            r1 = client.post("/api/v1/auth/login", json={"username": "ava", "password": "familyhub", "deviceId": did1})
+            r1 = client.post("/api/v1/auth/login", json={"username": "ava", "password": "fridgehub", "deviceId": did1})
             assert r1.status_code == 200
 
             # Next new device should be rejected
             did2 = f"limit-fail-{uuid.uuid4().hex[:8]}"
-            r2 = client.post("/api/v1/auth/login", json={"username": "ava", "password": "familyhub", "deviceId": did2})
+            r2 = client.post("/api/v1/auth/login", json={"username": "ava", "password": "fridgehub", "deviceId": did2})
             assert r2.status_code == 403
             assert "Maximum number of devices" in r2.json()["error"]["detail"]
 
             # Existing device should still work (not a new registration)
-            r3 = client.post("/api/v1/auth/login", json={"username": "ava", "password": "familyhub", "deviceId": did1})
+            r3 = client.post("/api/v1/auth/login", json={"username": "ava", "password": "fridgehub", "deviceId": did1})
             assert r3.status_code == 200
         finally:
             ava.max_devices = original_max
@@ -2094,7 +2094,7 @@ def test_max_devices_per_user_limit() -> None:
 def test_same_browser_device_id_rotation_reuses_existing_device_at_limit() -> None:
     """A changed client-side device ID from the same browser should not create duplicate devices."""
     unique = uuid4().hex[:8]
-    user_agent = f"FamilyHubBrowser/{unique}"
+    user_agent = f"FridgeHubBrowser/{unique}"
     first_device_id = f"stable-browser-{unique}"
     rotated_device_id = f"rotated-browser-{unique}"
 
@@ -2107,7 +2107,7 @@ def test_same_browser_device_id_rotation_reuses_existing_device_at_limit() -> No
               "/api/v1/auth/login",
               json={
                   "username": "ava",
-                  "password": "familyhub",
+                  "password": "fridgehub",
                   "deviceId": first_device_id,
                   "deviceName": "Ava Laptop",
                   "deviceType": "browser",
@@ -2129,7 +2129,7 @@ def test_same_browser_device_id_rotation_reuses_existing_device_at_limit() -> No
               "/api/v1/auth/login",
               json={
                   "username": "ava",
-                  "password": "familyhub",
+                  "password": "fridgehub",
                   "deviceId": rotated_device_id,
                   "deviceName": "Ava Laptop",
                   "deviceType": "desktop",
@@ -2152,7 +2152,7 @@ def test_same_browser_device_id_rotation_reuses_existing_device_at_limit() -> No
               "/api/v1/auth/login",
               json={
                   "username": "ava",
-                  "password": "familyhub",
+                  "password": "fridgehub",
                   "deviceId": f"new-browser-{unique}",
                   "deviceName": "Different Laptop",
                   "deviceType": "desktop",

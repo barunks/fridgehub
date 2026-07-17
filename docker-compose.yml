@@ -1,11 +1,11 @@
 services:
   mysql:
     image: mysql:8.0
-    container_name: familyhub-mysql
+    container_name: fridgehub-mysql
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD}
-      MYSQL_DATABASE: familyhub_db
-      MYSQL_USER: familyhub_user
+      MYSQL_DATABASE: fridgehub_db
+      MYSQL_USER: fridgehub_user
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:?set MYSQL_PASSWORD}
     ports:
       - "3306:3306"
@@ -20,7 +20,7 @@ services:
 
   redis:
     image: redis:7-alpine
-    container_name: familyhub-redis
+    container_name: fridgehub-redis
     ports:
       - "6379:6379"
     command: redis-server --appendonly yes
@@ -34,10 +34,10 @@ services:
 
   backend_migrate:
     build: ./backend
-    container_name: familyhub-backend-migrate
+    container_name: fridgehub-backend-migrate
     command: alembic upgrade head
     environment:
-      DATABASE_URL: mysql+mysqlconnector://familyhub_user:${MYSQL_PASSWORD:?set MYSQL_PASSWORD}@mysql:3306/familyhub_db
+      DATABASE_URL: mysql+mysqlconnector://fridgehub_user:${MYSQL_PASSWORD:?set MYSQL_PASSWORD}@mysql:3306/fridgehub_db
       REDIS_URL: redis://redis:6379/0
       SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY}
       ENVIRONMENT: production
@@ -51,9 +51,9 @@ services:
 
   backend:
     build: ./backend
-    container_name: familyhub-backend
+    container_name: fridgehub-backend
     environment:
-      DATABASE_URL: mysql+mysqlconnector://familyhub_user:${MYSQL_PASSWORD:?set MYSQL_PASSWORD}@mysql:3306/familyhub_db
+      DATABASE_URL: mysql+mysqlconnector://fridgehub_user:${MYSQL_PASSWORD:?set MYSQL_PASSWORD}@mysql:3306/fridgehub_db
       REDIS_URL: redis://redis:6379/0
       CORS_ORIGINS: http://localhost:8080,http://localhost:5173
       SEED_ON_STARTUP: "false"
@@ -77,9 +77,9 @@ services:
 
   celery_worker:
     build: ./backend
-    container_name: familyhub-celery-worker
+    container_name: fridgehub-celery-worker
     environment:
-      DATABASE_URL: mysql+mysqlconnector://familyhub_user:${MYSQL_PASSWORD:?set MYSQL_PASSWORD}@mysql:3306/familyhub_db
+      DATABASE_URL: mysql+mysqlconnector://fridgehub_user:${MYSQL_PASSWORD:?set MYSQL_PASSWORD}@mysql:3306/fridgehub_db
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/1
       CELERY_RESULT_BACKEND: redis://redis:6379/2
@@ -90,9 +90,9 @@ services:
 
   celery_beat:
     build: ./backend
-    container_name: familyhub-celery-beat
+    container_name: fridgehub-celery-beat
     environment:
-      DATABASE_URL: mysql+mysqlconnector://familyhub_user:${MYSQL_PASSWORD:?set MYSQL_PASSWORD}@mysql:3306/familyhub_db
+      DATABASE_URL: mysql+mysqlconnector://fridgehub_user:${MYSQL_PASSWORD:?set MYSQL_PASSWORD}@mysql:3306/fridgehub_db
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/1
       CELERY_RESULT_BACKEND: redis://redis:6379/2
@@ -106,7 +106,7 @@ services:
       context: ./frontend
       args:
         VITE_API_URL: ""
-    container_name: familyhub-frontend
+    container_name: fridgehub-frontend
     ports:
       - "8080:80"
     depends_on:

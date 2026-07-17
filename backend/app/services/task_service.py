@@ -2,7 +2,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.models import FamilyMember, Task
-from app.schemas.familyhub import TaskCreate, TaskUpdate
+from app.schemas.fridgehub import TaskCreate, TaskUpdate
 from app.services.audit_service import write_audit_log
 from app.services.family_service import invalidate_entity, serialize_task
 from app.services.notification_service import create_notification

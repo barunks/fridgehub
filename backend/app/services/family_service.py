@@ -27,7 +27,7 @@ from app.models import (
 from app.services.assistant_rules import generate_insights
 
 _bootstrap_locks: dict[int, Lock] = {}
-logger = logging.getLogger("familyhub.family_service")
+logger = logging.getLogger("fridgehub.family_service")
 
 # Entity cache key helpers
 ENTITIES = (

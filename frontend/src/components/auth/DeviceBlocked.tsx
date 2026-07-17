@@ -13,7 +13,7 @@ export const DeviceBlocked = ({ onRetry }: DeviceBlockedProps) => (
       </div>
       <h1 className="text-xl font-bold text-slate-900">Device Blocked</h1>
       <p className="mt-3 text-sm leading-6 text-slate-600">
-        This device has been revoked by a family administrator. You cannot access FamilyHub from this device.
+        This device has been revoked by a family administrator. You cannot access FridgeHub from this device.
       </p>
       <p className="mt-2 text-xs text-slate-400">
         If you believe this is a mistake, contact a parent or admin in your family to restore access.

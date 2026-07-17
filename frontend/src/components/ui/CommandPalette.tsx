@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { CalendarDays, ClipboardList, Search, ShoppingBasket, Users, X } from 'lucide-react'
-import type { FamilyHubStore } from '@/hooks/useFamilyHub'
+import type { FridgeHubStore } from '@/hooks/useFridgeHub'
 import { cn } from '@/utils/style'
 
 interface SearchResult {
@@ -13,7 +13,7 @@ interface SearchResult {
 }
 
 interface CommandPaletteProps {
-  store: FamilyHubStore
+  store: FridgeHubStore
 }
 
 const fuzzyMatch = (query: string, text: string): boolean => {

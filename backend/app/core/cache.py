@@ -12,7 +12,7 @@ except ImportError:  # pragma: no cover - exercised only when dependency is abse
     redis = None
 
 
-logger = logging.getLogger("familyhub.cache")
+logger = logging.getLogger("fridgehub.cache")
 
 
 class CacheClient:
@@ -184,4 +184,4 @@ cache = CacheClient()
 
 def cache_key(entity: str, **parts: Any) -> str:
     ordered = ":".join(f"{key}:{parts[key]}" for key in sorted(parts))
-    return f"familyhub:{entity}:{ordered}" if ordered else f"familyhub:{entity}"
+    return f"fridgehub:{entity}:{ordered}" if ordered else f"fridgehub:{entity}"

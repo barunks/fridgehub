@@ -4,7 +4,7 @@ from celery import Celery
 from celery.schedules import crontab
 
 celery_app = Celery(
-    "familyhub",
+    "fridgehub",
     broker=os.getenv("CELERY_BROKER_URL", os.getenv("REDIS_URL", "redis://localhost:6379/1")),
     backend=os.getenv("CELERY_RESULT_BACKEND", "redis://localhost:6379/2"),
     include=["app.tasks.grocery_scheduler", "app.tasks.notification_tasks"],

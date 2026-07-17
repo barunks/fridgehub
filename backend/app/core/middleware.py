@@ -6,7 +6,7 @@ from collections.abc import Awaitable, Callable
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
-logger = logging.getLogger("familyhub.request")
+logger = logging.getLogger("fridgehub.request")
 
 
 class RequestContextMiddleware(BaseHTTPMiddleware):

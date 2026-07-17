@@ -15,14 +15,14 @@ import { TasksView } from '@/components/tasks/TasksView'
 import { CommandPalette } from '@/components/ui/CommandPalette'
 import { DashboardSkeleton } from '@/components/ui/Skeleton'
 import { useAuth } from '@/hooks/useAuth'
-import { useFamilyHub } from '@/hooks/useFamilyHub'
+import { useFridgeHub } from '@/hooks/useFridgeHub'
 import { useTheme } from '@/hooks/useTheme'
 import { viewForPath, viewPaths } from '@/navigation'
 import type { ScopedNavigationOptions, ViewKey } from '@/types/familyHub'
 
 const App = () => {
   const auth = useAuth()
-  const store = useFamilyHub(auth.isAuthenticated, auth.userId, auth.capabilities, auth.role)
+  const store = useFridgeHub(auth.isAuthenticated, auth.userId, auth.capabilities, auth.role)
   const theme = useTheme()
   const location = useLocation()
   const navigate = useNavigate()

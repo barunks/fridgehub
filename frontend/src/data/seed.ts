@@ -4,7 +4,7 @@ import type {
   AssistantMessage,
   EmergencyContact,
   Family,
-  FamilyHubState,
+  FridgeHubState,
   FamilyMember,
   GroceryCycle,
   GroceryItem,
@@ -21,7 +21,7 @@ import { addDays, dateOffsetIso, dateTimeOffsetIso, toIsoDate, weekStart } from 
 
 const family: Family = {
   id: 1,
-  familyName: 'FamilyHub',
+  familyName: 'FridgeHub',
   homeBase: 'Singapore',
   timezone: 'Asia/Singapore',
   planStatus: 'api-ready',
@@ -568,7 +568,7 @@ const assistantInsights: AssistantInsight[] = [
   },
 ]
 
-export const createInitialFamilyHubState = (): FamilyHubState => ({
+export const createInitialFridgeHubState = (): FridgeHubState => ({
   currentUser: {
     userId: 1,
     familyId: family.id,
@@ -592,7 +592,7 @@ export const createInitialFamilyHubState = (): FamilyHubState => ({
   assistantInsights,
 })
 
-export const createEmptyFamilyHubState = (): FamilyHubState => ({
+export const createEmptyFridgeHubState = (): FridgeHubState => ({
   currentUser: {
     userId: 0,
     familyId: 0,

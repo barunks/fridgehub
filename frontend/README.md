@@ -1,6 +1,6 @@
-# FamilyHub Frontend
+# FridgeHub Frontend
 
-Vite React + TypeScript frontend for the FamilyHub command center. It hydrates authenticated app state from `VITE_API_URL`; local demo data is only the pre-auth/session placeholder.
+Vite React + TypeScript frontend for the FridgeHub command center. It hydrates authenticated app state from `VITE_API_URL`; local demo data is only the pre-auth/session placeholder.
 
 Implemented UI platform features:
 

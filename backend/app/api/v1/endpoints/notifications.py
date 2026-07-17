@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from app.core.dependencies import CurrentUser, get_current_user, require_permission
 from app.core.database import get_db
 from app.core.permissions import Permission
-from app.schemas.familyhub import NotificationOut
+from app.schemas.fridgehub import NotificationOut
 from app.services.notification_service import bulk_mark_read, list_notifications, mark_read
 
 router = APIRouter()

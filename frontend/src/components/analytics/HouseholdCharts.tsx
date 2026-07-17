@@ -15,7 +15,7 @@ import {
 } from 'recharts'
 import { Badge } from '@/components/ui/Badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
-import type { FamilyHubStore } from '@/hooks/useFamilyHub'
+import type { FridgeHubStore } from '@/hooks/useFridgeHub'
 import type { TaskStatus } from '@/types/familyHub'
 
 const taskStatusLabels: Record<TaskStatus, string> = {
@@ -36,7 +36,7 @@ const tooltipStyle = {
   fontSize: 12,
 }
 
-export const HouseholdCharts = ({ store }: { store: FamilyHubStore }) => {
+export const HouseholdCharts = ({ store }: { store: FridgeHubStore }) => {
   const { state } = store
 
   const taskStatusData = useMemo(() => {

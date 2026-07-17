@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from app.core.dependencies import CurrentUser, require_permission
 from app.core.database import get_db
 from app.core.permissions import Permission
-from app.schemas.familyhub import AssistantInsightOut, AssistantRequest, AssistantResponse
+from app.schemas.fridgehub import AssistantInsightOut, AssistantRequest, AssistantResponse
 from app.services.assistant_rules import generate_insights
 from app.services.assistant_service import recommendations
 from app.services.family_service import bootstrap_state

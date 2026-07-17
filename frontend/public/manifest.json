@@ -1,6 +1,6 @@
 {
-  "name": "FamilyHub",
-  "short_name": "FamilyHub",
+  "name": "FridgeHub",
+  "short_name": "FridgeHub",
   "description": "Family command center for groceries, meals, tasks, and reminders.",
   "start_url": "/",
   "display": "standalone",

@@ -2,11 +2,11 @@
 set -euo pipefail
 
 # ─────────────────────────────────────────────────────────────────────────────
-# FamilyHub — deploy.sh
-# Full deployment to Oracle Cloud instance for https://familyhubs.duckdns.org
+# FridgeHub — deploy.sh
+# Full deployment to Oracle Cloud instance for https://fridgehubs.duckdns.org
 #
 # Target: 138.2.109.105 (Oracle Cloud)
-# Domain: familyhubs.duckdns.org
+# Domain: fridgehubs.duckdns.org
 # SSH Key: ~/bytepulse-oracle.key
 #
 # Usage:
@@ -28,12 +28,12 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SSH_KEY="$HOME/bytepulse-oracle.key"
 REMOTE_HOST="138.2.109.105"
 REMOTE_USER="opc"
-DOMAIN="familyhubs.duckdns.org"
-REMOTE_DIR="/opt/familyhub"
-GIT_REPO="git@github.com:barunks/familyhub.git"
+DOMAIN="fridgehubs.duckdns.org"
+REMOTE_DIR="/opt/fridgehub"
+GIT_REPO="git@github.com:barunks/fridgehub.git"
 BRANCH="main"
-DB_NAME="familyhub_db"
-DB_USER="familyhub_user"
+DB_NAME="fridgehub_db"
+DB_USER="fridgehub_user"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -150,7 +150,7 @@ setup_server() {
     if [ ! -d $REMOTE_DIR/.git ]; then
       # Setup deploy key for git
       eval \$(ssh-agent -s) && ssh-add ~/.ssh/id_rsa 2>/dev/null || true
-      git clone $GIT_REPO $REMOTE_DIR 2>/dev/null || git clone https://github.com/barunks/familyhub.git $REMOTE_DIR
+      git clone $GIT_REPO $REMOTE_DIR 2>/dev/null || git clone https://github.com/barunks/fridgehub.git $REMOTE_DIR
     fi
   "
   ok "Repository cloned"
@@ -164,7 +164,7 @@ SECRET_KEY=$SECRET
 EOF"
 
   remote "cat > $REMOTE_DIR/backend/.env << EOF
-APP_NAME=FamilyHub API
+APP_NAME=FridgeHub API
 APP_VERSION=1.0.0
 ENVIRONMENT=production
 APP_DEBUG=false
@@ -201,9 +201,9 @@ EOF"
 
   # Systemd services
   info "Creating systemd services..."
-  remote "sudo tee /etc/systemd/system/familyhub-backend.service > /dev/null << 'EOF'
+  remote "sudo tee /etc/systemd/system/fridgehub-backend.service > /dev/null << 'EOF'
 [Unit]
-Description=FamilyHub Backend API
+Description=FridgeHub Backend API
 After=network.target mysql.service redis.service
 Wants=mysql.service redis.service
 
@@ -224,7 +224,7 @@ StandardError=journal
 WantedBy=multi-user.target
 EOF"
 
-  remote "sudo systemctl daemon-reload && sudo systemctl enable familyhub-backend"
+  remote "sudo systemctl daemon-reload && sudo systemctl enable fridgehub-backend"
   ok "Backend systemd service created"
 
   # Nginx config with Apple device security headers
@@ -241,8 +241,8 @@ EOF"
 # ─── Nginx configuration ────────────────────────────────────────────────────
 setup_nginx() {
   info "Configuring Nginx with security headers for Apple devices..."
-  remote "sudo tee /etc/nginx/sites-available/familyhub > /dev/null 2>/dev/null || sudo tee /etc/nginx/conf.d/familyhub.conf > /dev/null" << 'NGINX_EOF'
-# FamilyHub — Production Nginx Config
+  remote "sudo tee /etc/nginx/sites-available/fridgehub > /dev/null 2>/dev/null || sudo tee /etc/nginx/conf.d/fridgehub.conf > /dev/null" << 'NGINX_EOF'
+# FridgeHub — Production Nginx Config
 # Optimized for Apple devices (Safari, iOS WebKit)
 
 # Rate limiting
@@ -251,7 +251,7 @@ limit_req_zone $binary_remote_addr zone=login_limit:10m rate=5r/m;
 
 server {
     listen 80;
-    server_name familyhubs.duckdns.org;
+    server_name fridgehubs.duckdns.org;
 
     # Redirect all HTTP to HTTPS (required for Apple device security)
     return 301 https://$host$request_uri;
@@ -259,11 +259,11 @@ server {
 
 server {
     listen 443 ssl http2;
-    server_name familyhubs.duckdns.org;
+    server_name fridgehubs.duckdns.org;
 
     # SSL (managed by certbot)
-    ssl_certificate /etc/letsencrypt/live/familyhubs.duckdns.org/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/familyhubs.duckdns.org/privkey.pem;
+    ssl_certificate /etc/letsencrypt/live/fridgehubs.duckdns.org/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/fridgehubs.duckdns.org/privkey.pem;
     ssl_protocols TLSv1.2 TLSv1.3;
     ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384;
     ssl_prefer_server_ciphers off;
@@ -285,10 +285,10 @@ server {
     # Permissions policy — restrict device APIs
     add_header Permissions-Policy "camera=(), microphone=(), geolocation=(self), payment=()" always;
     # CSP — allow inline styles for Tailwind, restrict scripts
-    add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' https://familyhubs.duckdns.org; manifest-src 'self'; worker-src 'self';" always;
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' https://fridgehubs.duckdns.org; manifest-src 'self'; worker-src 'self';" always;
 
     # Frontend (static build)
-    root /opt/familyhub/frontend/dist;
+    root /opt/fridgehub/frontend/dist;
     index index.html;
 
     # Gzip
@@ -372,7 +372,7 @@ NGINX_EOF
   # Enable site (Debian/Ubuntu style)
   remote "
     if [ -d /etc/nginx/sites-enabled ]; then
-      sudo ln -sf /etc/nginx/sites-available/familyhub /etc/nginx/sites-enabled/
+      sudo ln -sf /etc/nginx/sites-available/fridgehub /etc/nginx/sites-enabled/
       sudo rm -f /etc/nginx/sites-enabled/default
     fi
     sudo nginx -t && sudo systemctl enable nginx
@@ -410,7 +410,7 @@ deploy_code() {
   ok "Frontend built"
 
   info "Restarting backend service..."
-  remote "sudo systemctl restart familyhub-backend"
+  remote "sudo systemctl restart fridgehub-backend"
   sleep 3
   ok "Backend restarted"
 
@@ -453,13 +453,13 @@ validate_deployment() {
 
   info "Checking backend service status..."
   local backend_status
-  backend_status=$(remote "systemctl is-active familyhub-backend" 2>/dev/null || echo "inactive")
+  backend_status=$(remote "systemctl is-active fridgehub-backend" 2>/dev/null || echo "inactive")
   if [[ "$backend_status" == "active" ]]; then
     ok "Backend service: active"
   else
     err "Backend service: $backend_status"
     info "Checking logs..."
-    remote "sudo journalctl -u familyhub-backend --no-pager -n 10"
+    remote "sudo journalctl -u fridgehub-backend --no-pager -n 10"
   fi
 
   info "Checking backend health (localhost)..."
@@ -502,7 +502,7 @@ validate_deployment() {
   local login_status
   login_status=$(curl -s -o /dev/null -w "%{http_code}" -X POST "https://$DOMAIN/api/v1/auth/login" \
     -H "Content-Type: application/json" \
-    -d '{"username":"meera","password":"familyhub"}' 2>/dev/null || echo "000")
+    -d '{"username":"meera","password":"fridgehub"}' 2>/dev/null || echo "000")
   if [[ "$login_status" == "200" ]]; then
     ok "API login: HTTP 200"
   else
@@ -558,7 +558,7 @@ validate_deployment() {
     ok "DNS resolves to $REMOTE_HOST"
   else
     warn "DNS resolves to: ${resolved_ip:-unknown} (expected $REMOTE_HOST)"
-    info "Update DuckDNS: curl 'https://www.duckdns.org/update?domains=familyhubs&token=YOUR_TOKEN&ip=$REMOTE_HOST'"
+    info "Update DuckDNS: curl 'https://www.duckdns.org/update?domains=fridgehubs&token=YOUR_TOKEN&ip=$REMOTE_HOST'"
   fi
 }
 
@@ -588,14 +588,14 @@ update_duckdns() {
   header "Phase: DuckDNS Update"
   info "To update DuckDNS, run this with your token:"
   echo ""
-  echo "  curl 'https://www.duckdns.org/update?domains=familyhubs&token=YOUR_DUCKDNS_TOKEN&ip=$REMOTE_HOST'"
+  echo "  curl 'https://www.duckdns.org/update?domains=fridgehubs&token=YOUR_DUCKDNS_TOKEN&ip=$REMOTE_HOST'"
   echo ""
   info "Or set up a cron on the server:"
-  echo "  */5 * * * * curl -s 'https://www.duckdns.org/update?domains=familyhubs&token=YOUR_TOKEN&ip=' > /dev/null"
+  echo "  */5 * * * * curl -s 'https://www.duckdns.org/update?domains=fridgehubs&token=YOUR_TOKEN&ip=' > /dev/null"
 }
 
 # ─── Main execution ─────────────────────────────────────────────────────────
-header "FamilyHub Production Deployment"
+header "FridgeHub Production Deployment"
 echo -e "  ${BOLD}Target${NC}:  $REMOTE_USER@$REMOTE_HOST"
 echo -e "  ${BOLD}Domain${NC}:  https://$DOMAIN"
 echo -e "  ${BOLD}Branch${NC}:  $BRANCH"
@@ -654,8 +654,8 @@ echo -e "  ${BOLD}API Docs${NC}:   https://$DOMAIN/docs (disabled in production)
 echo -e "  ${BOLD}Health${NC}:     https://$DOMAIN/health"
 echo ""
 echo -e "  ${BOLD}SSH${NC}:        ssh -i ~/bytepulse-oracle.key $REMOTE_USER@$REMOTE_HOST"
-echo -e "  ${BOLD}Logs${NC}:       sudo journalctl -u familyhub-backend -f"
-echo -e "  ${BOLD}Restart${NC}:    sudo systemctl restart familyhub-backend"
+echo -e "  ${BOLD}Logs${NC}:       sudo journalctl -u fridgehub-backend -f"
+echo -e "  ${BOLD}Restart${NC}:    sudo systemctl restart fridgehub-backend"
 echo ""
 echo -e "  ${CYAN}Apple Device Notes:${NC}"
 echo "    - HSTS enforced (Safari will always use HTTPS after first visit)"

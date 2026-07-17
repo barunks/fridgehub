@@ -4,11 +4,11 @@ import { DemoWorkflow } from './DemoWorkflow'
 import { DemoModules } from './DemoModules'
 import { DemoHowTo } from './DemoHowTo'
 import { DemoFaq } from './DemoFaq'
-import type { FamilyHubStore } from '@/hooks/useFamilyHub'
+import type { FridgeHubStore } from '@/hooks/useFridgeHub'
 
 type DemoTab = 'overview' | 'modules' | 'howto' | 'faq'
 
-export const DemoView = ({ store: _store }: { store: FamilyHubStore }) => {
+export const DemoView = ({ store: _store }: { store: FridgeHubStore }) => {
   const [tab, setTab] = useState<DemoTab>('overview')
 
   const tabs: { key: DemoTab; label: string }[] = [

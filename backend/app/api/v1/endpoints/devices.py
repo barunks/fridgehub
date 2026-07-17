@@ -8,7 +8,7 @@ from app.core.database import get_db
 from app.core.dependencies import CurrentUser, get_current_user, require_permission, token_revocation_key
 from app.core.permissions import Permission
 from app.models import Device, DeviceSession
-from app.schemas.familyhub import DeviceOut, DevicePolicyOut, DevicePolicyUpdate, DeviceUpdate, ErrorResponse
+from app.schemas.fridgehub import DeviceOut, DevicePolicyOut, DevicePolicyUpdate, DeviceUpdate, ErrorResponse
 from app.services.audit_service import write_audit_log
 
 router = APIRouter()

@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { FormField, inputClass } from '@/components/ui/FormField'
-import type { FamilyHubStore } from '@/hooks/useFamilyHub'
+import type { FridgeHubStore } from '@/hooks/useFridgeHub'
 import { formatCompactDate } from '@/utils/date'
 
 const colorOptions = [
@@ -20,7 +20,7 @@ const colorOptions = [
   { value: 'bg-pink-500', label: 'Pink' },
 ]
 
-export const FamilyView = ({ store }: { store: FamilyHubStore }) => {
+export const FamilyView = ({ store }: { store: FridgeHubStore }) => {
   const { state, addAnnouncement, addMember, updateMember, deleteMember, deleteAnnouncement, addEmergencyContact, updateEmergencyContact, deleteEmergencyContact, markNotificationRead, loadNotificationPage, loadAuditLogs } = store
   const canManageFamily = store.can('manage_family')
   const canManageAnnouncements = store.can('manage_announcements')

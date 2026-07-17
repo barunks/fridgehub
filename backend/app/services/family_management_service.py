@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from app.core.permissions import normalize_permission
 from app.core.security import hash_password
 from app.models import EmergencyContact, FamilyMember, User
-from app.schemas.familyhub import (
+from app.schemas.fridgehub import (
     EmergencyContactCreate,
     EmergencyContactUpdate,
     FamilyMemberCreate,

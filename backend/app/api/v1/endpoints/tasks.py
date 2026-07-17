@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from app.core.dependencies import CurrentUser, get_current_user, require_permission
 from app.core.database import get_db
 from app.core.permissions import Permission
-from app.schemas.familyhub import ErrorResponse, TaskCreate, TaskOut, TaskUpdate
+from app.schemas.fridgehub import ErrorResponse, TaskCreate, TaskOut, TaskUpdate
 from app.services import task_service
 
 router = APIRouter()

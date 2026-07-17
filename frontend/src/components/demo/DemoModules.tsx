@@ -201,7 +201,7 @@ const modules: ModuleGuide[] = [
       { step: 'Download PDF', detail: 'Printable shopping list filtered by store, frequency, or stock' },
       { step: 'Expiry alerts', detail: 'Get notified before perishables expire — use them in meals first' },
     ],
-    tips: ['Use "Regenerate Cycles" to reset manually', 'PDF includes FamilyHub watermark', 'Unpurchased items carry forward to next cycle'],
+    tips: ['Use "Regenerate Cycles" to reset manually', 'PDF includes FridgeHub watermark', 'Unpurchased items carry forward to next cycle'],
     mockup: <GroceryMockup />,
   },
   {

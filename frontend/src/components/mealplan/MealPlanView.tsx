@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { FormField, inputClass } from '@/components/ui/FormField'
-import type { FamilyHubStore } from '@/hooks/useFamilyHub'
+import type { FridgeHubStore } from '@/hooks/useFridgeHub'
 import { api } from '@/services/api'
 import type { MealPlanItem, MealTemplateRow, MealTemplateRowInput, MealType, MealUpdateInput, TimeScope, WeekDay } from '@/types/familyHub'
 import { formatCompactDate, formatDay, isIsoDateInRange, todayIso, weekEndIso, weekStartIso } from '@/utils/date'
@@ -148,7 +148,7 @@ const defaultEffectiveUntil = (planDate: string, scope: MealEffectiveScope) => {
   return planDate
 }
 
-export const MealPlanView = ({ store }: { store: FamilyHubStore }) => {
+export const MealPlanView = ({ store }: { store: FridgeHubStore }) => {
   const { state, updateMeal, applyWeeklyTemplate, applyWeeklyTemplateForAll, addRecipe, updateRecipe, deleteRecipe, loadRecipePage, loadMemberMeals, memberMeals, memberMealsLoading } = store
   const canManageMeals = store.can('manage_meals')
   const canManageRecipes = store.can('manage_recipes')

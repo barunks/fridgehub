@@ -85,7 +85,7 @@ export const LoginPage = ({ onBootstrapSignup, onInviteSignup, onLogin, error }:
   const [inviteToken, setInviteToken] = useState(initialInvite)
   const [joinForm, setJoinForm] = useState({ fullName: '', email: '', username: '', password: '' })
   const [setupForm, setSetupForm] = useState({
-    familyName: 'FamilyHub',
+    familyName: 'FridgeHub',
     homeBase: 'Singapore',
     timezone: 'Asia/Singapore',
     fullName: '',
@@ -192,7 +192,7 @@ export const LoginPage = ({ onBootstrapSignup, onInviteSignup, onLogin, error }:
               <div className="flex size-12 items-center justify-center rounded-xl bg-white text-slate-950">
                 <LayoutDashboard className="size-6" aria-hidden="true" />
               </div>
-              <h1 className="mt-8 text-3xl font-bold">FamilyHub</h1>
+              <h1 className="mt-8 text-3xl font-bold">FridgeHub</h1>
               <p className="mt-3 max-w-sm text-sm leading-6 text-slate-300">
                 Private household access for groceries, meals, tasks, and family operations.
               </p>
@@ -212,12 +212,12 @@ export const LoginPage = ({ onBootstrapSignup, onInviteSignup, onLogin, error }:
               <div className="flex size-11 items-center justify-center rounded-xl bg-slate-900 text-white">
                 <LayoutDashboard className="size-5" aria-hidden="true" />
               </div>
-              <h1 className="mt-4 text-2xl font-bold">FamilyHub</h1>
+              <h1 className="mt-4 text-2xl font-bold">FridgeHub</h1>
             </div>
 
             <div className="mb-6">
               <h2 className="text-2xl font-bold text-slate-950">
-                {mode === 'signin' ? 'Welcome back' : mode === 'join' ? 'Create your account' : 'Set up FamilyHub'}
+                {mode === 'signin' ? 'Welcome back' : mode === 'join' ? 'Create your account' : 'Set up FridgeHub'}
               </h2>
               <p className="mt-1 text-sm text-slate-500">
                 {mode === 'signin' ? 'Use your family account to continue.' : mode === 'join' ? 'Use the invite shared by your family admin.' : 'Create the first admin account.'}
@@ -305,7 +305,7 @@ export const LoginPage = ({ onBootstrapSignup, onInviteSignup, onLogin, error }:
 
             {showDemoCredentials && mode === 'signin' && (
               <p className="mt-6 rounded-lg bg-slate-100 px-4 py-3 text-center text-sm text-slate-600">
-                Demo: <span className="font-semibold text-slate-900">meera</span> / <span className="font-semibold text-slate-900">familyhub</span>
+                Demo: <span className="font-semibold text-slate-900">meera</span> / <span className="font-semibold text-slate-900">fridgehub</span>
               </p>
             )}
           </main>

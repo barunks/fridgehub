@@ -12,7 +12,7 @@ from app.core.dependencies import CurrentUser, token_revocation_key
 from app.core.permissions import effective_permissions, normalize_permission
 from app.core.security import create_access_token, create_refresh_token, decode_token, hash_password, verify_password
 from app.models import Device, DeviceSession, Family, FamilyInvite, FamilyMember, GroceryListType, User
-from app.schemas.familyhub import BootstrapSignupRequest, InviteSignupRequest, SignupInviteCreate
+from app.schemas.fridgehub import BootstrapSignupRequest, InviteSignupRequest, SignupInviteCreate
 from app.services.audit_service import write_audit_log
 from app.services.family_service import invalidate_entity, invalidate_family_cache
 from app.utils.sanitize import sanitize_text
@@ -362,7 +362,7 @@ def bootstrap_signup(
     ip_address: str | None = None,
 ) -> dict[str, str]:
     if not signup_status(db)["bootstrapAllowed"]:
-        raise HTTPException(status_code=409, detail="FamilyHub is already initialized. Ask an admin for an invite.")
+        raise HTTPException(status_code=409, detail="FridgeHub is already initialized. Ask an admin for an invite.")
 
     email = sanitize_text(payload.email.lower())
     username = sanitize_text(payload.username)

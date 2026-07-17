@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # ─────────────────────────────────────────────────────────────────────────────
-# FamilyHub — stop.sh
+# FridgeHub — stop.sh
 # Gracefully stops frontend and/or backend services, frees ports, cleans up.
 # Usage: ./scripts/stop.sh [frontend|backend|all]
 # ─────────────────────────────────────────────────────────────────────────────
@@ -77,7 +77,7 @@ stop_backend() {
   kill_port 8000 "backend API"
 
   info "Checking Celery workers..."
-  kill_by_pattern "celery.*familyhub\|celery.*app.tasks" "celery worker"
+  kill_by_pattern "celery.*fridgehub\|celery.*app.tasks" "celery worker"
 
   # Clean up .pyc and __pycache__ if requested
   if [[ -d "$PROJECT_ROOT/backend/__pycache__" ]]; then
@@ -106,7 +106,7 @@ stop_frontend() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-header "FamilyHub Stop Script"
+header "FridgeHub Stop Script"
 info "Target: ${BOLD}$TARGET${NC}"
 info "Project: $PROJECT_ROOT"
 echo ""

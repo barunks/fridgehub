@@ -45,7 +45,7 @@ def current_user_payload(current_user: CurrentUser) -> dict[str, object]:
 
 
 def token_revocation_key(jti: str) -> str:
-    return f"familyhub:revoked-token:{jti}"
+    return f"fridgehub:revoked-token:{jti}"
 
 
 def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> CurrentUser:

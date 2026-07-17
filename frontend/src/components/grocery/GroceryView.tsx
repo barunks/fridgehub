@@ -25,7 +25,7 @@ import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { FormField, inputClass } from '@/components/ui/FormField'
-import type { FamilyHubStore } from '@/hooks/useFamilyHub'
+import type { FridgeHubStore } from '@/hooks/useFridgeHub'
 import type {
   Frequency,
   GroceryItem,
@@ -112,8 +112,8 @@ const defaultCycleFilters: MultiViewFilters = {
   statuses: [],
 }
 
-const budgetTargetStorageKey = 'familyhub-shopping-budget-target'
-const budgetEstimateStorageKey = 'familyhub-shopping-budget-estimates'
+const budgetTargetStorageKey = 'fridgehub-shopping-budget-target'
+const budgetEstimateStorageKey = 'fridgehub-shopping-budget-estimates'
 
 const createEmptyItem = (listTypeId = 1): GroceryDraft => ({
   itemName: '',
@@ -172,7 +172,7 @@ const formatBudget = (value: number) =>
     minimumFractionDigits: 2,
   }).format(value)
 
-export const GroceryView = ({ store }: { store: FamilyHubStore }) => {
+export const GroceryView = ({ store }: { store: FridgeHubStore }) => {
   const {
     state,
     addGroceryItem,

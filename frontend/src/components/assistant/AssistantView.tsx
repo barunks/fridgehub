@@ -23,7 +23,7 @@ import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { FormField, inputClass } from '@/components/ui/FormField'
-import type { FamilyHubStore } from '@/hooks/useFamilyHub'
+import type { FridgeHubStore } from '@/hooks/useFridgeHub'
 import type { AssistantInsight } from '@/types/familyHub'
 import { formatTime } from '@/utils/date'
 import { cn } from '@/utils/style'
@@ -52,7 +52,7 @@ const typeIcon = {
 
 const insightSeverity = (insight: AssistantInsight) => insight.severity ?? 'info'
 
-export const AssistantView = ({ store }: { store: FamilyHubStore }) => {
+export const AssistantView = ({ store }: { store: FridgeHubStore }) => {
   const { state, askAssistant, clearAssistantChat, refreshAssistantInsights } = store
   const navigate = useNavigate()
   const [query, setQuery] = useState('')

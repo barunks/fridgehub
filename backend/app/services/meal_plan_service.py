@@ -5,7 +5,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.models import Family, FamilyMember, MealPlan, MealPlanTemplate, Recipe
-from app.schemas.familyhub import MealTemplateRowCreate, MealTemplateRowUpdate, MealUpdate
+from app.schemas.fridgehub import MealTemplateRowCreate, MealTemplateRowUpdate, MealUpdate
 from app.services.audit_service import write_audit_log
 from app.services.family_service import invalidate_entity, serialize_meal, serialize_recipe
 from app.services.notification_service import create_notification

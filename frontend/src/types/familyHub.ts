@@ -260,7 +260,7 @@ export interface AssistantMessage {
   createdAt: string
 }
 
-export interface FamilyHubState {
+export interface FridgeHubState {
   currentUser: CurrentSession
   capabilities: Permission[]
   family: Family

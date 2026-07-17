@@ -19,13 +19,13 @@ from app.core.rate_limit import LoginRateLimitMiddleware
 from app.core.versioning import API_VERSIONS, APIVersionHeaderMiddleware
 from app.utils.seed import seed_demo_data
 
-logger = logging.getLogger("familyhub.app")
+logger = logging.getLogger("fridgehub.app")
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     setup_logging()
-    logger.info("Starting FamilyHub API", extra={"version": settings.app_version, "environment": settings.environment})
+    logger.info("Starting FridgeHub API", extra={"version": settings.app_version, "environment": settings.environment})
 
     if settings.run_migrations_on_startup:
         init_db()
@@ -50,11 +50,11 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         finally:
             db.close()
 
-    logger.info("FamilyHub API ready")
+    logger.info("FridgeHub API ready")
     yield
 
     # Graceful shutdown
-    logger.info("Shutting down FamilyHub API")
+    logger.info("Shutting down FridgeHub API")
     engine.dispose()
     logger.info("Database connections closed")
 

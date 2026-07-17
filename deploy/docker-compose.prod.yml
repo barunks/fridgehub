@@ -1,5 +1,5 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# FamilyHub — Production Docker Compose (VastSpace VPS)
+# FridgeHub — Production Docker Compose (VastSpace VPS)
 #
 # Usage:
 #   cp deploy/.env.production .env   # fill in all values first
@@ -11,12 +11,12 @@ services:
   # ── MySQL 8 ────────────────────────────────────────────────────────────────
   mysql:
     image: mysql:8.0
-    container_name: familyhub-mysql
+    container_name: fridgehub-mysql
     restart: unless-stopped
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD}
-      MYSQL_DATABASE: ${MYSQL_DATABASE:-familyhub_db}
-      MYSQL_USER: ${MYSQL_USER:-familyhub_user}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-fridgehub_db}
+      MYSQL_USER: ${MYSQL_USER:-fridgehub_user}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:?set MYSQL_PASSWORD}
     volumes:
       - mysql_data:/var/lib/mysql
@@ -38,7 +38,7 @@ services:
   # ── Redis 7 ────────────────────────────────────────────────────────────────
   redis:
     image: redis:7-alpine
-    container_name: familyhub-redis
+    container_name: fridgehub-redis
     restart: unless-stopped
     command: redis-server --appendonly yes --maxmemory 128mb --maxmemory-policy allkeys-lru
     volumes:
@@ -56,11 +56,11 @@ services:
     build:
       context: ../backend
       dockerfile: Dockerfile
-    container_name: familyhub-migrate
+    container_name: fridgehub-migrate
     restart: "no"
     command: alembic upgrade head
     environment:
-      DATABASE_URL: mysql+mysqlconnector://${MYSQL_USER:-familyhub_user}:${MYSQL_PASSWORD}@mysql:3306/${MYSQL_DATABASE:-familyhub_db}
+      DATABASE_URL: mysql+mysqlconnector://${MYSQL_USER:-fridgehub_user}:${MYSQL_PASSWORD}@mysql:3306/${MYSQL_DATABASE:-fridgehub_db}
       SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY}
       ENVIRONMENT: production
     depends_on:
@@ -74,10 +74,10 @@ services:
     build:
       context: ../backend
       dockerfile: Dockerfile
-    container_name: familyhub-backend
+    container_name: fridgehub-backend
     restart: unless-stopped
     environment:
-      DATABASE_URL: mysql+mysqlconnector://${MYSQL_USER:-familyhub_user}:${MYSQL_PASSWORD}@mysql:3306/${MYSQL_DATABASE:-familyhub_db}
+      DATABASE_URL: mysql+mysqlconnector://${MYSQL_USER:-fridgehub_user}:${MYSQL_PASSWORD}@mysql:3306/${MYSQL_DATABASE:-fridgehub_db}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY}
       ENVIRONMENT: production
@@ -110,11 +110,11 @@ services:
     build:
       context: ../backend
       dockerfile: Dockerfile
-    container_name: familyhub-celery-worker
+    container_name: fridgehub-celery-worker
     restart: unless-stopped
     command: celery -A app.tasks.celery_app worker --loglevel=info --concurrency=2
     environment:
-      DATABASE_URL: mysql+mysqlconnector://${MYSQL_USER:-familyhub_user}:${MYSQL_PASSWORD}@mysql:3306/${MYSQL_DATABASE:-familyhub_db}
+      DATABASE_URL: mysql+mysqlconnector://${MYSQL_USER:-fridgehub_user}:${MYSQL_PASSWORD}@mysql:3306/${MYSQL_DATABASE:-fridgehub_db}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/1}
       CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/2}
@@ -130,11 +130,11 @@ services:
     build:
       context: ../backend
       dockerfile: Dockerfile
-    container_name: familyhub-celery-beat
+    container_name: fridgehub-celery-beat
     restart: unless-stopped
     command: celery -A app.tasks.celery_app beat --loglevel=info
     environment:
-      DATABASE_URL: mysql+mysqlconnector://${MYSQL_USER:-familyhub_user}:${MYSQL_PASSWORD}@mysql:3306/${MYSQL_DATABASE:-familyhub_db}
+      DATABASE_URL: mysql+mysqlconnector://${MYSQL_USER:-fridgehub_user}:${MYSQL_PASSWORD}@mysql:3306/${MYSQL_DATABASE:-fridgehub_db}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/1}
       CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/2}
@@ -152,7 +152,7 @@ services:
       dockerfile: Dockerfile
       args:
         VITE_API_URL: ""
-    container_name: familyhub-frontend
+    container_name: fridgehub-frontend
     restart: unless-stopped
     networks:
       - internal
@@ -160,7 +160,7 @@ services:
   # ── Nginx Reverse Proxy + SSL ──────────────────────────────────────────────
   nginx:
     image: nginx:1.27-alpine
-    container_name: familyhub-nginx
+    container_name: fridgehub-nginx
     restart: unless-stopped
     ports:
       - "80:80"
@@ -181,7 +181,7 @@ services:
   # ── Certbot (SSL certificate manager) ─────────────────────────────────────
   certbot:
     image: certbot/certbot:latest
-    container_name: familyhub-certbot
+    container_name: fridgehub-certbot
     volumes:
       - certbot_www:/var/www/certbot
       - certbot_certs:/etc/letsencrypt

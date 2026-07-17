@@ -1,1 +1,1 @@
-"""FamilyHub backend package."""
+"""FridgeHub backend package."""

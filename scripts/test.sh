@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # ─────────────────────────────────────────────────────────────────────────────
-# FamilyHub — test.sh
+# FridgeHub — test.sh
 # Runs frontend and/or backend test suites.
 # Usage: ./scripts/test.sh [frontend|backend|all]
 # ─────────────────────────────────────────────────────────────────────────────
@@ -40,7 +40,7 @@ run_backend_tests() {
 
   export PYTHONPATH="$PROJECT_ROOT/backend"
   export LOGIN_RATE_LIMIT_PER_MINUTE=100
-  export DATABASE_URL="sqlite:///./test_familyhub.db"
+  export DATABASE_URL="sqlite:///./test_fridgehub.db"
   export SECRET_KEY="test-secret-key-at-least-32-characters"
   export CACHE_ENABLED=false
 
@@ -112,7 +112,7 @@ run_frontend_tests() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-header "FamilyHub Test Runner"
+header "FridgeHub Test Runner"
 info "Target: ${BOLD}$TARGET${NC}"
 info "Project: $PROJECT_ROOT"
 

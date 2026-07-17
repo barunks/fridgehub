@@ -1,6 +1,6 @@
-# FamilyHub
+# FridgeHub
 
-FamilyHub is a full-stack family command center built from `docs/Family_Hub.docx` and the reference images in `docs/`.
+FridgeHub is a full-stack family command center built from `docs/Family_Hub.docx` and the reference images in `docs/`.
 
 The implementation now includes the React UI, FastAPI backend, SQLAlchemy data model, MySQL schema, Redis cache abstraction, Celery schedules, Docker deployment files, seeded meal/grocery/task templates, JWT auth/RBAC, audit logging, and tests.
 
@@ -24,7 +24,7 @@ The implementation now includes the React UI, FastAPI backend, SQLAlchemy data m
 ## Project Structure
 
 ```text
-FamilyHub/
+FridgeHub/
 |-- backend/
 |   |-- app/
 |   |   |-- api/v1/endpoints/
@@ -74,7 +74,7 @@ Backend:
 python3 -m venv .venv
 . .venv/bin/activate
 pip install -r backend/requirements.txt
-PYTHONPATH=backend DATABASE_URL=sqlite:///./familyhub.db CACHE_ENABLED=false SECRET_KEY=local-dev-secret-key-at-least-32-chars uvicorn app.main:app --reload --port 8000
+PYTHONPATH=backend DATABASE_URL=sqlite:///./fridgehub.db CACHE_ENABLED=false SECRET_KEY=local-dev-secret-key-at-least-32-chars uvicorn app.main:app --reload --port 8000
 ```
 
 Frontend:
@@ -127,7 +127,7 @@ The `/command-center` route (parent-only) provides a unified admin workspace wit
 
 ## Signup & Onboarding
 
-FamilyHub does not allow open anonymous signup. Every user must belong to a family, and every session is tied to a registered device.
+FridgeHub does not allow open anonymous signup. Every user must belong to a family, and every session is tied to a registered device.
 
 ### Three Signup Flows
 
@@ -192,7 +192,7 @@ For the login endpoint, `deviceId` is optional by default for backward compatibi
 
 Device ID strategy:
 - Frontend generates a stable random UUID via `crypto.randomUUID()` on first use
-- Stored in `localStorage` under `familyhub-device-id`
+- Stored in `localStorage` under `fridgehub-device-id`
 - No browser fingerprinting — avoids privacy concerns and instability across browser updates
 - API clients without a device ID get a derived UUID from `uuid5(user_agent|ip)` as fallback
 
@@ -342,7 +342,7 @@ Demo login:
 ```json
 {
   "username": "meera",
-  "password": "familyhub"
+  "password": "fridgehub"
 }
 ```
 
@@ -381,7 +381,7 @@ Migrations:
 Local SQLite is used only for fast development and tests. Docker uses MySQL:
 
 ```text
-mysql+mysqlconnector://familyhub_user:${MYSQL_PASSWORD}@mysql:3306/familyhub_db
+mysql+mysqlconnector://fridgehub_user:${MYSQL_PASSWORD}@mysql:3306/fridgehub_db
 ```
 
 ## Cache And Background Jobs

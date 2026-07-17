@@ -100,8 +100,8 @@ export const useAuth = () => {
     const handler = () => {
       clearSession()
     }
-    window.addEventListener('familyhub:auth-required', handler)
-    return () => window.removeEventListener('familyhub:auth-required', handler)
+    window.addEventListener('fridgehub:auth-required', handler)
+    return () => window.removeEventListener('fridgehub:auth-required', handler)
   }, [clearSession])
 
   useEffect(() => {

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────────────
-# FamilyHub — VastSpace VPS Deploy Script
+# FridgeHub — VastSpace VPS Deploy Script
 #
 # Usage:
 #   ./deploy/deploy.sh --setup      # First-time server setup + deploy
@@ -35,8 +35,8 @@ CERTBOT_EMAIL="${CERTBOT_EMAIL:?CERTBOT_EMAIL not set in .env}"
 REMOTE_HOST="${REMOTE_HOST:-}"
 REMOTE_USER="${REMOTE_USER:-root}"
 SSH_KEY="${SSH_KEY:-$HOME/.ssh/id_rsa}"
-REMOTE_DIR="${REMOTE_DIR:-/opt/familyhub}"
-GIT_REPO="${GIT_REPO:-git@github.com:barunks/familyhub.git}"
+REMOTE_DIR="${REMOTE_DIR:-/opt/fridgehub}"
+GIT_REPO="${GIT_REPO:-git@github.com:barunks/fridgehub.git}"
 BRANCH="${BRANCH:-main}"
 
 # ── Colors ───────────────────────────────────────────────────────────────────
@@ -191,7 +191,7 @@ deploy_code() {
 
   info "Injecting domain into Nginx config..."
   remote "
-    sed -i 's/DOMAIN_PLACEHOLDER/$DOMAIN/g' $REMOTE_DIR/deploy/nginx/conf.d/familyhub.conf
+    sed -i 's/DOMAIN_PLACEHOLDER/$DOMAIN/g' $REMOTE_DIR/deploy/nginx/conf.d/fridgehub.conf
   "
 
   info "Building and starting all services..."
@@ -205,7 +205,7 @@ deploy_code() {
 
   info "Waiting for backend health check..."
   for i in {1..12}; do
-    STATUS=$(remote "docker inspect --format='{{.State.Health.Status}}' familyhub-backend 2>/dev/null || echo starting")
+    STATUS=$(remote "docker inspect --format='{{.State.Health.Status}}' fridgehub-backend 2>/dev/null || echo starting")
     if [[ "$STATUS" == "healthy" ]]; then
       ok "Backend is healthy"
       break
@@ -247,11 +247,11 @@ validate() {
   echo "$HEADERS" | grep -qi "x-content-type-options"   && ok "X-Content-Type-Options present" || warn "X-Content-Type-Options missing"
 
   info "Checking MySQL..."
-  MYSQL=$(remote "docker exec familyhub-mysql mysqladmin ping -uroot -p\$MYSQL_ROOT_PASSWORD --silent 2>/dev/null && echo ok || echo fail")
+  MYSQL=$(remote "docker exec fridgehub-mysql mysqladmin ping -uroot -p\$MYSQL_ROOT_PASSWORD --silent 2>/dev/null && echo ok || echo fail")
   [[ "$MYSQL" == "ok" ]] && ok "MySQL: healthy" || err "MySQL: $MYSQL"
 
   info "Checking Redis..."
-  REDIS=$(remote "docker exec familyhub-redis redis-cli ping 2>/dev/null || echo FAIL")
+  REDIS=$(remote "docker exec fridgehub-redis redis-cli ping 2>/dev/null || echo FAIL")
   [[ "$REDIS" == "PONG" ]] && ok "Redis: PONG" || err "Redis: $REDIS"
 
   echo ""
@@ -275,7 +275,7 @@ show_logs() {
 # ─────────────────────────────────────────────────────────────────────────────
 # Main
 # ─────────────────────────────────────────────────────────────────────────────
-header "FamilyHub — VastSpace Deployment"
+header "FridgeHub — VastSpace Deployment"
 echo -e "  ${BOLD}Domain${NC}:  https://$DOMAIN"
 echo -e "  ${BOLD}Server${NC}:  $REMOTE_USER@$REMOTE_HOST"
 echo -e "  ${BOLD}Branch${NC}:  $BRANCH"

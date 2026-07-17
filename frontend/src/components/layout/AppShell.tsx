@@ -19,7 +19,7 @@ import {
 import { Avatar } from '@/components/ui/Avatar'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
-import type { FamilyHubStore } from '@/hooks/useFamilyHub'
+import type { FridgeHubStore } from '@/hooks/useFridgeHub'
 import type { ThemeMode } from '@/hooks/useTheme'
 import { navItems } from '@/navigation'
 import type { ScopedNavigationOptions, ViewKey } from '@/types/familyHub'
@@ -31,7 +31,7 @@ interface AppShellProps extends PropsWithChildren {
   onLogout: () => void
   onNavigate: (view: ViewKey, options?: ScopedNavigationOptions) => void
   onToggleTheme: () => void
-  store: FamilyHubStore
+  store: FridgeHubStore
   theme: ThemeMode
   username: string | null
 }
@@ -246,7 +246,7 @@ export const AppShell = ({ activeView, onLogout, onNavigate, onToggleTheme, stor
             <div className="mb-5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-800">
               {store.isBrowserOffline
                 ? 'You are offline. Changes are disabled until the browser reconnects.'
-                : 'The FamilyHub API is unavailable. Data shown here may be stale.'}
+                : 'The FridgeHub API is unavailable. Data shown here may be stale.'}
             </div>
           )}
           {children}

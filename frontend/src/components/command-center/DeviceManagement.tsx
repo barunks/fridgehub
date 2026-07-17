@@ -100,7 +100,7 @@ export const DeviceManagement = () => {
       <ConfirmDialog
         open={revokeId !== null}
         title="Revoke device?"
-        message="This device will be permanently blocked from accessing FamilyHub. All active sessions will be terminated."
+        message="This device will be permanently blocked from accessing FridgeHub. All active sessions will be terminated."
         confirmLabel="Revoke"
         onConfirm={() => { if (revokeId) handleRevoke(revokeId) }}
         onCancel={() => setRevokeId(null)}

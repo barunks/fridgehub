@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # ─────────────────────────────────────────────────────────────────────────────
-# FamilyHub — start.sh
+# FridgeHub — start.sh
 # Stops existing services, ensures dependencies, starts frontend/backend.
 # Usage: ./scripts/start.sh [frontend|backend|all]
 # ─────────────────────────────────────────────────────────────────────────────
@@ -42,7 +42,7 @@ wait_for_port() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-header "FamilyHub Start Script"
+header "FridgeHub Start Script"
 info "Target: ${BOLD}$TARGET${NC}"
 info "Project: $PROJECT_ROOT"
 
@@ -80,7 +80,7 @@ if [[ "$TARGET" == "backend" || "$TARGET" == "back" || "$TARGET" == "be" || "$TA
     ok "MySQL process detected"
   else
     warn "MySQL is not running"
-    info "Backend will use SQLite fallback (DATABASE_URL=sqlite:///./familyhub.db)"
+    info "Backend will use SQLite fallback (DATABASE_URL=sqlite:///./fridgehub.db)"
     info "To use MySQL, start it with: sudo systemctl start mysql"
   fi
 
@@ -147,7 +147,7 @@ start_backend() {
 
   # Set environment for local dev
   export PYTHONPATH="$PROJECT_ROOT/backend"
-  export DATABASE_URL="${DATABASE_URL:-sqlite:///./familyhub.db}"
+  export DATABASE_URL="${DATABASE_URL:-sqlite:///./fridgehub.db}"
   export CACHE_ENABLED="${CACHE_ENABLED:-false}"
   export SECRET_KEY="${SECRET_KEY:-local-dev-secret-key-at-least-32-chars}"
   export SEED_ON_STARTUP="${SEED_ON_STARTUP:-true}"
@@ -219,4 +219,4 @@ info "View logs:"
 echo "    tail -f $PROJECT_ROOT/logs/backend.log"
 echo "    tail -f $PROJECT_ROOT/logs/frontend.log"
 echo ""
-ok "FamilyHub started ✓"
+ok "FridgeHub started ✓"

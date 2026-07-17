@@ -4,7 +4,7 @@ import type {
   BootstrapSignupInput,
   DeviceInfo,
   DevicePolicy,
-  FamilyHubState,
+  FridgeHubState,
   FrequencyType,
   GroceryItemUpdateInput,
   GroceryItem,
@@ -63,8 +63,8 @@ export interface AccessTokenPayload {
   exp?: number
 }
 
-const DEVICE_ID_KEY = 'familyhub-device-id'
-const DEVICE_COOKIE_KEY = 'familyhub_device_id'
+const DEVICE_ID_KEY = 'fridgehub-device-id'
+const DEVICE_COOKIE_KEY = 'fridgehub_device_id'
 
 const readDeviceCookie = () => {
   if (typeof document === 'undefined') return null
@@ -167,7 +167,7 @@ export const clearAccessToken = () => {
 
 const authRequired = () => {
   clearAccessToken()
-  window.dispatchEvent(new Event('familyhub:auth-required'))
+  window.dispatchEvent(new Event('fridgehub:auth-required'))
   throw new Error('AUTH_REQUIRED')
 }
 
@@ -347,7 +347,7 @@ export const api = {
   previewSignupInvite,
   bootstrapSignup,
   signupWithInvite,
-  bootstrap: () => request<FamilyHubState>('/api/v1/family/bootstrap'),
+  bootstrap: () => request<FridgeHubState>('/api/v1/family/bootstrap'),
   listGroceryItems: (params: { limit?: number; offset?: number; listTypeId?: number | 'all' } = {}) =>
     request<GroceryItem[]>(
       `/api/v1/grocery/items${queryString({

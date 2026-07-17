@@ -112,7 +112,7 @@ export const DemoWorkflow = () => {
       <div className="rounded-3xl border border-slate-200/70 bg-white p-6 shadow-sm sm:p-8">
         <div className="mb-6">
           <h3 className="text-xl font-bold text-slate-900">Application Flow</h3>
-          <p className="mt-1 text-sm text-slate-500">Click each stage to explore how FamilyHub works end-to-end</p>
+          <p className="mt-1 text-sm text-slate-500">Click each stage to explore how FridgeHub works end-to-end</p>
         </div>
 
         {/* Timeline bar */}

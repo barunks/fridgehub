@@ -2,7 +2,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.models import Announcement
-from app.schemas.familyhub import AnnouncementCreate
+from app.schemas.fridgehub import AnnouncementCreate
 from app.services.audit_service import write_audit_log
 from app.services.family_service import invalidate_entity, serialize_announcement
 from app.utils.sanitize import sanitize_text

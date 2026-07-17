@@ -1,4 +1,4 @@
-# FamilyHub — VastSpace VPS Deployment Guide
+# FridgeHub — VastSpace VPS Deployment Guide
 
 Full stack: FastAPI + MySQL 8 + Redis + Celery + React + Nginx + Let's Encrypt HTTPS
 
@@ -15,7 +15,7 @@ deploy/
 └── nginx/
     ├── nginx.conf             # Nginx base config
     └── conf.d/
-        └── familyhub.conf     # Site config (HTTP redirect + HTTPS + proxy)
+        └── fridgehub.conf     # Site config (HTTP redirect + HTTPS + proxy)
 ```
 
 ---
@@ -33,7 +33,7 @@ deploy/
 
 ### Domain
 - Buy a domain (Namecheap, Cloudflare, etc.) or use a subdomain you own
-- Create an **A record**: `familyhub.yourdomain.com` → `YOUR_VPS_IP`
+- Create an **A record**: `fridgehub.yourdomain.com` → `YOUR_VPS_IP`
 - DNS propagation takes 5–30 minutes
 
 ---
@@ -50,12 +50,12 @@ Edit `.env` and fill in **every** value:
 
 ```bash
 # Required — change all of these
-DOMAIN=familyhub.yourdomain.com
+DOMAIN=fridgehub.yourdomain.com
 MYSQL_ROOT_PASSWORD=$(openssl rand -base64 24 | tr -dc 'a-zA-Z0-9' | head -c 24)
 MYSQL_PASSWORD=$(openssl rand -base64 24 | tr -dc 'a-zA-Z0-9' | head -c 24)
 SECRET_KEY=$(openssl rand -base64 48 | tr -dc 'a-zA-Z0-9' | head -c 64)
 CERTBOT_EMAIL=your-email@example.com
-CORS_ORIGINS=https://familyhub.yourdomain.com
+CORS_ORIGINS=https://fridgehub.yourdomain.com
 
 # VPS connection
 REMOTE_HOST=YOUR_VPS_IP
@@ -78,7 +78,7 @@ This will:
 1. SSH into your VPS
 2. Install Docker + UFW firewall
 3. Open ports 22, 80, 443
-4. Clone the repository to `/opt/familyhub`
+4. Clone the repository to `/opt/fridgehub`
 5. Copy your `.env` to the server
 6. Build all Docker images
 7. Run database migrations
@@ -107,7 +107,7 @@ Expected output:
 [ OK ]  Redis: PONG
 ```
 
-Open your browser: `https://familyhub.yourdomain.com`
+Open your browser: `https://fridgehub.yourdomain.com`
 
 ---
 
@@ -115,7 +115,7 @@ Open your browser: `https://familyhub.yourdomain.com`
 
 On first launch the database is empty. The app shows a **Setup** tab:
 
-1. Go to `https://familyhub.yourdomain.com`
+1. Go to `https://fridgehub.yourdomain.com`
 2. Click **Setup** tab
 3. Fill in family name, admin username, email, password
 4. Register your device
@@ -156,7 +156,7 @@ This pulls the latest code, rebuilds images, runs migrations, and restarts servi
 ssh -i ~/.ssh/id_rsa root@YOUR_VPS_IP
 
 # On the server — view container status
-cd /opt/familyhub
+cd /opt/fridgehub
 docker compose -f deploy/docker-compose.prod.yml ps
 
 # On the server — restart a single service

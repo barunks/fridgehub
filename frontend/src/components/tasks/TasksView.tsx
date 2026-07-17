@@ -37,7 +37,7 @@ import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { FormField, inputClass } from '@/components/ui/FormField'
-import type { FamilyHubStore } from '@/hooks/useFamilyHub'
+import type { FridgeHubStore } from '@/hooks/useFridgeHub'
 import type { FamilyMember, NewTaskInput, Priority, RecurrenceType, Task, TaskStatus, TaskUpdateInput, TimeScope } from '@/types/familyHub'
 import {
   addDaysToIsoDate,
@@ -547,7 +547,7 @@ const TaskLane = ({
   )
 }
 
-export const TasksView = ({ store }: { store: FamilyHubStore }) => {
+export const TasksView = ({ store }: { store: FridgeHubStore }) => {
   const { state, addTask, updateTask, reassignTask, toggleTaskStatus, deleteTask, loadTaskPage } = store
   const canManageTasks = store.can('manage_tasks')
   const page = store.pagination.tasks

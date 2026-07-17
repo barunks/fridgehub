@@ -19,7 +19,7 @@ import { Avatar } from '@/components/ui/Avatar'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
-import type { FamilyHubStore } from '@/hooks/useFamilyHub'
+import type { FridgeHubStore } from '@/hooks/useFridgeHub'
 import type {
   GroceryCycle,
   FamilyMember,
@@ -48,7 +48,7 @@ import {
 import { cn } from '@/utils/style'
 
 interface DashboardViewProps {
-  store: FamilyHubStore
+  store: FridgeHubStore
   onNavigate: (view: ViewKey, options?: ScopedNavigationOptions) => void
 }
 

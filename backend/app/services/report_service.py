@@ -1,4 +1,4 @@
-"""Shopping report PDF generation with FamilyHub watermark."""
+"""Shopping report PDF generation with FridgeHub watermark."""
 
 from io import BytesIO
 from datetime import date
@@ -21,11 +21,11 @@ from app.models import Family, GroceryItem, GroceryListType, GroceryPurchaseCycl
 
 
 class _WatermarkCanvas(Canvas):
-    """Canvas subclass that draws a diagonal FamilyHub watermark on every page."""
+    """Canvas subclass that draws a diagonal FridgeHub watermark on every page."""
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self._family_name: str = "FamilyHub"
+        self._family_name: str = "FridgeHub"
 
     def showPage(self):
         self._draw_watermark()
@@ -37,7 +37,7 @@ class _WatermarkCanvas(Canvas):
         self.setFillColor(colors.Color(0.85, 0.85, 0.85, alpha=0.3))
         self.translate(A4[0] / 2, A4[1] / 2)
         self.rotate(45)
-        self.drawCentredString(0, 0, f"FamilyHub")
+        self.drawCentredString(0, 0, f"FridgeHub")
         self.restoreState()
 
 

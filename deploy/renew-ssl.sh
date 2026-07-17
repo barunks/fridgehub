@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────────────
-# FamilyHub — SSL Auto-Renewal
-# Run by cron on the VPS: 0 3 * * * /opt/familyhub/deploy/renew-ssl.sh
+# FridgeHub — SSL Auto-Renewal
+# Run by cron on the VPS: 0 3 * * * /opt/fridgehub/deploy/renew-ssl.sh
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
-REMOTE_DIR="/opt/familyhub"
+REMOTE_DIR="/opt/fridgehub"
 COMPOSE="docker compose -f $REMOTE_DIR/deploy/docker-compose.prod.yml"
-LOG="/var/log/familyhub-ssl-renew.log"
+LOG="/var/log/fridgehub-ssl-renew.log"
 
 echo "[$(date)] Starting SSL renewal check" >> "$LOG"
 

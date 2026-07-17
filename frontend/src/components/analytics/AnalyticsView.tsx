@@ -2,11 +2,11 @@ import { BarChart3 } from 'lucide-react'
 import { Suspense, lazy } from 'react'
 import { Card, CardContent } from '@/components/ui/Card'
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary'
-import type { FamilyHubStore } from '@/hooks/useFamilyHub'
+import type { FridgeHubStore } from '@/hooks/useFridgeHub'
 
 const HouseholdCharts = lazy(() => import('@/components/analytics/HouseholdCharts'))
 
-export const AnalyticsView = ({ store }: { store: FamilyHubStore }) => {
+export const AnalyticsView = ({ store }: { store: FridgeHubStore }) => {
   return (
     <div className="grid gap-6">
       {/* Hero banner */}
