@@ -611,7 +611,7 @@ export const api = {
   },
   // Device management
   getDevicePolicy: () => request<DevicePolicy>('/api/v1/auth/devices/policy'),
-  updateDevicePolicy: (maxDevices: number) =>
+  updateDevicePolicy: (maxDevices: number | null) =>
     request<DevicePolicy>('/api/v1/auth/devices/policy', {
       method: 'PATCH',
       body: JSON.stringify({ maxDevices }),

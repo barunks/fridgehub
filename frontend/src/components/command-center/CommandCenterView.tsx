@@ -1140,7 +1140,8 @@ const SecurityPanel = ({ store: _store }: Props) => {
   const [loading, setLoading] = useState(false)
   const [devices, setDevices] = useState<DeviceInfo[]>([])
   const [devicePolicy, setDevicePolicy] = useState<DevicePolicy | null>(null)
-  const [deviceLimitDraft, setDeviceLimitDraft] = useState(5)
+  const [deviceLimitDraft, setDeviceLimitDraft] = useState<number | null>(null)
+  const [limitEnabled, setLimitEnabled] = useState(false)
   const [registrationQr, setRegistrationQr] = useState('')
   const [devicesLoading, setDevicesLoading] = useState(false)
   const [invites, setInvites] = useState<SignupInvite[]>([])
@@ -1158,7 +1159,8 @@ const SecurityPanel = ({ store: _store }: Props) => {
       .then(([deviceRows, policy]) => {
         setDevices(deviceRows)
         setDevicePolicy(policy)
-        setDeviceLimitDraft(policy.maxDevices)
+        setDeviceLimitDraft(policy.maxDevices ?? null)
+        setLimitEnabled(policy.maxDevices !== null)
       })
       .catch(() => {})
       .finally(() => setDevicesLoading(false))
@@ -1268,16 +1270,18 @@ const SecurityPanel = ({ store: _store }: Props) => {
   }
 
   const handleUpdateDeviceLimit = () => {
-    if (deviceLimitDraft < Math.max(1, devicePolicy?.activeDeviceCount ?? 1) || deviceLimitDraft > 20) {
-      setStatus({ type: 'error', message: 'Device limit must be at least the active device count and no more than 20' })
+    const limit = limitEnabled ? (deviceLimitDraft ?? 1) : null
+    if (limit !== null && (limit < Math.max(1, devicePolicy?.activeDeviceCount ?? 1) || limit > 100)) {
+      setStatus({ type: 'error', message: 'Limit must be at least the active device count and no more than 100' })
       return
     }
     api
-      .updateDevicePolicy(deviceLimitDraft)
+      .updateDevicePolicy(limit as number)
       .then((policy) => {
         setDevicePolicy(policy)
-        setDeviceLimitDraft(policy.maxDevices)
-        setStatus({ type: 'success', message: 'Device limit updated' })
+        setDeviceLimitDraft(policy.maxDevices ?? null)
+        setLimitEnabled(policy.maxDevices !== null)
+        setStatus({ type: 'success', message: limit === null ? 'Device limit removed (unlimited)' : 'Device limit updated' })
       })
       .catch((err: unknown) => setStatus({ type: 'error', message: err instanceof Error ? err.message : 'Failed to update device limit' }))
   }
@@ -1453,24 +1457,42 @@ const SecurityPanel = ({ store: _store }: Props) => {
             )}
           </div>
           <div className="grid content-start gap-4">
-            <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
-              <FormField label="Max devices">
+            <div className="grid gap-3">
+              <label className="flex items-center gap-2 text-sm font-semibold text-slate-700 cursor-pointer">
                 <input
-                  className={inputClass}
-                  max={20}
-                  min={Math.max(1, devicePolicy?.activeDeviceCount ?? 1)}
-                  onChange={(event) => setDeviceLimitDraft(Number(event.target.value))}
-                  type="number"
-                  value={deviceLimitDraft}
+                  type="checkbox"
+                  className="accent-blue-600"
+                  checked={limitEnabled}
+                  onChange={(e) => {
+                    setLimitEnabled(e.target.checked)
+                    if (e.target.checked && !deviceLimitDraft) setDeviceLimitDraft(10)
+                  }}
                 />
-              </FormField>
-              <Button onClick={handleUpdateDeviceLimit} variant="secondary">
-                Save limit
-              </Button>
+                Enforce a device limit
+              </label>
+              {limitEnabled && (
+                <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
+                  <FormField label="Max devices">
+                    <input
+                      className={inputClass}
+                      max={100}
+                      min={Math.max(1, devicePolicy?.activeDeviceCount ?? 1)}
+                      onChange={(event) => setDeviceLimitDraft(Number(event.target.value))}
+                      type="number"
+                      value={deviceLimitDraft ?? 10}
+                    />
+                  </FormField>
+                  <Button onClick={handleUpdateDeviceLimit} variant="secondary">Save limit</Button>
+                </div>
+              )}
+              {!limitEnabled && (
+                <Button onClick={handleUpdateDeviceLimit} variant="secondary" className="justify-self-start">Save (unlimited)</Button>
+              )}
             </div>
             <div className="rounded-xl border border-slate-100 bg-white p-4">
               <p className="text-sm font-semibold text-slate-900">
-                {devicePolicy?.activeDeviceCount ?? devices.length} of {devicePolicy?.maxDevices ?? deviceLimitDraft} devices registered
+                {devicePolicy?.activeDeviceCount ?? devices.length} of{' '}
+                {devicePolicy?.maxDevices != null ? devicePolicy.maxDevices : 'Unlimited'} devices registered
               </p>
               <p className="mt-1 text-xs leading-5 text-slate-500">
                 Open FridgeHub on another device or scan this QR code, then sign in with the same account. The device is registered automatically after sign-in.

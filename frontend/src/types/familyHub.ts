@@ -389,7 +389,7 @@ export interface DeviceInfo {
 }
 
 export interface DevicePolicy {
-  maxDevices: number
+  maxDevices: number | null
   activeDeviceCount: number
 }
 

@@ -9,7 +9,8 @@ import type {
   SignupStatus,
 } from '@/types/familyHub'
 
-type AuthMode = 'signin' | 'join' | 'setup'
+type AuthMode = 'signin' | 'signup'
+type SignupSubMode = 'admin' | 'join'
 
 interface LoginPageProps {
   onLogin: (username: string, password: string, device?: Partial<SignupDeviceInput>) => Promise<void>
@@ -90,7 +91,8 @@ export const LoginPage = ({ onBootstrapSignup, onInviteSignup, onLogin, error }:
     return search.get('invite') || ''
   }, [])
 
-  const [mode, setMode] = useState<AuthMode>(initialInvite ? 'join' : 'signin')
+  const [mode, setMode] = useState<AuthMode>(initialInvite ? 'signup' : 'signin')
+  const [signupSubMode, setSignupSubMode] = useState<SignupSubMode>(initialInvite ? 'join' : 'admin')
   const [status, setStatus] = useState<SignupStatus | null>(null)
   const [invitePreview, setInvitePreview] = useState<SignupInvitePreview | null>(null)
   const [localError, setLocalError] = useState<string | null>(null)
@@ -122,10 +124,8 @@ export const LoginPage = ({ onBootstrapSignup, onInviteSignup, onLogin, error }:
   }, [])
 
   useEffect(() => {
-    if (status && !status.bootstrapAllowed && mode === 'setup') {
-      setMode(initialInvite ? 'join' : 'signin')
-    }
-  }, [initialInvite, mode, status])
+    if (initialInvite) { setMode('signup'); setSignupSubMode('join') }
+  }, [initialInvite])
 
   useEffect(() => {
     const token = extractInviteToken(inviteToken)
@@ -154,8 +154,7 @@ export const LoginPage = ({ onBootstrapSignup, onInviteSignup, onLogin, error }:
 
   const tabs: Array<{ key: AuthMode; label: string }> = [
     { key: 'signin', label: 'Sign in' },
-    { key: 'join', label: 'Join family' },
-    ...(status?.bootstrapAllowed ? [{ key: 'setup' as const, label: 'First setup' }] : []),
+    { key: 'signup', label: 'Sign up' },
   ]
 
   const handleSignIn = async (event: FormEvent) => {
@@ -258,14 +257,14 @@ export const LoginPage = ({ onBootstrapSignup, onInviteSignup, onLogin, error }:
 
             <div className="mb-6">
               <h2 className="text-2xl font-bold text-slate-950">
-                {mode === 'signin' ? 'Welcome back' : mode === 'join' ? 'Create your account' : 'Set up FridgeHub'}
+                {mode === 'signin' ? 'Welcome back' : signupSubMode === 'admin' ? 'Create your family' : 'Create your account'}
               </h2>
               <p className="mt-1 text-sm text-slate-500">
                 {mode === 'signin'
                   ? 'Sign in with your family account credentials.'
-                  : mode === 'join'
-                  ? 'Use the invite link or code shared by your family admin.'
-                  : 'Create the first admin account and family workspace.'}
+                  : signupSubMode === 'admin'
+                  ? 'Set up the first admin account and family workspace.'
+                  : 'Use the invite link or code shared by your family admin.'}
               </p>
             </div>
 
@@ -285,6 +284,21 @@ export const LoginPage = ({ onBootstrapSignup, onInviteSignup, onLogin, error }:
                 </button>
               ))}
             </div>
+
+            {mode === 'signup' && (
+              <div className="mb-5 grid grid-cols-2 gap-1 rounded-xl border border-slate-200 bg-slate-100 p-1">
+                {([['admin', 'Family Admin'], ['join', 'Join Family']] as [SignupSubMode, string][]).map(([key, label]) => (
+                  <button
+                    key={key}
+                    type="button"
+                    className={`min-h-9 rounded-lg px-3 text-sm font-semibold transition ${signupSubMode === key ? 'bg-white text-slate-950 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+                    onClick={() => { setSignupSubMode(key); setLocalError(null) }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
 
             {currentError && (
               <div className="mb-5 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-800">
@@ -307,7 +321,7 @@ export const LoginPage = ({ onBootstrapSignup, onInviteSignup, onLogin, error }:
               </form>
             )}
 
-            {mode === 'join' && (
+            {mode === 'signup' && signupSubMode === 'join' && (
               <form className="grid gap-4" onSubmit={handleJoin}>
                 <Field icon={KeyRound} label="Invite link or code" onChange={setInviteToken} value={inviteToken} placeholder="Paste the invite link or token" />
                 {invitePreview && (
@@ -340,7 +354,7 @@ export const LoginPage = ({ onBootstrapSignup, onInviteSignup, onLogin, error }:
               </form>
             )}
 
-            {mode === 'setup' && (
+            {mode === 'signup' && signupSubMode === 'admin' && (
               <form className="grid gap-4" onSubmit={handleSetup}>
                 <Field icon={Home} label="Family name" {...setupField('familyName')} placeholder="e.g. The Krishnamurthy Family" />
                 <Field autoComplete="name" icon={UserRound} label="Admin full name" {...setupField('fullName')} placeholder="Your full name" />
