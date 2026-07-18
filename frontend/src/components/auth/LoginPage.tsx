@@ -104,7 +104,7 @@ export const LoginPage = ({ onBootstrapSignup, onInviteSignup, onLogin, error }:
   const [joinTouched, setJoinTouched] = useState<Record<string, boolean>>({})
 
   const [setupForm, setSetupForm] = useState({
-    familyName: 'FridgeHub',
+    familyName: '',
     homeBase: 'Singapore',
     timezone: 'Asia/Singapore',
     fullName: '',
