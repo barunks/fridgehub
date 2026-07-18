@@ -86,12 +86,16 @@ def seed_demo_data(db: Session) -> None:
         return
 
     # Acquire advisory lock to prevent race between multiple workers
-    dialect = db.bind.dialect.name if db.bind else "sqlite"
+    from sqlalchemy import text as _text
+    try:
+        dialect = db.get_bind().dialect.name
+    except Exception:
+        dialect = "sqlite"
     if dialect == "postgresql":
-        db.execute(__import__("sqlalchemy").text("SELECT pg_advisory_lock(123456789)"))
+        db.execute(_text("SELECT pg_advisory_lock(123456789)"))
         # Re-check after acquiring lock
         if db.query(Family).first():
-            db.execute(__import__("sqlalchemy").text("SELECT pg_advisory_unlock(123456789)"))
+            db.execute(_text("SELECT pg_advisory_unlock(123456789)"))
             return
 
     users = [
@@ -588,4 +592,4 @@ def seed_demo_data(db: Session) -> None:
     db.commit()
 
     if dialect == "postgresql":
-        db.execute(__import__("sqlalchemy").text("SELECT pg_advisory_unlock(123456789)"))
+        db.execute(_text("SELECT pg_advisory_unlock(123456789)"))

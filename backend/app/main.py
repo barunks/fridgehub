@@ -27,19 +27,25 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     setup_logging()
     logger.info("Starting FridgeHub API", extra={"version": settings.app_version, "environment": settings.environment})
 
+    import sys
     if settings.run_migrations_on_startup:
+        print("DIAG: calling init_db()", file=sys.stderr, flush=True)
         try:
             init_db()
-        except Exception:
+            print("DIAG: init_db() done", file=sys.stderr, flush=True)
+        except Exception as exc:
+            print(f"DIAG: init_db() FAILED: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
             logger.exception("Startup migrations failed")
             raise
     else:
         logger.info("Skipping startup migrations; expecting migrations to be run before the API starts")
 
     if settings.seed_on_startup:
+        print("DIAG: calling seed_demo_data()", file=sys.stderr, flush=True)
         db = SessionLocal()
         try:
             seed_demo_data(db)
+            print("DIAG: seed_demo_data() done", file=sys.stderr, flush=True)
             # Warm cache for seeded family
             if settings.cache_enabled:
                 from app.services.family_service import bootstrap_state
