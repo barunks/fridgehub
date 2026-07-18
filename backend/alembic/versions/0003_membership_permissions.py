@@ -7,7 +7,7 @@ Create Date: 2026-07-11
 
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy import inspect
+from sqlalchemy import text
 
 
 revision = "0003_membership_permissions"
@@ -16,17 +16,25 @@ branch_labels = None
 depends_on = None
 
 
-def _columns(table_name: str) -> set[str]:
-    return {column["name"] for column in inspect(op.get_bind()).get_columns(table_name)}
+def _has_column(table: str, column: str) -> bool:
+    bind = op.get_bind()
+    if bind.dialect.name == "sqlite":
+        rows = bind.execute(text(f"PRAGMA table_info({table})")).fetchall()
+        return any(r[1] == column for r in rows)
+    result = bind.execute(text(
+        "SELECT COUNT(*) FROM information_schema.columns "
+        "WHERE table_name = :t AND column_name = :c"
+    ), {"t": table, "c": column})
+    return result.scalar() > 0
 
 
 def upgrade() -> None:
-    if "permissions" not in _columns("family_members"):
+    if not _has_column("family_members", "permissions"):
         with op.batch_alter_table("family_members") as batch:
             batch.add_column(sa.Column("permissions", sa.JSON(), nullable=True))
 
 
 def downgrade() -> None:
-    if "permissions" in _columns("family_members"):
+    if _has_column("family_members", "permissions"):
         with op.batch_alter_table("family_members") as batch:
             batch.drop_column("permissions")

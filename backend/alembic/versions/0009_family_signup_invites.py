@@ -8,7 +8,7 @@ Create Date: 2026-07-13
 
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy import inspect
+from sqlalchemy import text
 
 
 revision = "0009_family_signup_invites"
@@ -17,8 +17,21 @@ branch_labels = None
 depends_on = None
 
 
+def _has_table(table: str) -> bool:
+    bind = op.get_bind()
+    if bind.dialect.name == "sqlite":
+        rows = bind.execute(text(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name=:t"
+        ), {"t": table}).fetchall()
+        return len(rows) > 0
+    result = bind.execute(text(
+        "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = :t"
+    ), {"t": table})
+    return result.scalar() > 0
+
+
 def upgrade() -> None:
-    if inspect(op.get_bind()).has_table("family_invites"):
+    if _has_table("family_invites"):
         return
     op.create_table(
         "family_invites",
@@ -47,7 +60,8 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    if inspect(op.get_bind()).has_table("family_invites"):
-        op.drop_index("idx_family_invites_token_hash", table_name="family_invites")
-        op.drop_index("idx_family_invites_family", table_name="family_invites")
-        op.drop_table("family_invites")
+    if not _has_table("family_invites"):
+        return
+    op.drop_index("idx_family_invites_token_hash", table_name="family_invites")
+    op.drop_index("idx_family_invites_family", table_name="family_invites")
+    op.drop_table("family_invites")

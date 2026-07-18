@@ -8,7 +8,7 @@ Create Date: 2026-07-13
 
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy import inspect
+from sqlalchemy import text
 
 
 revision = "0005_device_sessions"
@@ -17,37 +17,49 @@ branch_labels = None
 depends_on = None
 
 
-def _columns(table_name: str) -> set[str]:
-    return {column["name"] for column in inspect(op.get_bind()).get_columns(table_name)}
+def _has_column(table: str, column: str) -> bool:
+    bind = op.get_bind()
+    if bind.dialect.name == "sqlite":
+        rows = bind.execute(text(f"PRAGMA table_info({table})")).fetchall()
+        return any(r[1] == column for r in rows)
+    result = bind.execute(text(
+        "SELECT COUNT(*) FROM information_schema.columns "
+        "WHERE table_name = :t AND column_name = :c"
+    ), {"t": table, "c": column})
+    return result.scalar() > 0
 
 
-def _tables() -> set[str]:
-    return set(inspect(op.get_bind()).get_table_names())
+def _has_table(table: str) -> bool:
+    bind = op.get_bind()
+    if bind.dialect.name == "sqlite":
+        rows = bind.execute(text(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name=:t"
+        ), {"t": table}).fetchall()
+        return len(rows) > 0
+    result = bind.execute(text(
+        "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = :t"
+    ), {"t": table})
+    return result.scalar() > 0
 
 
 def upgrade() -> None:
-    # Extend devices table
-    cols = _columns("devices")
-    with op.batch_alter_table("devices") as batch:
-        if "family_id" not in cols:
-            batch.add_column(sa.Column("family_id", sa.Integer(), nullable=True))
-        if "device_type" not in cols:
-            batch.add_column(sa.Column("device_type", sa.String(30), nullable=False, server_default="browser"))
-        if "platform" not in cols:
-            batch.add_column(sa.Column("platform", sa.String(100), nullable=True))
-        if "last_ip" not in cols:
-            batch.add_column(sa.Column("last_ip", sa.String(45), nullable=True))
-        if "last_user_agent" not in cols:
-            batch.add_column(sa.Column("last_user_agent", sa.String(512), nullable=True))
-        if "is_revoked" not in cols:
-            batch.add_column(sa.Column("is_revoked", sa.Boolean(), nullable=False, server_default="0"))
-        if "is_trusted" not in cols:
-            batch.add_column(sa.Column("is_trusted", sa.Boolean(), nullable=False, server_default="0"))
-        if "registered_at" not in cols:
-            batch.add_column(sa.Column("registered_at", sa.DateTime(), server_default=sa.func.now(), nullable=False))
+    cols_to_add = [
+        ("family_id", sa.Column("family_id", sa.Integer(), nullable=True)),
+        ("device_type", sa.Column("device_type", sa.String(30), nullable=False, server_default="browser")),
+        ("platform", sa.Column("platform", sa.String(100), nullable=True)),
+        ("last_ip", sa.Column("last_ip", sa.String(45), nullable=True)),
+        ("last_user_agent", sa.Column("last_user_agent", sa.String(512), nullable=True)),
+        ("is_revoked", sa.Column("is_revoked", sa.Boolean(), nullable=False, server_default="0")),
+        ("is_trusted", sa.Column("is_trusted", sa.Boolean(), nullable=False, server_default="0")),
+        ("registered_at", sa.Column("registered_at", sa.DateTime(), server_default=sa.func.now(), nullable=False)),
+    ]
+    missing = [(name, col) for name, col in cols_to_add if not _has_column("devices", name)]
+    if missing:
+        with op.batch_alter_table("devices") as batch:
+            for _, col in missing:
+                batch.add_column(col)
 
-    # Create device_sessions table
-    if "device_sessions" not in _tables():
+    if not _has_table("device_sessions"):
         op.create_table(
             "device_sessions",
             sa.Column("id", sa.Integer(), primary_key=True),
@@ -69,11 +81,13 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    if "device_sessions" in _tables():
+    if _has_table("device_sessions"):
         op.drop_table("device_sessions")
 
-    cols = _columns("devices")
-    with op.batch_alter_table("devices") as batch:
-        for col in ("family_id", "device_type", "platform", "last_ip", "last_user_agent", "is_revoked", "is_trusted", "registered_at"):
-            if col in cols:
+    cols = ["family_id", "device_type", "platform", "last_ip", "last_user_agent",
+            "is_revoked", "is_trusted", "registered_at"]
+    present = [c for c in cols if _has_column("devices", c)]
+    if present:
+        with op.batch_alter_table("devices") as batch:
+            for col in present:
                 batch.drop_column(col)

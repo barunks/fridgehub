@@ -8,7 +8,7 @@ Create Date: 2026-07-13
 
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy import inspect, text
+from sqlalchemy import text
 
 
 revision = "0006_max_devices_constraint"
@@ -19,8 +19,16 @@ depends_on = None
 MAX_DEVICES_DEFAULT = 5
 
 
-def _columns(table_name: str) -> set[str]:
-    return {column["name"] for column in inspect(op.get_bind()).get_columns(table_name)}
+def _has_column(table: str, column: str) -> bool:
+    bind = op.get_bind()
+    if bind.dialect.name == "sqlite":
+        rows = bind.execute(text(f"PRAGMA table_info({table})")).fetchall()
+        return any(r[1] == column for r in rows)
+    result = bind.execute(text(
+        "SELECT COUNT(*) FROM information_schema.columns "
+        "WHERE table_name = :t AND column_name = :c"
+    ), {"t": table, "c": column})
+    return result.scalar() > 0
 
 
 def _is_mysql() -> bool:
@@ -28,15 +36,12 @@ def _is_mysql() -> bool:
 
 
 def upgrade() -> None:
-    # Add max_devices column to users table for per-user override
-    cols = _columns("users")
-    if "max_devices" not in cols:
+    if not _has_column("users", "max_devices"):
         with op.batch_alter_table("users") as batch:
             batch.add_column(
                 sa.Column("max_devices", sa.Integer(), nullable=False, server_default=str(MAX_DEVICES_DEFAULT))
             )
 
-    # MySQL trigger to enforce device limit on INSERT
     if _is_mysql():
         op.execute(text("DROP TRIGGER IF EXISTS trg_enforce_max_devices"))
         op.execute(text("""
@@ -67,7 +72,6 @@ def downgrade() -> None:
     if _is_mysql():
         op.execute(text("DROP TRIGGER IF EXISTS trg_enforce_max_devices"))
 
-    cols = _columns("users")
-    if "max_devices" in cols:
+    if _has_column("users", "max_devices"):
         with op.batch_alter_table("users") as batch:
             batch.drop_column("max_devices")
