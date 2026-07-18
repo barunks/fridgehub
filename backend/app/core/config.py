@@ -3,7 +3,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _BACKEND_DIR = Path(__file__).resolve().parents[2]
@@ -35,6 +35,13 @@ class Settings(BaseSettings):
     auth_cookie_secure: bool = False
     auth_cookie_samesite: Literal["lax", "strict", "none"] = "lax"
     auth_cookie_domain: str | None = None
+
+    @field_validator("auth_cookie_secure", mode="before")
+    @classmethod
+    def parse_cookie_secure(cls, v: object) -> bool:
+        if isinstance(v, str):
+            return v.strip().lower() in ("true", "1", "yes")
+        return bool(v)
     auth_expose_refresh_token_in_body: bool = False
 
     cors_origins: str = (
