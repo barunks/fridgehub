@@ -1,9 +1,13 @@
 import secrets
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_BACKEND_DIR = Path(__file__).resolve().parents[2]
+_PROJECT_DIR = _BACKEND_DIR.parent
 
 
 class Settings(BaseSettings):
@@ -51,15 +55,17 @@ class Settings(BaseSettings):
     # SMTP email
     smtp_host: str = "smtp.gmail.com"
     smtp_port: int = 587
-    smtp_username: str = ""
-    smtp_password: str = ""
-    smtp_from_email: str = ""
+    smtp_username: str = "barunks@gmail.com"
+    smtp_password: str = "cxyi puhu whph jgiv"
+    smtp_from_email: str = "barunks@gmail.com"
     smtp_use_tls: bool = True
 
     # Twilio SMS
     twilio_account_sid: str = ""
     twilio_auth_token: str = ""
     twilio_from_number: str = ""
+    twilio_messaging_service_sid: str = ""
+    twilio_verify_sid: str = ""
 
     @property
     def email_enabled(self) -> bool:
@@ -67,9 +73,33 @@ class Settings(BaseSettings):
 
     @property
     def sms_enabled(self) -> bool:
-        return bool(self.twilio_account_sid and self.twilio_auth_token and self.twilio_from_number)
+        return bool(
+            self.twilio_account_sid
+            and self.twilio_auth_token
+            and (
+                self.twilio_verify_sid
+                or self.twilio_messaging_service_sid
+                or self.twilio_from_number
+            )
+        )
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    @property
+    def twilio_verify_enabled(self) -> bool:
+        return bool(self.twilio_account_sid and self.twilio_auth_token and self.twilio_verify_sid)
+
+    @property
+    def twilio_direct_sms_enabled(self) -> bool:
+        return bool(
+            self.twilio_account_sid
+            and self.twilio_auth_token
+            and (self.twilio_messaging_service_sid or self.twilio_from_number)
+        )
+
+    model_config = SettingsConfigDict(
+        env_file=(_BACKEND_DIR / ".env", _PROJECT_DIR / ".env"),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
     @model_validator(mode="after")
     def validate_production_security(self) -> "Settings":

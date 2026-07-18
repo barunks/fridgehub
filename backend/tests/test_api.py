@@ -9,6 +9,11 @@ os.environ["SEED_ON_STARTUP"] = "true"
 os.environ["CACHE_ENABLED"] = "false"
 os.environ["SECRET_KEY"] = "test-secret-key-that-is-long-enough-for-jwt-tests"
 os.environ["LOGIN_RATE_LIMIT_PER_MINUTE"] = "1000"
+os.environ["TWILIO_ACCOUNT_SID"] = ""
+os.environ["TWILIO_AUTH_TOKEN"] = ""
+os.environ["TWILIO_FROM_NUMBER"] = ""
+os.environ["TWILIO_VERIFY_SID"] = ""
+os.environ["TWILIO_MESSAGING_SERVICE_SID"] = ""
 
 from fastapi.testclient import TestClient  # noqa: E402
 
@@ -2996,9 +3001,15 @@ def test_login_blocked_for_unverified_user() -> None:
             db.close()
         r = client.post("/api/v1/auth/login", json={"username": "unveriflogin", "password": "Test1234"})
     assert r.status_code == 403
-    detail = r.json()["error"]["detail"]
+    body = r.json()
+    detail = body["error"]["detail"]
     assert "verified" in detail.lower()
-    assert f"userId={user_id}" in detail
+    assert body["error"]["code"] == "account_unverified"
+    assert body["userId"] == user_id
+    assert body["email"] == "unveriflogin@fridgehub.test"
+    assert body["phone"]
+    assert body["emailVerified"] is False
+    assert body["phoneVerified"] is False
 
 
 def test_verify_otp_correct_codes_marks_verified() -> None:
@@ -3034,6 +3045,8 @@ def test_verify_otp_correct_codes_marks_verified() -> None:
         assert body["emailVerified"] is True
         assert body["phoneVerified"] is True
         assert body["verified"] is True
+        assert body["email"] == "verifcorrect@fridgehub.test"
+        assert body["phone"]
 
         # Confirm DB state via a fresh connection
         db2 = SessionLocal()
@@ -3178,7 +3191,10 @@ def test_resend_otp_issues_new_codes() -> None:
         with TestClient(app) as client:
             r = client.post("/api/v1/auth/resend", json={"userId": user.id})
         assert r.status_code == 200
-        assert r.json()["verified"] is False
+        body = r.json()
+        assert body["verified"] is False
+        assert body["email"] == "verifresend@fridgehub.test"
+        assert body["phone"]
 
         db.expire_all()
         # Old row must be invalidated
@@ -3192,6 +3208,137 @@ def test_resend_otp_issues_new_codes() -> None:
         assert new_row.id != old_id
     finally:
         db.close()
+
+
+def test_send_sms_calls_twilio_when_configured(monkeypatch) -> None:
+    """Configured SMS delivery must make a Twilio Messages API request."""
+    from app.core.config import settings
+    from app.services.notification_service import send_sms
+    import twilio.rest
+
+    calls: dict[str, object] = {}
+
+    class FakeMessage:
+        sid = "SMtest"
+        status = "queued"
+
+    class FakeMessages:
+        def create(self, **kwargs):
+            calls["message"] = kwargs
+            return FakeMessage()
+
+    class FakeClient:
+        def __init__(self, account_sid: str, auth_token: str):
+            calls["account_sid"] = account_sid
+            calls["auth_token"] = auth_token
+            self.messages = FakeMessages()
+
+    monkeypatch.setattr(twilio.rest, "Client", FakeClient)
+    monkeypatch.setattr(settings, "twilio_account_sid", "ACtest")
+    monkeypatch.setattr(settings, "twilio_auth_token", "token-test")
+    monkeypatch.setattr(settings, "twilio_from_number", "+12295543902")
+    monkeypatch.setattr(settings, "twilio_messaging_service_sid", "")
+    monkeypatch.setattr(settings, "twilio_verify_sid", "")
+
+    assert send_sms("+6591234567", "Your FridgeHub code is 123456.") is True
+    assert calls["account_sid"] == "ACtest"
+    assert calls["auth_token"] == "token-test"
+    assert calls["message"] == {
+        "to": "+6591234567",
+        "from_": "+12295543902",
+        "body": "Your FridgeHub code is 123456.",
+    }
+
+
+def test_send_sms_uses_messaging_service_without_from(monkeypatch) -> None:
+    """Direct SMS can use a Messaging Service SID instead of a From number."""
+    from app.core.config import settings
+    from app.services.notification_service import send_sms
+    import twilio.rest
+
+    calls: dict[str, object] = {}
+
+    class FakeMessage:
+        sid = "SMtest"
+        status = "queued"
+
+    class FakeMessages:
+        def create(self, **kwargs):
+            calls["message"] = kwargs
+            return FakeMessage()
+
+    class FakeClient:
+        def __init__(self, account_sid: str, auth_token: str):
+            calls["account_sid"] = account_sid
+            calls["auth_token"] = auth_token
+            self.messages = FakeMessages()
+
+    monkeypatch.setattr(twilio.rest, "Client", FakeClient)
+    monkeypatch.setattr(settings, "twilio_account_sid", "ACtest")
+    monkeypatch.setattr(settings, "twilio_auth_token", "token-test")
+    monkeypatch.setattr(settings, "twilio_from_number", "")
+    monkeypatch.setattr(settings, "twilio_messaging_service_sid", "MGtest")
+    monkeypatch.setattr(settings, "twilio_verify_sid", "")
+
+    assert send_sms("+6591234567", "Your FridgeHub code is 123456.") is True
+    assert calls["message"] == {
+        "to": "+6591234567",
+        "messaging_service_sid": "MGtest",
+        "body": "Your FridgeHub code is 123456.",
+    }
+
+
+def test_send_otp_sms_uses_twilio_verify_when_configured(monkeypatch) -> None:
+    """OTP SMS can use Twilio Verify, which does not require TWILIO_FROM_NUMBER."""
+    from app.core.config import settings
+    from app.services.notification_service import send_otp_sms
+    import twilio.rest
+
+    calls: dict[str, object] = {}
+
+    class FakeVerification:
+        sid = "VEtest"
+        status = "pending"
+
+    class FakeVerifications:
+        def create(self, **kwargs):
+            calls["verification"] = kwargs
+            return FakeVerification()
+
+    class FakeService:
+        verifications = FakeVerifications()
+
+    class FakeServices:
+        def __call__(self, service_sid: str):
+            calls["service_sid"] = service_sid
+            return FakeService()
+
+    class FakeV2:
+        services = FakeServices()
+
+    class FakeVerify:
+        v2 = FakeV2()
+
+    class FakeClient:
+        def __init__(self, account_sid: str, auth_token: str):
+            calls["account_sid"] = account_sid
+            calls["auth_token"] = auth_token
+            self.verify = FakeVerify()
+
+    monkeypatch.setattr(twilio.rest, "Client", FakeClient)
+    monkeypatch.setattr(settings, "twilio_account_sid", "ACtest")
+    monkeypatch.setattr(settings, "twilio_auth_token", "token-test")
+    monkeypatch.setattr(settings, "twilio_from_number", "")
+    monkeypatch.setattr(settings, "twilio_messaging_service_sid", "")
+    monkeypatch.setattr(settings, "twilio_verify_sid", "VAtest")
+
+    assert send_otp_sms("+6591234567", "123456") is True
+    assert calls["service_sid"] == "VAtest"
+    assert calls["verification"] == {
+        "to": "+6591234567",
+        "channel": "sms",
+        "custom_code": "123456",
+    }
 
 
 def test_verified_user_can_login_normally() -> None:

@@ -65,6 +65,8 @@ class TokenResponse(CamelModel):
     accessToken: str
     refreshToken: str | None = None
     tokenType: str = "bearer"
+    email: str | None = None
+    phone: str | None = None
 
 
 class RefreshRequest(CamelModel):
@@ -666,6 +668,8 @@ class VerificationStatusOut(CamelModel):
     emailVerified: bool
     phoneVerified: bool
     verified: bool  # True only when both are verified
+    email: str | None = None
+    phone: str | None = None
 
 
 class BootstrapState(CamelModel):

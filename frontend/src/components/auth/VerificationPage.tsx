@@ -13,6 +13,7 @@ interface VerificationPageProps {
 
 const OtpInput = ({
   label,
+  sublabel,
   icon: Icon,
   value,
   onChange,
@@ -21,6 +22,7 @@ const OtpInput = ({
   testId,
 }: {
   label: string
+  sublabel?: string
   icon: typeof Mail
   value: string
   onChange: (v: string) => void
@@ -32,7 +34,12 @@ const OtpInput = ({
     <div className="flex items-center justify-between text-sm font-semibold text-slate-700">
       <span className="flex items-center gap-1.5">
         <Icon className="size-4 text-slate-400" aria-hidden="true" />
-        {label}
+        <span>
+          {label}
+          {sublabel && (
+            <span className="ml-1.5 font-normal text-slate-500">{sublabel}</span>
+          )}
+        </span>
       </span>
       {verified ? (
         <span className="flex items-center gap-1 text-xs font-medium text-emerald-600">
@@ -73,7 +80,6 @@ export const VerificationPage = ({ status, onVerify, onResend, onCancel }: Verif
   const [cooldown, setCooldown] = useState(0)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  // Start cooldown on mount (OTP was just sent by the backend)
   useEffect(() => {
     startCooldown()
     return () => { if (timerRef.current) clearInterval(timerRef.current) }
@@ -85,10 +91,7 @@ export const VerificationPage = ({ status, onVerify, onResend, onCancel }: Verif
     if (timerRef.current) clearInterval(timerRef.current)
     timerRef.current = setInterval(() => {
       setCooldown((prev) => {
-        if (prev <= 1) {
-          clearInterval(timerRef.current!)
-          return 0
-        }
+        if (prev <= 1) { clearInterval(timerRef.current!); return 0 }
         return prev - 1
       })
     }, 1000)
@@ -127,6 +130,8 @@ export const VerificationPage = ({ status, onVerify, onResend, onCancel }: Verif
     }
   }
 
+  const fullyVerified = status.emailVerified && (!status.hasPhone || status.phoneVerified)
+
   return (
     <div className="min-h-dvh bg-slate-50 px-4 py-8 text-slate-950 sm:px-6">
       <div className="mx-auto flex min-h-[calc(100dvh-4rem)] w-full max-w-5xl items-center">
@@ -142,6 +147,28 @@ export const VerificationPage = ({ status, onVerify, onResend, onCancel }: Verif
               <p className="mt-3 max-w-sm text-sm leading-6 text-slate-300">
                 Verify your identity to activate your account and access your family workspace.
               </p>
+
+              {/* Delivery targets */}
+              <div className="mt-8 grid gap-3">
+                {status.email && (
+                  <div className="flex items-center gap-3 rounded-lg border border-white/10 bg-white/5 px-3 py-2.5">
+                    <Mail className="size-4 shrink-0 text-slate-400" aria-hidden="true" />
+                    <div>
+                      <p className="text-xs text-slate-500">Email code sent to</p>
+                      <p className="text-sm font-semibold text-white">{status.email}</p>
+                    </div>
+                  </div>
+                )}
+                {status.hasPhone && status.phone && (
+                  <div className="flex items-center gap-3 rounded-lg border border-white/10 bg-white/5 px-3 py-2.5">
+                    <Phone className="size-4 shrink-0 text-slate-400" aria-hidden="true" />
+                    <div>
+                      <p className="text-xs text-slate-500">SMS code sent to</p>
+                      <p className="text-sm font-semibold text-white">{status.phone}</p>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
             <div className="grid gap-3 text-sm text-slate-200">
               {[
@@ -169,13 +196,39 @@ export const VerificationPage = ({ status, onVerify, onResend, onCancel }: Verif
             <div className="mb-6">
               <h2 className="text-2xl font-bold text-slate-950">Verify your account</h2>
               <p className="mt-1 text-sm text-slate-500">
-                Enter the 6-digit codes sent to your email{status.hasPhone ? ' and phone' : ''}.
-                Codes expire in 10 minutes.
+                We sent 6-digit codes to
+                {status.email && <> <span className="font-medium text-slate-700">{status.email}</span></>}
+                {status.hasPhone && status.phone && (
+                  <> and <span className="font-medium text-slate-700">{status.phone}</span></>
+                )}
+                . Codes expire in 10 minutes.
               </p>
             </div>
 
-            {/* Overall status banner */}
-            {status.emailVerified && (!status.hasPhone || status.phoneVerified) ? (
+            {/* Delivery targets — mobile only */}
+            <div className="mb-5 grid gap-2 lg:hidden">
+              {status.email && (
+                <div className="flex items-center gap-2.5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                  <Mail className="size-4 shrink-0 text-slate-400" aria-hidden="true" />
+                  <div className="min-w-0">
+                    <p className="text-xs text-slate-400">Email code sent to</p>
+                    <p className="truncate text-sm font-semibold text-slate-700">{status.email}</p>
+                  </div>
+                </div>
+              )}
+              {status.hasPhone && status.phone && (
+                <div className="flex items-center gap-2.5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                  <Phone className="size-4 shrink-0 text-slate-400" aria-hidden="true" />
+                  <div className="min-w-0">
+                    <p className="text-xs text-slate-400">SMS code sent to</p>
+                    <p className="truncate text-sm font-semibold text-slate-700">{status.phone}</p>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Status banner */}
+            {fullyVerified ? (
               <div className="mb-5 flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-800">
                 <CheckCircle2 className="size-4 shrink-0" aria-hidden="true" />
                 Account fully verified. Redirecting…
@@ -203,7 +256,8 @@ export const VerificationPage = ({ status, onVerify, onResend, onCancel }: Verif
               <OtpInput
                 disabled={loading}
                 icon={Mail}
-                label="Email verification code"
+                label="Email code"
+                sublabel={status.email ? `(sent to ${status.email})` : undefined}
                 onChange={setEmailOtp}
                 value={emailOtp}
                 verified={status.emailVerified}
@@ -214,7 +268,8 @@ export const VerificationPage = ({ status, onVerify, onResend, onCancel }: Verif
                 <OtpInput
                   disabled={loading}
                   icon={Phone}
-                  label="Phone verification code"
+                  label="Phone code"
+                  sublabel={status.phone ? `(sent to ${status.phone})` : undefined}
                   onChange={setPhoneOtp}
                   value={phoneOtp}
                   verified={status.phoneVerified}

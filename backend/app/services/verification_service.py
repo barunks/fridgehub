@@ -33,6 +33,33 @@ _OTP_TTL_MINUTES = 10
 _MAX_ATTEMPTS = 5
 
 
+def _has_phone(user: User) -> bool:
+    return bool(user.phone and user.phone.strip())
+
+
+def verification_status(user: User) -> dict[str, object]:
+    has_phone = _has_phone(user)
+    phone_verified = bool(user.phone_verified) if has_phone else True
+    email_verified = bool(user.email_verified)
+    return {
+        "userId": user.id,
+        "emailVerified": email_verified,
+        "phoneVerified": phone_verified,
+        "verified": email_verified and phone_verified,
+        "email": user.email,
+        "phone": user.phone if has_phone else None,
+    }
+
+
+def _pending_channels(user: User) -> list[str]:
+    channels = []
+    if not user.email_verified:
+        channels.append("email")
+    if _has_phone(user) and not user.phone_verified:
+        channels.append("phone")
+    return channels
+
+
 def _six_digit_otp() -> str:
     return "".join(secrets.choice("0123456789") for _ in range(6))
 
@@ -57,7 +84,7 @@ def issue_otp(db: Session, user: User) -> int:
     frontend response).
     """
     email_otp = _six_digit_otp()
-    phone_otp = _six_digit_otp()
+    phone_otp = _six_digit_otp() if _has_phone(user) else None
 
     _invalidate_existing(db, user.id)
 
@@ -65,17 +92,21 @@ def issue_otp(db: Session, user: User) -> int:
         entity_type="user",
         entity_id=user.id,
         email_otp_hash=_hash_otp(email_otp),
-        phone_otp_hash=_hash_otp(phone_otp) if user.phone else None,
+        phone_otp_hash=_hash_otp(phone_otp) if phone_otp else None,
         email_target=user.email,
-        phone_target=user.phone or "",
+        phone_target=user.phone if _has_phone(user) else None,
         expires_at=datetime.now(timezone.utc) + timedelta(minutes=_OTP_TTL_MINUTES),
     )
     db.add(otp_row)
     db.flush()
 
     send_otp_email(user.email, email_otp)
-    if user.phone:
-        send_otp_sms(user.phone, phone_otp)
+    if phone_otp and user.phone:
+        if not send_otp_sms(user.phone, phone_otp):
+            raise HTTPException(
+                status_code=502,
+                detail="Could not send SMS verification code. Check Twilio configuration and the recipient phone number.",
+            )
 
     return user.id
 
@@ -90,8 +121,8 @@ def verify_otp(db: Session, user_id: int, email_otp: str, phone_otp: str) -> dic
     if not user or not user.is_active:
         raise HTTPException(status_code=404, detail="User not found.")
 
-    if user.email_verified and user.phone_verified:
-        return {"userId": user.id, "emailVerified": True, "phoneVerified": True, "verified": True}
+    if verification_status(user)["verified"]:
+        return verification_status(user)
 
     now = datetime.now(timezone.utc)
     row = (
@@ -138,18 +169,25 @@ def verify_otp(db: Session, user_id: int, email_otp: str, phone_otp: str) -> dic
     row.is_used = True
     db.flush()
 
-    return {"userId": user.id, "emailVerified": True, "phoneVerified": True, "verified": True}
+    return verification_status(user)
 
 
 def require_verified_or_resend(db: Session, user: User) -> None:
     """Called during login. If the user is not fully verified, re-issue OTPs
     and raise HTTP 403 so the frontend redirects to the verification screen.
     """
-    if user.email_verified and user.phone_verified:
+    status = verification_status(user)
+    if status["verified"]:
         return
 
     issue_otp(db, user)
+    channels = _pending_channels(user)
+    channel_text = " and ".join(channels) if channels else "account"
     raise HTTPException(
         status_code=403,
-        detail=f"Account not verified. A new verification code has been sent to your email and phone. Please verify to continue. userId={user.id}",
+        detail={
+            "message": f"Account not verified. A new verification code has been sent to your {channel_text}. Please verify to continue.",
+            "code": "account_unverified",
+            **status,
+        },
     )

@@ -40,7 +40,7 @@ export const useAuth = () => {
       applyToken(tokens.accessToken)
     } catch (error) {
       if (isUnverifiedAccountError(error)) {
-        setPendingVerification({ userId: error.userId, emailVerified: false, phoneVerified: false, verified: false, hasPhone: true })
+        setPendingVerification(error.status)
         return
       }
       const message = error instanceof Error ? error.message : 'Login failed'
@@ -56,8 +56,9 @@ export const useAuth = () => {
     setAuthError(null)
     setIsDeviceBlocked(false)
     try {
-      const { userId: newUserId } = await api.bootstrapSignup(payload)
-      setPendingVerification({ userId: newUserId, emailVerified: false, phoneVerified: false, verified: false, hasPhone: Boolean(payload.phone) })
+      const { userId: newUserId, email, phone } = await api.bootstrapSignup(payload)
+      const hasPhone = phone.replace(/\D/g, '').length >= 8
+      setPendingVerification({ userId: newUserId, emailVerified: false, phoneVerified: false, verified: false, hasPhone, email, phone: hasPhone ? phone : undefined })
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Signup failed'
       setAuthError(message)
@@ -69,8 +70,9 @@ export const useAuth = () => {
     setAuthError(null)
     setIsDeviceBlocked(false)
     try {
-      const { userId: newUserId } = await api.signupWithInvite(payload)
-      setPendingVerification({ userId: newUserId, emailVerified: false, phoneVerified: false, verified: false, hasPhone: Boolean(payload.phone) })
+      const { userId: newUserId, email, phone } = await api.signupWithInvite(payload)
+      const hasPhone = phone.replace(/\D/g, '').length >= 8
+      setPendingVerification({ userId: newUserId, emailVerified: false, phoneVerified: false, verified: false, hasPhone, email, phone: hasPhone ? phone : undefined })
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Signup failed'
       setAuthError(message)
@@ -93,7 +95,8 @@ export const useAuth = () => {
 
   const resendOtp = useCallback(async () => {
     if (!pendingVerification) return
-    await api.resendOtp(pendingVerification.userId)
+    const result = await api.resendOtp(pendingVerification.userId)
+    setPendingVerification((prev) => prev ? { ...prev, ...result } : prev)
   }, [pendingVerification])
 
   const dismissVerification = useCallback(() => {

@@ -415,6 +415,8 @@ export interface VerificationStatus {
   phoneVerified: boolean
   verified: boolean
   hasPhone: boolean
+  email?: string
+  phone?: string
 }
 
 export interface SignupInvite {

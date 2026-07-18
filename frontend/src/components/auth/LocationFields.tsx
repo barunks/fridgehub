@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { ChevronDown, Hash, Loader2, MapPin } from 'lucide-react'
-import { COUNTRIES, detectCountryFromGeolocation, detectCountryFromTimezone, type Country } from '@/utils/countries'
+import { COUNTRIES, detectCountryFromGeolocation, type Country } from '@/utils/countries'
 
 const inputClass =
   'min-h-11 w-full rounded-xl border border-slate-700/60 bg-slate-800/60 px-3.5 py-2.5 text-[16px] leading-tight text-white outline-none transition placeholder:text-slate-600 focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20 sm:text-sm'
@@ -295,8 +295,4 @@ export const LocationFields = ({ value, onChange, phoneLabel = 'Phone number' }:
   )
 }
 
-/** Default value using timezone detection (instant, no permission) */
-export const defaultLocationValue = (): LocationValue => {
-  const country = detectCountryFromTimezone()
-  return { country, localPhone: '', postalCode: '', address: '' }
-}
+

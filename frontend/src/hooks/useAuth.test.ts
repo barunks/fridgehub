@@ -68,6 +68,40 @@ describe('useAuth', () => {
     expect(localStorage.getItem('fridgehub-refresh-token')).toBeNull()
   })
 
+  it('uses backend delivery targets for unverified login', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(jsonResponse({ error: { detail: 'Refresh required' } }, 401))
+        .mockResolvedValueOnce(jsonResponse({
+          error: {
+            detail: 'Account not verified. A new verification code has been sent to your email and phone. Please verify to continue.',
+            code: 'account_unverified',
+          },
+          userId: 42,
+          emailVerified: false,
+          phoneVerified: false,
+          verified: false,
+          email: 'suravi@example.com',
+          phone: '+6591234567',
+        }, 403)),
+    )
+    const { result } = renderHook(() => useAuth())
+    await waitFor(() => expect(result.current.isCheckingAuth).toBe(false))
+
+    await act(async () => {
+      await result.current.login('suravib', 'TestPass1')
+    })
+
+    expect(result.current.pendingVerification).toMatchObject({
+      userId: 42,
+      email: 'suravi@example.com',
+      phone: '+6591234567',
+      hasPhone: true,
+    })
+  })
+
   it('logout clears the in-memory access token', async () => {
     setAccessToken(token)
     vi.stubGlobal(

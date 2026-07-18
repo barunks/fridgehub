@@ -50,6 +50,8 @@ interface TokenResponse {
   accessToken: string
   refreshToken?: string
   tokenType: string
+  email?: string | null
+  phone?: string | null
 }
 
 let accessToken: string | null = null
@@ -203,12 +205,33 @@ const requestPublic = async <T>(path: string, init?: RequestInit): Promise<T> =>
 // Typed error for unverified accounts — carries userId so the UI can show the verification screen
 export interface UnverifiedAccountError extends Error {
   userId: number
+  status: VerificationStatus
 }
 
-const makeUnverifiedError = (userId: number): UnverifiedAccountError => {
+type VerificationStatusResponse = Omit<VerificationStatus, 'hasPhone' | 'email' | 'phone'> & {
+  hasPhone?: boolean
+  email?: string | null
+  phone?: string | null
+}
+
+const hasUsablePhone = (phone?: string | null) => (phone ?? '').replace(/\D/g, '').length >= 8
+
+const normalizeVerificationStatus = (status: VerificationStatusResponse): VerificationStatus => {
+  const phone = status.phone ?? undefined
+  const hasPhone = status.hasPhone ?? hasUsablePhone(phone)
+  return {
+    ...status,
+    hasPhone,
+    email: status.email ?? undefined,
+    phone: hasPhone ? phone : undefined,
+  }
+}
+
+const makeUnverifiedError = (status: VerificationStatus): UnverifiedAccountError => {
   const err = new Error('Account not verified') as UnverifiedAccountError
   err.name = 'UnverifiedAccountError'
-  err.userId = userId
+  err.userId = status.userId
+  err.status = status
   return err
 }
 
@@ -227,8 +250,28 @@ export const loginUser = async (username: string, password: string, device?: Par
     const body = await response.json().catch(() => null)
     const detail: string = body?.detail || body?.error?.detail || response.statusText || 'Login failed'
     if (response.status === 403) {
+      const structuredUserId = Number(body?.userId)
+      if (body?.error?.code === 'account_unverified' && structuredUserId) {
+        throw makeUnverifiedError(normalizeVerificationStatus({
+          userId: structuredUserId,
+          emailVerified: Boolean(body.emailVerified),
+          phoneVerified: Boolean(body.phoneVerified),
+          verified: Boolean(body.verified),
+          email: body.email ?? undefined,
+          phone: body.phone ?? undefined,
+          hasPhone: body.hasPhone,
+        }))
+      }
       const match = detail.match(/userId=(\d+)/)
-      if (match) throw makeUnverifiedError(Number(match[1]))
+      if (match) {
+        throw makeUnverifiedError(normalizeVerificationStatus({
+          userId: Number(match[1]),
+          emailVerified: false,
+          phoneVerified: false,
+          verified: false,
+          hasPhone: true,
+        }))
+      }
     }
     throw new Error(detail)
   }
@@ -243,7 +286,7 @@ export const getSignupStatus = () => requestPublic<SignupStatus>('/api/v1/auth/s
 export const previewSignupInvite = (inviteToken: string) =>
   requestPublic<SignupInvitePreview>(`/api/v1/auth/invites/${encodeURIComponent(inviteToken)}`)
 
-export const bootstrapSignup = async (payload: BootstrapSignupInput): Promise<{ userId: number }> => {
+export const bootstrapSignup = async (payload: BootstrapSignupInput): Promise<{ userId: number; email: string; phone: string }> => {
   const response = await fetch(apiUrl('/api/v1/auth/signup/bootstrap'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -257,10 +300,10 @@ export const bootstrapSignup = async (payload: BootstrapSignupInput): Promise<{ 
   setAccessToken(tokens.accessToken)
   syncDeviceIdFromToken(tokens.accessToken)
   const userId = Number(parseAccessToken(tokens.accessToken)?.sub) || 0
-  return { userId }
+  return { userId, email: tokens.email ?? payload.email, phone: tokens.phone ?? payload.phone }
 }
 
-export const signupWithInvite = async (payload: InviteSignupInput): Promise<{ userId: number }> => {
+export const signupWithInvite = async (payload: InviteSignupInput): Promise<{ userId: number; email: string; phone: string }> => {
   const response = await fetch(apiUrl('/api/v1/auth/signup'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -274,7 +317,7 @@ export const signupWithInvite = async (payload: InviteSignupInput): Promise<{ us
   setAccessToken(tokens.accessToken)
   syncDeviceIdFromToken(tokens.accessToken)
   const userId = Number(parseAccessToken(tokens.accessToken)?.sub) || 0
-  return { userId }
+  return { userId, email: tokens.email ?? payload.email, phone: tokens.phone ?? payload.phone }
 }
 
 export const refreshAccessToken = async () => {
@@ -654,13 +697,13 @@ export const api = {
       body: JSON.stringify({ query }),
     }),
   verifyOtp: (userId: number, emailOtp: string, phoneOtp: string) =>
-    requestPublic<VerificationStatus>('/api/v1/auth/verify', {
+    requestPublic<VerificationStatusResponse>('/api/v1/auth/verify', {
       method: 'POST',
       body: JSON.stringify({ userId, emailOtp, phoneOtp }),
-    }),
+    }).then(normalizeVerificationStatus),
   resendOtp: (userId: number) =>
-    requestPublic<VerificationStatus>('/api/v1/auth/resend', {
+    requestPublic<VerificationStatusResponse>('/api/v1/auth/resend', {
       method: 'POST',
       body: JSON.stringify({ userId }),
-    }),
+    }).then(normalizeVerificationStatus),
 }

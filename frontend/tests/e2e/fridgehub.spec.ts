@@ -548,13 +548,22 @@ test('cancel from verification screen returns to sign in', async ({ page }) => {
 test('login with unverified account shows verification screen', async ({ page }) => {
   await page.goto('/')
 
-  // Mock login to return 403 with userId in detail
+  // Mock login to return the structured unverified-account contract.
   await page.route('**/api/v1/auth/login', (route) =>
     route.fulfill({
       status: 403,
       contentType: 'application/json',
       body: JSON.stringify({
-        detail: 'Account not verified. A new verification code has been sent to your email and phone. Please verify to continue. userId=42',
+        error: {
+          detail: 'Account not verified. A new verification code has been sent to your email and phone. Please verify to continue.',
+          code: 'account_unverified',
+        },
+        userId: 42,
+        emailVerified: false,
+        phoneVerified: false,
+        verified: false,
+        email: 'suravi@example.com',
+        phone: '+6591234567',
       }),
     }),
   )
@@ -565,7 +574,9 @@ test('login with unverified account shows verification screen', async ({ page })
 
   // Should land on verification screen, not show a generic error
   await expect(page.getByRole('heading', { name: /Verify your account/i })).toBeVisible()
-  await expect(page.getByLabel('Email verification code')).toBeVisible()
+  await expect(page.getByLabel('Email code')).toBeVisible()
+  await expect(page.getByText('suravi@example.com').first()).toBeVisible()
+  await expect(page.getByText('+6591234567').first()).toBeVisible()
 })
 
 test('verified channel input becomes read-only with green Verified badge', async ({ page }) => {

@@ -4,7 +4,8 @@ import {
   Mail, Phone, Shield, Sparkles, UserRound, Users, Zap,
 } from 'lucide-react'
 import { api } from '@/services/api'
-import { LocationFields, defaultLocationValue, type LocationValue } from '@/components/auth/LocationFields'
+import { LocationFields, type LocationValue } from '@/components/auth/LocationFields'
+import { defaultLocationValue } from '@/utils/locationDefaults'
 import { COUNTRIES, detectCountryFromTimezone, type Country } from '@/utils/countries'
 import type {
   BootstrapSignupInput,
@@ -194,11 +195,12 @@ export const LoginPage = ({ onBootstrapSignup, onInviteSignup, onLogin, error }:
     if (pwError) { setLocalError(pwError); return }
     setLoading(true); setLocalError(null)
     try {
+      const phone = `${setupLocation.country.isd}${setupLocation.localPhone.replace(/\s/g, '')}`
       await onBootstrapSignup({
         ...setupForm,
         homeBase: setupLocation.country.name,
         timezone: setupLocation.country.timezone,
-        phone: `${setupLocation.country.isd}${setupLocation.localPhone.replace(/\s/g, '')}`,
+        phone,
         country: setupLocation.country.name,
         address: setupLocation.address,
         postalCode: setupLocation.postalCode,
@@ -231,7 +233,7 @@ export const LoginPage = ({ onBootstrapSignup, onInviteSignup, onLogin, error }:
   const submitDisabled = {
     signin: loading || !username || !password,
     join: loading || !inviteToken.trim() || !joinForm.fullName || !joinForm.email || !joinPhone.trim() || !joinForm.username || !joinForm.password || !!joinPasswordHint,
-    admin: loading || !setupForm.familyName || !setupForm.fullName || !setupForm.email || !setupLocation.localPhone || !setupLocation.postalCode || !setupLocation.address || !setupForm.username || !setupForm.password || !!setupPasswordHint,
+    admin: loading || !setupForm.familyName || !setupForm.fullName || !setupForm.email || !setupLocation.localPhone || !setupForm.username || !setupForm.password || !!setupPasswordHint,
   }
 
   return (

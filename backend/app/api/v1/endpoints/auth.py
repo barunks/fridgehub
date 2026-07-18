@@ -64,6 +64,8 @@ def _public_token_response(tokens: dict[str, str]) -> dict[str, str | None]:
         "accessToken": tokens["accessToken"],
         "refreshToken": tokens["refreshToken"] if settings.auth_expose_refresh_token_in_body else None,
         "tokenType": tokens["tokenType"],
+        "email": tokens.get("email"),
+        "phone": tokens.get("phone"),
     }
 
 

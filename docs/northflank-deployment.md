@@ -62,11 +62,16 @@ Set them to enable real email delivery.
 
 When these are unset, SMS OTPs fall back to console logging only.
 Users without a phone number skip SMS verification entirely — no Twilio required for them.
+For OTPs, prefer Twilio Verify: set `TWILIO_VERIFY_SID` and no `TWILIO_FROM_NUMBER`
+is required. If you use Programmable Messaging instead, set either
+`TWILIO_MESSAGING_SERVICE_SID` or `TWILIO_FROM_NUMBER`.
 
 | Variable | Where to find |
 |----------|--------------|
 | `TWILIO_ACCOUNT_SID` | Twilio Console → Account Info |
 | `TWILIO_AUTH_TOKEN` | Twilio Console → Account Info |
+| `TWILIO_VERIFY_SID` | Twilio Console → Verify → Services, starts with `VA` |
+| `TWILIO_MESSAGING_SERVICE_SID` | Twilio Console → Messaging → Services, starts with `MG` |
 | `TWILIO_FROM_NUMBER` | Twilio Console → Phone Numbers (E.164 format, e.g. `+12015551234`) |
 
 ---
@@ -122,7 +127,7 @@ SMTP_FROM_EMAIL   = <from secret group>
 # Twilio
 TWILIO_ACCOUNT_SID  = <from secret group>
 TWILIO_AUTH_TOKEN   = <from secret group>
-TWILIO_FROM_NUMBER  = <from secret group>
+TWILIO_VERIFY_SID   = <from secret group>
 ```
 
 Health check: `GET /health` on port 8000.

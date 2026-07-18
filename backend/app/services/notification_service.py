@@ -16,6 +16,14 @@ from app.services.family_service import invalidate_entity, serialize_notificatio
 logger = logging.getLogger(__name__)
 
 
+def _mask_secret(value: str | None, visible: int = 4) -> str:
+    if not value:
+        return "unset"
+    if len(value) <= visible * 2:
+        return "***"
+    return f"{value[:visible]}...{value[-visible:]}"
+
+
 # ---------------------------------------------------------------------------
 # DB notification helpers (existing)
 # ---------------------------------------------------------------------------
@@ -97,8 +105,9 @@ def bulk_mark_read(db: Session, user_id: int, family_id: int) -> int:
 
 def send_email(to: str, subject: str, html_body: str, text_body: str | None = None) -> bool:
     if not settings.email_enabled:
-        logger.info("EMAIL (stub) to=%s subject=%s", to, subject)
+        logger.info("EMAIL (stub — SMTP not configured) to=%s subject=%s", to, subject)
         return True
+    logger.info("EMAIL sending to=%s subject=%s smtp_host=%s", to, subject, settings.smtp_host)
     try:
         msg = MIMEMultipart("alternative")
         msg["Subject"] = subject
@@ -112,10 +121,10 @@ def send_email(to: str, subject: str, html_body: str, text_body: str | None = No
                 server.starttls()
             server.login(settings.smtp_username, settings.smtp_password)
             server.sendmail(settings.smtp_from_email, to, msg.as_string())
-        logger.info("Email sent to=%s subject=%s", to, subject)
+        logger.info("EMAIL sent OK to=%s subject=%s", to, subject)
         return True
     except Exception:
-        logger.exception("Failed to send email to=%s", to)
+        logger.exception("EMAIL FAILED to=%s subject=%s", to, subject)
         return False
 
 
@@ -124,17 +133,69 @@ def send_email(to: str, subject: str, html_body: str, text_body: str | None = No
 # ---------------------------------------------------------------------------
 
 def send_sms(to: str, body: str) -> bool:
-    if not settings.sms_enabled:
-        logger.info("SMS (stub) to=%s body=%s", to, body)
+    if not settings.twilio_direct_sms_enabled:
+        logger.info(
+            "SMS (stub — Twilio direct messaging not configured) to=%s | "
+            "Set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and either "
+            "TWILIO_FROM_NUMBER or TWILIO_MESSAGING_SERVICE_SID to enable direct SMS",
+            to,
+        )
         return True
+    logger.info(
+        "SMS sending to=%s from=%s messaging_service=%s account_sid=%s",
+        to,
+        _mask_secret(settings.twilio_from_number),
+        _mask_secret(settings.twilio_messaging_service_sid),
+        _mask_secret(settings.twilio_account_sid),
+    )
     try:
         from twilio.rest import Client
         client = Client(settings.twilio_account_sid, settings.twilio_auth_token)
-        client.messages.create(to=to, from_=settings.twilio_from_number, body=body)
-        logger.info("SMS sent to=%s", to)
+        message_payload = {"to": to, "body": body}
+        if settings.twilio_messaging_service_sid:
+            message_payload["messaging_service_sid"] = settings.twilio_messaging_service_sid
+        else:
+            message_payload["from_"] = settings.twilio_from_number
+        message = client.messages.create(**message_payload)
+        logger.info("SMS sent OK to=%s sid=%s status=%s", to, message.sid, message.status)
         return True
     except Exception:
-        logger.exception("Failed to send SMS to=%s", to)
+        logger.exception(
+            "SMS FAILED to=%s from=%s messaging_service=%s account_sid=%s",
+            to,
+            _mask_secret(settings.twilio_from_number),
+            _mask_secret(settings.twilio_messaging_service_sid),
+            _mask_secret(settings.twilio_account_sid),
+        )
+        return False
+
+
+def send_verify_sms(to: str, otp: str) -> bool:
+    if not settings.twilio_verify_enabled:
+        return False
+    logger.info(
+        "VERIFY SMS sending to=%s service_sid=%s account_sid=%s",
+        to, _mask_secret(settings.twilio_verify_sid), _mask_secret(settings.twilio_account_sid),
+    )
+    try:
+        from twilio.rest import Client
+        client = Client(settings.twilio_account_sid, settings.twilio_auth_token)
+        verification = (
+            client.verify.v2
+            .services(settings.twilio_verify_sid)
+            .verifications
+            .create(to=to, channel="sms", custom_code=otp)
+        )
+        logger.info(
+            "VERIFY SMS sent OK to=%s verification_sid=%s status=%s",
+            to, verification.sid, verification.status,
+        )
+        return True
+    except Exception:
+        logger.exception(
+            "VERIFY SMS FAILED to=%s service_sid=%s account_sid=%s",
+            to, _mask_secret(settings.twilio_verify_sid), _mask_secret(settings.twilio_account_sid),
+        )
         return False
 
 
@@ -200,5 +261,7 @@ def send_otp_email(to: str, otp: str, purpose: str = "signup") -> bool:
 
 
 def send_otp_sms(to: str, otp: str, purpose: str = "signup") -> bool:
+    if settings.twilio_verify_enabled:
+        return send_verify_sms(to, otp)
     body = f"Your FridgeHub {purpose} code is {otp}. Valid for 10 minutes. Do not share this code."
     return send_sms(to, body)

@@ -468,6 +468,8 @@ def bootstrap_signup(
     issue_otp(db, user)
     db.commit()
     invalidate_family_cache(family.id)
+    tokens["email"] = user.email
+    tokens["phone"] = user.phone or ""
     return tokens
 
 
@@ -568,6 +570,8 @@ def signup_with_invite(
     db.commit()
     invalidate_entity("members", family.id)
     invalidate_entity("family", family.id)
+    tokens["email"] = user.email
+    tokens["phone"] = user.phone or ""
     return tokens
 
 
