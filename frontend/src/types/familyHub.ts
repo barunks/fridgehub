@@ -403,7 +403,7 @@ export interface SignupDeviceInput {
 }
 
 export interface SignupStatus {
-  bootstrapAllowed: boolean
+  signupOpen: boolean
 }
 
 export interface VerificationStatus {

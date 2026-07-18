@@ -94,7 +94,7 @@ class ChangePasswordRequest(CamelModel):
 
 
 class SignupStatusOut(CamelModel):
-    bootstrapAllowed: bool
+    signupOpen: bool
 
 
 class SignupInviteCreate(CamelModel):

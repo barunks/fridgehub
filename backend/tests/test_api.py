@@ -163,12 +163,61 @@ def test_change_password_wrong_current() -> None:
         assert r.status_code == 400
 
 
-def test_signup_status_bootstrap_closed_for_seeded_family() -> None:
+def test_signup_status_is_always_open() -> None:
     with TestClient(app) as client:
         r = client.get("/api/v1/auth/signup/status")
         assert r.status_code == 200
-        assert r.json()["bootstrapAllowed"] is False
+        assert r.json()["signupOpen"] is True
 
+
+def test_second_family_can_be_created_with_unique_phone() -> None:
+    unique = uuid4().hex[:8]
+    with TestClient(app) as client:
+        r = client.post(
+            "/api/v1/auth/signup/bootstrap",
+            json={
+                "familyName": f"Family {unique}",
+                "homeBase": "Singapore",
+                "timezone": "Asia/Singapore",
+                "fullName": f"Admin {unique}",
+                "email": f"admin-{unique}@test.local",
+                "phone": f"+6590{unique[:6]}",
+                "username": f"admin{unique}",
+                "password": "AdminPass1",
+                "deviceId": f"dev-{unique}",
+                "deviceName": "Test Device",
+                "deviceType": "browser",
+            },
+        )
+        assert r.status_code == 200
+        assert "accessToken" in r.json()
+
+
+def test_same_phone_cannot_create_two_families() -> None:
+    unique = uuid4().hex[:8]
+    phone = f"+6591{unique[:6]}"
+    payload = {
+        "homeBase": "Singapore",
+        "timezone": "Asia/Singapore",
+        "fullName": f"Admin {unique}",
+        "phone": phone,
+        "password": "AdminPass1",
+        "deviceType": "browser",
+    }
+    with TestClient(app) as client:
+        r1 = client.post(
+            "/api/v1/auth/signup/bootstrap",
+            json={**payload, "familyName": f"Family1 {unique}", "email": f"a1-{unique}@test.local",
+                  "username": f"adm1{unique}", "deviceId": f"d1-{unique}", "deviceName": "D1"},
+        )
+        assert r1.status_code == 200
+        r2 = client.post(
+            "/api/v1/auth/signup/bootstrap",
+            json={**payload, "familyName": f"Family2 {unique}", "email": f"a2-{unique}@test.local",
+                  "username": f"adm2{unique}", "deviceId": f"d2-{unique}", "deviceName": "D2"},
+        )
+        assert r2.status_code == 409
+        assert "phone" in r2.json()["error"]["detail"].lower()
 
 def test_invite_signup_registers_device_and_closes_invite() -> None:
     unique = uuid4().hex[:10]

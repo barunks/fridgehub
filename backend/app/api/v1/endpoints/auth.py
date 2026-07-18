@@ -30,7 +30,6 @@ from app.services.auth_service import (
     preview_signup_invite,
     refresh,
     revoke_signup_invite,
-    signup_status,
     signup_with_invite,
 )
 
@@ -137,8 +136,8 @@ def login_endpoint(
 
 
 @router.get("/signup/status", response_model=SignupStatusOut)
-def signup_status_endpoint(db: Session = Depends(get_db)) -> dict[str, bool]:
-    return signup_status(db)
+def signup_status_endpoint() -> dict[str, bool]:
+    return {"signupOpen": True}
 
 
 @router.post(

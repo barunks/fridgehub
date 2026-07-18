@@ -215,13 +215,15 @@ def _serialize_invite(invite: FamilyInvite, token: str | None = None) -> dict[st
     }
 
 
-def _require_unique_user(db: Session, email: str, username: str) -> None:
+def _require_unique_user(db: Session, email: str, username: str, phone: str | None = None) -> None:
+    if phone:
+        existing_phone = db.query(User).filter(User.phone == phone).first()
+        if existing_phone:
+            raise HTTPException(status_code=409, detail="That phone number is already registered. Please sign in or use a different number.")
     existing = db.query(User).filter((User.email == email) | (User.username == username)).first()
     if existing:
-        if existing.email == email and existing.username == username:
-            raise HTTPException(status_code=409, detail="Both that email address and username are already registered. Please use different values.")
         if existing.email == email:
-            raise HTTPException(status_code=409, detail=f"The email address '{email}' is already registered. Use a different email or sign in instead.")
+            raise HTTPException(status_code=409, detail=f"The email address '{email}' is already registered.")
         raise HTTPException(status_code=409, detail=f"The username '{username}' is already taken. Please choose a different username.")
 
 
@@ -282,9 +284,7 @@ def _create_default_meal_template(db: Session, family_id: int, user_id: int) -> 
 
 
 def signup_status(db: Session) -> dict[str, bool]:
-    active_users = db.query(User).filter(User.is_active.is_(True)).count()
-    active_families = db.query(Family).filter(Family.is_active.is_(True)).count()
-    return {"bootstrapAllowed": active_users == 0 and active_families == 0}
+    return {"signupOpen": True}
 
 
 def create_signup_invite(
@@ -392,12 +392,15 @@ def bootstrap_signup(
     user_agent: str | None = None,
     ip_address: str | None = None,
 ) -> dict[str, str]:
-    if not signup_status(db)["bootstrapAllowed"]:
-        raise HTTPException(status_code=409, detail="FridgeHub is already initialized. Ask an admin for an invite.")
-
     email = sanitize_text(payload.email.lower())
     username = sanitize_text(payload.username)
-    _require_unique_user(db, email, username)
+    phone = sanitize_text(payload.phone)
+    _require_unique_user(db, email, username, phone)
+
+    # One user can only be a family admin once
+    existing_admin = db.query(User).filter(User.phone == phone, User.family_role == "admin").first()
+    if existing_admin:
+        raise HTTPException(status_code=409, detail="This phone number is already registered as a family admin. A user can only create one family.")
 
     user = User(
         email=email,
@@ -405,7 +408,7 @@ def bootstrap_signup(
         password_hash=hash_password(payload.password),
         full_name=sanitize_text(payload.fullName),
         family_role="admin",
-        phone=sanitize_text(payload.phone),
+        phone=phone,
     )
     db.add(user)
     db.flush()
