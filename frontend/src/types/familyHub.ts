@@ -435,6 +435,9 @@ export interface SignupInvitePreview {
   email?: string | null
   role: string
   expiresAt: string
+  country: string
+  address: string
+  postalCode: string
 }
 
 export interface SignupInviteCreateInput {

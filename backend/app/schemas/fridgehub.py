@@ -136,6 +136,9 @@ class SignupInvitePreviewOut(CamelModel):
     email: str | None = None
     role: str
     expiresAt: datetime
+    country: str = ""
+    address: str = ""
+    postalCode: str = ""
 
 
 class BootstrapSignupRequest(DeviceRegistrationRequest):

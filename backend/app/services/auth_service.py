@@ -383,6 +383,9 @@ def preview_signup_invite(db: Session, token: str) -> dict[str, object]:
         "email": invite.email,
         "role": invite.role,
         "expiresAt": invite.expires_at,
+        "country": family.country or "",
+        "address": family.address or "",
+        "postalCode": family.postal_code or "",
     }
 
 
@@ -482,7 +485,8 @@ def signup_with_invite(
     if invite.email and invite.email.lower() != email:
         raise HTTPException(status_code=403, detail="This invite was sent to a different email address. Sign up using the email address that received the invite.")
     username = sanitize_text(payload.username)
-    _require_unique_user(db, email, username)
+    phone = sanitize_text(payload.phone)
+    _require_unique_user(db, email, username, phone)
 
     family = db.get(Family, invite.family_id)
     if not family or not family.is_active:
@@ -516,7 +520,7 @@ def signup_with_invite(
         password_hash=hash_password(payload.password),
         full_name=sanitize_text(payload.fullName),
         family_role=sanitize_text(invite.role),
-        phone=sanitize_text(payload.phone),
+        phone=phone,
     )
     db.add(user)
     db.flush()
