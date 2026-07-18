@@ -26,11 +26,13 @@ from datetime import datetime, timedelta, timezone
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.models import User, VerificationOtp
-from app.services.notification_service import send_otp_email, send_otp_sms
+from app.services.notification_service import check_verify_sms, send_otp_email, send_otp_sms
 
 _OTP_TTL_MINUTES = 10
 _MAX_ATTEMPTS = 5
+_TWILIO_VERIFY_PHONE_OTP = "twilio_verify"
 
 
 def _has_phone(user: User) -> bool:
@@ -84,7 +86,7 @@ def issue_otp(db: Session, user: User) -> int:
     frontend response).
     """
     email_otp = _six_digit_otp()
-    phone_otp = _six_digit_otp() if _has_phone(user) else None
+    phone_otp = _six_digit_otp() if _has_phone(user) and not settings.twilio_verify_enabled else None
 
     _invalidate_existing(db, user.id)
 
@@ -92,7 +94,11 @@ def issue_otp(db: Session, user: User) -> int:
         entity_type="user",
         entity_id=user.id,
         email_otp_hash=_hash_otp(email_otp),
-        phone_otp_hash=_hash_otp(phone_otp) if phone_otp else None,
+        phone_otp_hash=(
+            _TWILIO_VERIFY_PHONE_OTP
+            if _has_phone(user) and settings.twilio_verify_enabled
+            else _hash_otp(phone_otp) if phone_otp else None
+        ),
         email_target=user.email,
         phone_target=user.phone if _has_phone(user) else None,
         expires_at=datetime.now(timezone.utc) + timedelta(minutes=_OTP_TTL_MINUTES),
@@ -101,12 +107,8 @@ def issue_otp(db: Session, user: User) -> int:
     db.flush()
 
     send_otp_email(user.email, email_otp)
-    if phone_otp and user.phone:
-        if not send_otp_sms(user.phone, phone_otp):
-            raise HTTPException(
-                status_code=502,
-                detail="Could not send SMS verification code. Check Twilio configuration and the recipient phone number.",
-            )
+    if user.phone and (phone_otp or settings.twilio_verify_enabled):
+        send_otp_sms(user.phone, phone_otp or "")
 
     return user.id
 
@@ -147,8 +149,13 @@ def verify_otp(db: Session, user_id: int, email_otp: str, phone_otp: str) -> dic
         raise HTTPException(status_code=400, detail="Too many incorrect attempts. Please request a new verification code.")
 
     email_ok = _hash_otp(email_otp.strip()) == row.email_otp_hash
-    # Phone OTP is optional — skip check when user has no phone number
-    phone_ok = row.phone_otp_hash is None or _hash_otp(phone_otp.strip()) == row.phone_otp_hash
+    # Phone OTP is optional — skip check when user has no phone number.
+    if row.phone_otp_hash is None:
+        phone_ok = True
+    elif row.phone_otp_hash == _TWILIO_VERIFY_PHONE_OTP:
+        phone_ok = email_ok and bool(user.phone) and check_verify_sms(user.phone, phone_otp.strip())
+    else:
+        phone_ok = _hash_otp(phone_otp.strip()) == row.phone_otp_hash
 
     if not email_ok or not phone_ok:
         row.attempts += 1
