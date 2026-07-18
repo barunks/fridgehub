@@ -12,7 +12,7 @@ from sqlalchemy import text
 
 
 revision = "0009_family_signup_invites"
-down_revision = "0008_grocery_extended_frequencies"
+down_revision = "0008_grocery_ext_frequencies"
 branch_labels = None
 depends_on = None
 

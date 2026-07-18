@@ -10,7 +10,7 @@ from alembic import op
 from sqlalchemy import text
 
 
-revision = "0008_grocery_extended_frequencies"
+revision = "0008_grocery_ext_frequencies"
 down_revision = "0007_scoped_meal_templates"
 branch_labels = None
 depends_on = None
