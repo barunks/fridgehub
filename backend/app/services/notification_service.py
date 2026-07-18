@@ -155,7 +155,7 @@ def send_sms(to: str, body: str) -> bool:
         if settings.twilio_messaging_service_sid:
             message_payload["messaging_service_sid"] = settings.twilio_messaging_service_sid
         else:
-            message_payload["from_"] = settings.twilio_from_number
+            message_payload["from_"] = settings._twilio_from
         message = client.messages.create(**message_payload)
         logger.info("SMS sent OK to=%s sid=%s status=%s", to, message.sid, message.status)
         return True

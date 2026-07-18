@@ -72,6 +72,10 @@ class Settings(BaseSettings):
         return bool(self.smtp_username and self.smtp_password and self.smtp_from_email)
 
     @property
+    def _twilio_from(self) -> str:
+        return self.twilio_from_number.strip()
+
+    @property
     def sms_enabled(self) -> bool:
         return bool(
             self.twilio_account_sid
