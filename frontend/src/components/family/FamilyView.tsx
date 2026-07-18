@@ -203,7 +203,7 @@ export const FamilyView = ({ store }: { store: FridgeHubStore }) => {
                             </div>
                           )}
                           {canManageFamily && (
-                            <div className="mt-3 flex gap-2 opacity-0 transition-opacity group-hover:opacity-100">
+                            <div className="mt-3 flex gap-2 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
                               <button
                                 className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-slate-600 transition hover:border-indigo-200 hover:text-indigo-600"
                                 onClick={() => { setEditingMemberId(member.id); setMemberEdit({ name: member.name, role: member.role, colorClass: member.colorClass, status: member.status }) }}

@@ -105,6 +105,9 @@ def seed_demo_data(db: Session) -> None:
             password_hash=hash_password("fridgehub"),
             full_name="Meera",
             family_role="Mom",
+            phone="+6591000001",
+            email_verified=True,
+            phone_verified=True,
         ),
         User(
             email="dad@fridgehub.local",
@@ -112,6 +115,9 @@ def seed_demo_data(db: Session) -> None:
             password_hash=hash_password("fridgehub"),
             full_name="Dad",
             family_role="Parent",
+            phone="+6591000002",
+            email_verified=True,
+            phone_verified=True,
         ),
         User(
             email="ava@fridgehub.local",
@@ -119,6 +125,9 @@ def seed_demo_data(db: Session) -> None:
             password_hash=hash_password("fridgehub"),
             full_name="Ava",
             family_role="Child",
+            phone="+6591000003",
+            email_verified=True,
+            phone_verified=True,
         ),
         User(
             email="noah@fridgehub.local",
@@ -126,12 +135,25 @@ def seed_demo_data(db: Session) -> None:
             password_hash=hash_password("fridgehub"),
             full_name="Noah",
             family_role="Child",
+            phone="+6591000004",
+            email_verified=True,
+            phone_verified=True,
         ),
     ]
     db.add_all(users)
     db.flush()
 
-    family = Family(family_name="FridgeHub", home_base="Singapore", timezone="Asia/Singapore", created_by=users[0].id)
+    family = Family(
+        family_name="FridgeHub",
+        home_base="Singapore",
+        timezone="Asia/Singapore",
+        created_by=users[0].id,
+        contact_email="family@fridgehub.local",
+        contact_phone="+6500000000",
+        pincode="018956",
+        email_verified=True,
+        phone_verified=True,
+    )
     db.add(family)
     db.flush()
 

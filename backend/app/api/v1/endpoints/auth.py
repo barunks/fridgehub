@@ -174,10 +174,12 @@ def list_invites_endpoint(
 @router.post("/invites", response_model=SignupInviteOut, status_code=201)
 def create_invite_endpoint(
     payload: SignupInviteCreate,
+    request: Request,
     current_user: CurrentUser = Depends(require_permission(Permission.MANAGE_FAMILY)),
     db: Session = Depends(get_db),
 ) -> dict[str, object]:
-    return create_signup_invite(db, payload, current_user.family_id, current_user.user_id)
+    base_url = str(request.base_url).rstrip("/")
+    return create_signup_invite(db, payload, current_user.family_id, current_user.user_id, base_url)
 
 
 @router.delete("/invites/{invite_id}", status_code=204, responses={404: {"model": ErrorResponse}})

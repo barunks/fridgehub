@@ -98,7 +98,7 @@ export const AppShell = ({ activeView, onLogout, onNavigate, onToggleTheme, stor
   }, [store])
 
   return (
-    <div className="relative min-h-screen overflow-hidden lg:grid lg:grid-cols-[272px_minmax(0,1fr)]">
+    <div className="relative min-h-dvh overflow-hidden lg:grid lg:grid-cols-[272px_minmax(0,1fr)]">
       <div className="pointer-events-none fixed inset-0 -z-10 animated-gradient-bg bg-[linear-gradient(135deg,rgba(79,70,229,0.06),transparent_32%),linear-gradient(225deg,rgba(20,184,166,0.08),transparent_36%),linear-gradient(315deg,rgba(139,92,246,0.04),transparent_28%),linear-gradient(180deg,rgba(255,255,255,0.72),rgba(241,245,249,0.48))]" style={{ backgroundSize: '200% 200%' }} />
       {/* Sidebar */}
       <aside className="hidden border-r border-slate-800/50 bg-gradient-to-b from-slate-900 via-slate-900 to-slate-950 px-5 py-7 text-white lg:flex lg:flex-col">
@@ -178,7 +178,7 @@ export const AppShell = ({ activeView, onLogout, onNavigate, onToggleTheme, stor
       </aside>
 
       {/* Main content */}
-      <div className="min-w-0 pb-24 lg:pb-0">
+      <div className="min-w-0 pb-safe-nav lg:pb-0">
         <header className="glass-panel sticky top-0 z-20 border-x-0 border-t-0 px-4 py-4 lg:px-8">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="min-w-0">
@@ -337,7 +337,7 @@ export const AppShell = ({ activeView, onLogout, onNavigate, onToggleTheme, stor
       )}
 
       {/* Mobile bottom nav */}
-      <nav className="fixed inset-x-0 bottom-0 z-40 flex gap-1 overflow-x-auto border-t border-slate-200/60 bg-white/90 px-2 py-2.5 shadow-[0_-8px_30px_rgba(15,23,42,0.06)] backdrop-blur-xl lg:hidden">
+      <nav className="fixed inset-x-0 bottom-0 z-40 flex gap-1 overflow-x-auto border-t border-slate-200/60 bg-white/90 px-2 pt-2.5 bottom-nav-safe shadow-[0_-8px_30px_rgba(15,23,42,0.06)] backdrop-blur-xl lg:hidden">
         {visibleNavItems.map((item) => {
           const Icon = item.icon
           const active = activeView === item.key

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.core.dependencies import CurrentUser, current_user_payload, get_current_user, require_permission
@@ -138,3 +138,11 @@ def remove_emergency_contact(
     db: Session = Depends(get_db),
 ) -> None:
     family_management_service.delete_emergency_contact(db, contact_id, current_user.family_id, current_user.user_id)
+
+
+@router.delete("/data", responses={403: {"model": ErrorResponse}})
+def purge_family_data(
+    current_user: CurrentUser = Depends(require_permission(Permission.MANAGE_FAMILY)),
+    db: Session = Depends(get_db),
+) -> dict:
+    return family_management_service.purge_family_data(db, current_user.family_id, current_user.user_id)

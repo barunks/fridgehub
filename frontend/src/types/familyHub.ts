@@ -406,6 +406,14 @@ export interface SignupStatus {
   bootstrapAllowed: boolean
 }
 
+export interface VerificationStatus {
+  userId: number
+  emailVerified: boolean
+  phoneVerified: boolean
+  verified: boolean
+  hasPhone: boolean
+}
+
 export interface SignupInvite {
   id: number
   inviteToken?: string | null
@@ -427,11 +435,10 @@ export interface SignupInvitePreview {
 }
 
 export interface SignupInviteCreateInput {
-  email?: string
+  email: string
   role: string
   permissions?: Permission[]
-  expiresInDays: number
-  maxUses: number
+  expiresInDays?: number | null
 }
 
 export interface BootstrapSignupInput extends SignupDeviceInput {
@@ -440,6 +447,7 @@ export interface BootstrapSignupInput extends SignupDeviceInput {
   timezone: string
   fullName: string
   email: string
+  phone: string
   username: string
   password: string
 }
@@ -448,6 +456,7 @@ export interface InviteSignupInput extends SignupDeviceInput {
   inviteToken: string
   fullName: string
   email: string
+  phone: string
   username: string
   password: string
 }

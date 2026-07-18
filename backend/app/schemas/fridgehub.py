@@ -98,11 +98,10 @@ class SignupStatusOut(CamelModel):
 
 
 class SignupInviteCreate(CamelModel):
-    email: str | None = Field(default=None, max_length=255)
+    email: str = Field(min_length=3, max_length=255)
     role: str = Field(default="member", min_length=1, max_length=50)
     permissions: list[str] | None = None
-    expiresInDays: int = Field(default=7, ge=1, le=30)
-    maxUses: int = Field(default=1, ge=1, le=10)
+    expiresInDays: int | None = Field(default=None, ge=1, le=365)
 
 
 class SignupInviteOut(CamelModel):
@@ -131,6 +130,7 @@ class BootstrapSignupRequest(DeviceRegistrationRequest):
     timezone: str = Field(default="Asia/Singapore", min_length=1, max_length=64)
     fullName: str = Field(min_length=1, max_length=255)
     email: str = Field(min_length=3, max_length=255)
+    phone: str = Field(min_length=8, max_length=20)
     username: str = Field(min_length=2, max_length=100)
     password: str = Field(min_length=8, max_length=128)
 
@@ -144,6 +144,7 @@ class InviteSignupRequest(DeviceRegistrationRequest):
     inviteToken: str = Field(min_length=16)
     fullName: str = Field(min_length=1, max_length=255)
     email: str = Field(min_length=3, max_length=255)
+    phone: str = Field(min_length=8, max_length=20)
     username: str = Field(min_length=2, max_length=100)
     password: str = Field(min_length=8, max_length=128)
 
@@ -572,12 +573,12 @@ class DeviceUpdate(CamelModel):
 
 
 class DevicePolicyOut(CamelModel):
-    maxDevices: int
+    maxDevices: int | None = None
     activeDeviceCount: int
 
 
 class DevicePolicyUpdate(CamelModel):
-    maxDevices: int = Field(ge=1, le=20)
+    maxDevices: int | None = Field(default=None, ge=1, le=10000)
 
 
 class AssistantInsightOut(CamelModel):
@@ -625,6 +626,23 @@ class AuditLogOut(CamelModel):
     ipAddress: str | None = None
     userAgent: str | None = None
     createdAt: datetime
+
+
+class VerifyOtpRequest(CamelModel):
+    userId: int
+    emailOtp: str = Field(min_length=6, max_length=6)
+    phoneOtp: str = Field(min_length=6, max_length=6)
+
+
+class ResendOtpRequest(CamelModel):
+    userId: int
+
+
+class VerificationStatusOut(CamelModel):
+    userId: int
+    emailVerified: bool
+    phoneVerified: bool
+    verified: bool  # True only when both are verified
 
 
 class BootstrapState(CamelModel):

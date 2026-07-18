@@ -1417,7 +1417,7 @@ export const MealPlanView = ({ store }: { store: FridgeHubStore }) => {
         >
           <section
             aria-modal="true"
-            className="animate-scale-in max-h-[90vh] w-full max-w-3xl overflow-auto rounded-3xl border border-slate-200/80 bg-white shadow-[0_32px_80px_rgb(15_23_42/0.18)]"
+            className="animate-scale-in modal-max-h w-full max-w-3xl overflow-auto rounded-3xl border border-slate-200/80 bg-white shadow-[0_32px_80px_rgb(15_23_42/0.18)]"
             onClick={(event) => event.stopPropagation()}
             role="dialog"
           >

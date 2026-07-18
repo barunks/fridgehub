@@ -74,7 +74,7 @@
 
 body {
   min-width: 320px;
-  min-height: 100vh;
+  min-height: 100dvh;
   margin: 0;
   background:
     linear-gradient(120deg, rgb(238 242 255 / 0.74), transparent 38%),
@@ -212,11 +212,12 @@ button:disabled {
 }
 
 #root {
-  min-height: 100vh;
+  min-height: 100dvh;
 }
 
 .scrollbar-thin {
   scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
 }
 
 .glass-panel {
@@ -689,4 +690,37 @@ button:disabled {
     scroll-behavior: auto !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* ── iOS / iPad responsive fixes ─────────────────────────────────────────── */
+
+/* Momentum scrolling for all overflow-auto/scroll containers on iOS Safari */
+.overflow-auto,
+.overflow-y-auto,
+.overflow-x-auto,
+.overflow-scroll {
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Safe-area-aware bottom nav — accounts for iOS home indicator */
+.bottom-nav-safe {
+  padding-bottom: max(0.625rem, env(safe-area-inset-bottom));
+}
+
+/* Safe-area-aware page bottom padding so content isn't hidden behind bottom nav */
+.pb-safe-nav {
+  padding-bottom: calc(5rem + env(safe-area-inset-bottom));
+}
+
+/* dvh fallback for browsers that don't support it yet */
+@supports not (min-height: 100dvh) {
+  body,
+  #root {
+    min-height: -webkit-fill-available;
+  }
+}
+
+/* Modals: use dvh so iOS address bar doesn't clip them */
+.modal-max-h {
+  max-height: min(90dvh, 90vh);
 }

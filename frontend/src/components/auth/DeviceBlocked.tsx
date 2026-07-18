@@ -5,7 +5,7 @@ interface DeviceBlockedProps {
 }
 
 export const DeviceBlocked = ({ onRetry }: DeviceBlockedProps) => (
-  <div className="flex min-h-screen items-center justify-center px-4">
+  <div className="flex min-h-dvh items-center justify-center px-4">
     <div className="absolute inset-0 bg-gradient-to-br from-rose-50 via-white to-slate-50" />
     <div className="relative w-full max-w-[420px] animate-scale-in rounded-3xl border border-rose-200/60 bg-white/80 p-9 shadow-2xl shadow-rose-200/30 backdrop-blur-xl text-center">
       <div className="mx-auto mb-6 flex size-16 items-center justify-center rounded-2xl bg-gradient-to-br from-rose-500 to-red-600 text-white shadow-lg shadow-rose-500/30">

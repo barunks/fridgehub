@@ -176,7 +176,7 @@ def test_invite_signup_registers_device_and_closes_invite() -> None:
         headers = auth_headers(client)
         invite = client.post(
             "/api/v1/auth/invites",
-            json={"email": f"join-{unique}@fridgehub.local", "role": "member", "expiresInDays": 3, "maxUses": 1},
+            json={"email": f"join-{unique}@fridgehub.local", "role": "member", "expiresInDays": 3},
             headers=headers,
         )
         assert invite.status_code == 201
@@ -194,6 +194,7 @@ def test_invite_signup_registers_device_and_closes_invite() -> None:
                 "inviteToken": invite_token,
                 "fullName": "Invite User",
                 "email": f"join-{unique}@fridgehub.local",
+                "phone": "+6591000099",
                 "username": f"join{unique}",
                 "password": "joinpass1",
                 "deviceId": f"invite-device-{unique}",
@@ -224,6 +225,7 @@ def test_invite_signup_registers_device_and_closes_invite() -> None:
                 "inviteToken": invite_token,
                 "fullName": "Second User",
                 "email": f"second-{unique}@fridgehub.local",
+                "phone": "+6591000098",
                 "username": f"second{unique}",
                 "password": "joinpass1",
                 "deviceId": f"invite-device-second-{unique}",
@@ -1886,35 +1888,48 @@ def test_device_list() -> None:
 
 
 def test_device_policy_can_be_updated_by_parent() -> None:
-    """Parent can raise/lower device capacity, but not below current active devices."""
-    with TestClient(app) as client:
-        headers = auth_headers(client)
-        policy = client.get("/api/v1/auth/devices/policy", headers=headers)
-        assert policy.status_code == 200
-        current = policy.json()
-        assert current["maxDevices"] >= current["activeDeviceCount"]
+    """Parent can set/clear device capacity; None means unlimited; cannot set below active count."""
+    from app.core.config import settings as _settings
+    original = _settings.max_devices_per_user
+    try:
+        with TestClient(app) as client:
+            headers = auth_headers(client)
+            policy = client.get("/api/v1/auth/devices/policy", headers=headers)
+            assert policy.status_code == 200
+            current = policy.json()
+            active_count = current["activeDeviceCount"]
+            # maxDevices is None when no limit is configured
+            assert current["maxDevices"] is None or current["maxDevices"] >= active_count
 
-        raised_limit = min(20, max(current["activeDeviceCount"] + 1, current["maxDevices"]))
-        updated = client.patch(
-            "/api/v1/auth/devices/policy",
-            json={"maxDevices": raised_limit},
-            headers=headers,
-        )
-        assert updated.status_code == 200
-        assert updated.json()["maxDevices"] == raised_limit
+            # Set an explicit limit above current active count
+            raised_limit = active_count + 3
+            updated = client.patch(
+                "/api/v1/auth/devices/policy",
+                json={"maxDevices": raised_limit},
+                headers=headers,
+            )
+            assert updated.status_code == 200
+            assert updated.json()["maxDevices"] == raised_limit
 
-        rejected = client.patch(
-            "/api/v1/auth/devices/policy",
-            json={"maxDevices": max(0, current["activeDeviceCount"] - 1)},
-            headers=headers,
-        )
-        assert rejected.status_code in {400, 422}
+            # Setting below active count must be rejected
+            if active_count > 0:
+                rejected = client.patch(
+                    "/api/v1/auth/devices/policy",
+                    json={"maxDevices": active_count - 1},
+                    headers=headers,
+                )
+                assert rejected.status_code in {400, 422}
 
-        client.patch(
-            "/api/v1/auth/devices/policy",
-            json={"maxDevices": current["maxDevices"]},
-            headers=headers,
-        )
+            # Clear the limit (None = unlimited)
+            cleared = client.patch(
+                "/api/v1/auth/devices/policy",
+                json={"maxDevices": None},
+                headers=headers,
+            )
+            assert cleared.status_code == 200
+            assert cleared.json()["maxDevices"] is None
+    finally:
+        _settings.__dict__["max_devices_per_user"] = original
 
 
 def test_device_policy_requires_family_management_permission() -> None:
@@ -2048,59 +2063,48 @@ def test_device_registered_audit_event() -> None:
 
 
 def test_max_devices_per_user_limit() -> None:
-    """User cannot register more than user.max_devices (default 5) active devices."""
+    """When MAX_DEVICES_PER_USER is set, registering beyond the limit is rejected; existing devices still work."""
     import uuid
-    from app.core.database import SessionLocal
-    from app.models import User
-
-    # Temporarily lower ava's max_devices to test the limit
-    db = SessionLocal()
-    ava = db.query(User).filter_by(username="ava").one()
-    original_max = ava.max_devices
+    from app.core.config import settings as _settings
 
     with TestClient(app) as client:
-        # Check how many active devices ava currently has
         login_r = client.post("/api/v1/auth/login", json={"username": "ava", "password": "fridgehub"})
         assert login_r.status_code == 200
         headers = {"Authorization": f"Bearer {login_r.json()['accessToken']}"}
         r = client.get("/api/v1/auth/devices", headers=headers)
         existing_active = len([d for d in r.json() if not d["isRevoked"]])
 
-        # Set limit to existing + 1 so we can register exactly 1 more
-        ava.max_devices = existing_active + 1
-        db.commit()
-
+        # Set config limit to existing + 1 so we can register exactly 1 more
+        original = _settings.max_devices_per_user
+        _settings.__dict__["max_devices_per_user"] = existing_active + 1
         try:
             # Register one more device — should succeed
             did1 = f"limit-ok-{uuid.uuid4().hex[:8]}"
             r1 = client.post("/api/v1/auth/login", json={"username": "ava", "password": "fridgehub", "deviceId": did1})
             assert r1.status_code == 200
 
-            # Next new device should be rejected
+            # Next truly new device should be rejected
             did2 = f"limit-fail-{uuid.uuid4().hex[:8]}"
             r2 = client.post("/api/v1/auth/login", json={"username": "ava", "password": "fridgehub", "deviceId": did2})
             assert r2.status_code == 403
             assert "Maximum number of devices" in r2.json()["error"]["detail"]
 
-            # Existing device should still work (not a new registration)
+            # Re-login on an already-registered device must still succeed
             r3 = client.post("/api/v1/auth/login", json={"username": "ava", "password": "fridgehub", "deviceId": did1})
             assert r3.status_code == 200
         finally:
-            ava.max_devices = original_max
-            db.commit()
-            db.close()
+            _settings.__dict__["max_devices_per_user"] = original
 
 
 def test_same_browser_device_id_rotation_reuses_existing_device_at_limit() -> None:
     """A changed client-side device ID from the same browser should not create duplicate devices."""
+    from app.core.config import settings as _settings
     unique = uuid4().hex[:8]
     user_agent = f"FridgeHubBrowser/{unique}"
     first_device_id = f"stable-browser-{unique}"
     rotated_device_id = f"rotated-browser-{unique}"
 
-    db = SessionLocal()
-    ava = db.query(User).filter_by(username="ava").one()
-    original_max = ava.max_devices
+    original = _settings.max_devices_per_user
     try:
       with TestClient(app) as client:
           first = client.post(
@@ -2116,15 +2120,18 @@ def test_same_browser_device_id_rotation_reuses_existing_device_at_limit() -> No
           )
           assert first.status_code == 200
 
-          db.expire_all()
+          db = SessionLocal()
+          ava = db.query(User).filter_by(username="ava").one()
           active_count = (
               db.query(Device)
               .filter(Device.user_id == ava.id, Device.is_active.is_(True), Device.is_revoked.is_(False))
               .count()
           )
-          ava.max_devices = active_count
-          db.commit()
+          db.close()
+          # Pin the config limit to current active count so any truly new device is rejected
+          _settings.__dict__["max_devices_per_user"] = active_count
 
+          # Rotated device ID from same browser/UA should match existing device — no new slot needed
           rotated = client.post(
               "/api/v1/auth/login",
               json={
@@ -2140,14 +2147,17 @@ def test_same_browser_device_id_rotation_reuses_existing_device_at_limit() -> No
           assert rotated.status_code == 200
           assert decode_token(rotated.json()["accessToken"])["device_id"] == first_device_id
 
-          db.expire_all()
+          db2 = SessionLocal()
+          ava2 = db2.query(User).filter_by(username="ava").one()
           after_count = (
-              db.query(Device)
-              .filter(Device.user_id == ava.id, Device.is_active.is_(True), Device.is_revoked.is_(False))
+              db2.query(Device)
+              .filter(Device.user_id == ava2.id, Device.is_active.is_(True), Device.is_revoked.is_(False))
               .count()
           )
+          db2.close()
           assert after_count == active_count
 
+          # A genuinely new device from a different browser must be blocked at the limit
           truly_new = client.post(
               "/api/v1/auth/login",
               json={
@@ -2162,9 +2172,7 @@ def test_same_browser_device_id_rotation_reuses_existing_device_at_limit() -> No
           )
           assert truly_new.status_code == 403
     finally:
-        ava.max_devices = original_max
-        db.commit()
-        db.close()
+        _settings.__dict__["max_devices_per_user"] = original
 
 
 def test_shopping_report_pdf_download() -> None:
@@ -2206,3 +2214,877 @@ def test_shopping_report_requires_auth() -> None:
     with TestClient(app) as client:
         r = client.get("/api/v1/grocery/shopping-report")
         assert r.status_code in (401, 403)
+
+
+# ---------------------------------------------------------------------------
+# Error message specificity
+# ---------------------------------------------------------------------------
+
+
+def test_login_wrong_password_gives_specific_message() -> None:
+    """Wrong password returns a message distinct from 'account not found'."""
+    with TestClient(app) as client:
+        r = client.post("/api/v1/auth/login", json={"username": "meera", "password": "wrongpassword"})
+        assert r.status_code == 401
+        detail = r.json()["error"]["detail"]
+        assert "incorrect password" in detail.lower()
+
+
+def test_login_unknown_user_gives_specific_message() -> None:
+    """Unknown username returns a message about no account found."""
+    with TestClient(app) as client:
+        r = client.post("/api/v1/auth/login", json={"username": "nobody_xyz", "password": "fridgehub"})
+        assert r.status_code == 401
+        detail = r.json()["error"]["detail"]
+        assert "no active account" in detail.lower()
+
+
+def test_duplicate_email_gives_specific_message() -> None:
+    """Registering with an already-used email surfaces the email in the error."""
+    unique = uuid4().hex[:10]
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+        # Create first member
+        client.post(
+            "/api/v1/family/members",
+            json={"name": "First", "email": f"dup-{unique}@test.local", "username": f"first{unique}", "password": "fridgehub1", "role": "child", "colorClass": "bg-blue-500"},
+            headers=headers,
+        )
+        # Try same email, different username
+        r = client.post(
+            "/api/v1/family/members",
+            json={"name": "Second", "email": f"dup-{unique}@test.local", "username": f"second{unique}", "password": "fridgehub1", "role": "child", "colorClass": "bg-blue-500"},
+            headers=headers,
+        )
+        assert r.status_code == 409
+        detail = r.json()["error"]["detail"]
+        assert f"dup-{unique}@test.local" in detail
+
+
+def test_duplicate_username_gives_specific_message() -> None:
+    """Registering with an already-used username surfaces the username in the error."""
+    unique = uuid4().hex[:10]
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+        client.post(
+            "/api/v1/family/members",
+            json={"name": "First", "email": f"uniq1-{unique}@test.local", "username": f"dupuser{unique}", "password": "fridgehub1", "role": "child", "colorClass": "bg-blue-500"},
+            headers=headers,
+        )
+        r = client.post(
+            "/api/v1/family/members",
+            json={"name": "Second", "email": f"uniq2-{unique}@test.local", "username": f"dupuser{unique}", "password": "fridgehub1", "role": "child", "colorClass": "bg-blue-500"},
+            headers=headers,
+        )
+        assert r.status_code == 409
+        detail = r.json()["error"]["detail"]
+        assert f"dupuser{unique}" in detail
+
+
+def test_validation_error_summary_is_human_readable() -> None:
+    """422 validation errors produce a readable summary in error.detail, not 'Validation failed'."""
+    with TestClient(app) as client:
+        # Missing required fields on login
+        r = client.post("/api/v1/auth/login", json={})
+        assert r.status_code == 422
+        body = r.json()
+        detail = body["error"]["detail"]
+        # Should NOT be the generic fallback
+        assert detail != "Validation failed"
+        # Should mention at least one field name
+        assert any(field["field"] for field in body["validationErrors"])
+
+
+def test_password_strength_error_strips_pydantic_prefix() -> None:
+    """Password validator message should not contain 'Value error, ' prefix."""
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+        r = client.post(
+            "/api/v1/auth/change-password",
+            json={"currentPassword": "fridgehub", "newPassword": "onlyletters"},
+            headers=headers,
+        )
+        assert r.status_code == 422
+        detail = r.json()["error"]["detail"]
+        assert "Value error," not in detail
+        assert "letter" in detail.lower() or "number" in detail.lower()
+
+
+# ---------------------------------------------------------------------------
+# One admin per family enforcement
+# ---------------------------------------------------------------------------
+
+
+def test_cannot_create_second_admin_via_member_endpoint() -> None:
+    """Creating a member with role=admin is rejected when family already has an admin."""
+    unique = uuid4().hex[:10]
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+        r = client.post(
+            "/api/v1/family/members",
+            json={
+                "name": "Second Admin",
+                "email": f"admin2-{unique}@test.local",
+                "username": f"admin2{unique}",
+                "password": "fridgehub1",
+                "role": "admin",
+                "colorClass": "bg-red-500",
+            },
+            headers=headers,
+        )
+        assert r.status_code == 409
+        detail = r.json()["error"]["detail"]
+        assert "already has an admin" in detail.lower()
+
+
+def test_cannot_promote_member_to_admin_when_admin_exists() -> None:
+    """Updating a member's role to admin is rejected when family already has an admin."""
+    unique = uuid4().hex[:10]
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+        # Create a regular member
+        created = client.post(
+            "/api/v1/family/members",
+            json={"name": "Promote Test", "email": f"promote-{unique}@test.local", "username": f"promote{unique}", "password": "fridgehub1", "role": "child", "colorClass": "bg-blue-500"},
+            headers=headers,
+        )
+        assert created.status_code == 200
+        member_id = created.json()["id"]
+
+        # Try to promote to admin — should fail
+        r = client.patch(f"/api/v1/family/members/{member_id}", json={"role": "admin"}, headers=headers)
+        assert r.status_code == 409
+        assert "already has an admin" in r.json()["error"]["detail"].lower()
+
+        # Clean up
+        client.delete(f"/api/v1/family/members/{member_id}", headers=headers)
+
+
+def test_can_change_non_admin_role_freely() -> None:
+    """Changing a member's role between non-admin values works without restriction."""
+    unique = uuid4().hex[:10]
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+        created = client.post(
+            "/api/v1/family/members",
+            json={"name": "Role Free", "email": f"rolefree-{unique}@test.local", "username": f"rolefree{unique}", "password": "fridgehub1", "role": "child", "colorClass": "bg-blue-500"},
+            headers=headers,
+        )
+        member_id = created.json()["id"]
+
+        r = client.patch(f"/api/v1/family/members/{member_id}", json={"role": "parent"}, headers=headers)
+        assert r.status_code == 200
+        assert r.json()["role"] == "parent"
+
+        r = client.patch(f"/api/v1/family/members/{member_id}", json={"role": "child"}, headers=headers)
+        assert r.status_code == 200
+        assert r.json()["role"] == "child"
+
+        client.delete(f"/api/v1/family/members/{member_id}", headers=headers)
+
+
+# ---------------------------------------------------------------------------
+# Invite — admin role blocked
+# ---------------------------------------------------------------------------
+
+
+def test_invite_with_admin_role_is_rejected() -> None:
+    """Creating an invite with role=admin is rejected at the API level."""
+    unique = uuid4().hex[:10]
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+        r = client.post(
+            "/api/v1/auth/invites",
+            json={"email": f"adminvite-{unique}@test.local", "role": "admin"},
+            headers=headers,
+        )
+        assert r.status_code == 400
+        detail = r.json()["error"]["detail"]
+        assert "admin" in detail.lower()
+        assert "bootstrap" in detail.lower() or "independently" in detail.lower()
+
+
+def test_invite_signup_with_admin_role_blocked_even_if_invite_exists() -> None:
+    """Even if an invite somehow has role=admin, signup is blocked when family already has an admin."""
+    unique = uuid4().hex[:10]
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+
+        # Force-create an admin invite directly in DB (bypassing service guard)
+        db = SessionLocal()
+        try:
+            import hashlib, secrets
+            token = secrets.token_urlsafe(32)
+            token_hash = hashlib.sha256(token.encode()).hexdigest()
+            from datetime import datetime, timezone, timedelta
+            from app.models import FamilyInvite, FamilyMember
+            member = db.query(FamilyMember).filter_by(is_active=True).first()
+            invite = FamilyInvite(
+                family_id=member.family_id,
+                invited_by=member.user_id,
+                token_hash=token_hash,
+                email=f"adminvite2-{unique}@test.local",
+                role="admin",
+                max_uses=1,
+                used_count=0,
+                expires_at=datetime.now(timezone.utc) + timedelta(days=7),
+            )
+            db.add(invite)
+            db.commit()
+        finally:
+            db.close()
+
+        r = client.post(
+            "/api/v1/auth/signup",
+            json={
+                "inviteToken": token,
+                "fullName": "Admin Attempt",
+                "email": f"adminvite2-{unique}@test.local",
+                "phone": "+6591000077",
+                "username": f"adminattempt{unique}",
+                "password": "fridgehub1",
+                "deviceId": f"admin-invite-device-{unique}",
+                "deviceName": "Test Phone",
+                "deviceType": "phone",
+            },
+        )
+        assert r.status_code == 409
+        assert "already has an admin" in r.json()["error"]["detail"].lower()
+
+
+# ---------------------------------------------------------------------------
+# Invite — email mandatory, correct email enforced
+# ---------------------------------------------------------------------------
+
+
+def test_invite_requires_email() -> None:
+    """Creating an invite without email is rejected (email is mandatory)."""
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+        r = client.post(
+            "/api/v1/auth/invites",
+            json={"role": "member"},
+            headers=headers,
+        )
+        # Missing required field → 422
+        assert r.status_code == 422
+
+
+def test_invite_signup_wrong_email_rejected() -> None:
+    """Signing up with a different email than the invite was issued to returns 403."""
+    unique = uuid4().hex[:10]
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+        invite = client.post(
+            "/api/v1/auth/invites",
+            json={"email": f"correct-{unique}@test.local", "role": "member"},
+            headers=headers,
+        )
+        assert invite.status_code == 201
+        token = invite.json()["inviteToken"]
+
+        r = client.post(
+            "/api/v1/auth/signup",
+            json={
+                "inviteToken": token,
+                "fullName": "Wrong Email User",
+                "email": f"wrong-{unique}@test.local",
+                "phone": "+6591000066",
+                "username": f"wrongemail{unique}",
+                "password": "fridgehub1",
+                "deviceId": f"wrong-email-device-{unique}",
+                "deviceName": "Test Phone",
+                "deviceType": "phone",
+            },
+        )
+        assert r.status_code == 403
+        detail = r.json()["error"]["detail"]
+        assert "different email" in detail.lower() or "sent to" in detail.lower()
+
+
+def test_invite_preview_shows_family_and_role() -> None:
+    """Preview endpoint returns family name, role, and expiry for a valid invite."""
+    unique = uuid4().hex[:10]
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+        invite = client.post(
+            "/api/v1/auth/invites",
+            json={"email": f"preview-{unique}@test.local", "role": "parent"},
+            headers=headers,
+        )
+        assert invite.status_code == 201
+        token = invite.json()["inviteToken"]
+
+        r = client.get(f"/api/v1/auth/invites/{token}")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["familyName"] == "FridgeHub"
+        assert data["role"] == "parent"
+        assert data["email"] == f"preview-{unique}@test.local"
+        assert "expiresAt" in data
+
+
+def test_invite_preview_invalid_token_returns_404() -> None:
+    """Preview with a garbage token returns 404."""
+    with TestClient(app) as client:
+        r = client.get("/api/v1/auth/invites/this-is-not-a-real-token-at-all-xyz")
+        assert r.status_code == 404
+        assert "invalid" in r.json()["error"]["detail"].lower() or "expired" in r.json()["error"]["detail"].lower()
+
+
+def test_invite_signup_full_flow_correct_email() -> None:
+    """Full invite signup flow: create invite → preview → signup with correct email → member exists."""
+    unique = uuid4().hex[:10]
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+
+        # Admin creates invite
+        invite = client.post(
+            "/api/v1/auth/invites",
+            json={"email": f"newmember-{unique}@test.local", "role": "member"},
+            headers=headers,
+        )
+        assert invite.status_code == 201
+        token = invite.json()["inviteToken"]
+        assert token
+
+        # Preview invite
+        preview = client.get(f"/api/v1/auth/invites/{token}")
+        assert preview.status_code == 200
+        assert preview.json()["role"] == "member"
+
+        # Sign up
+        signup = client.post(
+            "/api/v1/auth/signup",
+            json={
+                "inviteToken": token,
+                "fullName": "New Member",
+                "email": f"newmember-{unique}@test.local",
+                "phone": f"+659100{unique[:4]}",
+                "username": f"newmember{unique}",
+                "password": "fridgehub1",
+                "deviceId": f"newmember-device-{unique}",
+                "deviceName": "New Phone",
+                "deviceType": "phone",
+            },
+        )
+        assert signup.status_code == 200
+        assert "accessToken" in signup.json()
+
+        # Verify member exists in family
+        db = SessionLocal()
+        try:
+            user = db.query(User).filter_by(username=f"newmember{unique}").one()
+            member = db.query(FamilyMember).filter_by(user_id=user.id, is_active=True).one()
+            assert member.role == "member"
+        finally:
+            db.close()
+
+        # Invite is now consumed — reuse should fail
+        reuse = client.post(
+            "/api/v1/auth/signup",
+            json={
+                "inviteToken": token,
+                "fullName": "Reuse Attempt",
+                "email": f"newmember-{unique}@test.local",
+                "phone": "+6591000055",
+                "username": f"reuse{unique}",
+                "password": "fridgehub1",
+                "deviceId": f"reuse-device-{unique}",
+                "deviceName": "Reuse Phone",
+                "deviceType": "phone",
+            },
+        )
+        assert reuse.status_code == 404
+
+
+def test_invite_signup_role_is_member_not_admin() -> None:
+    """A member who signs up via invite gets the role from the invite, never admin."""
+    unique = uuid4().hex[:10]
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+        invite = client.post(
+            "/api/v1/auth/invites",
+            json={"email": f"rolecheck-{unique}@test.local", "role": "child"},
+            headers=headers,
+        )
+        token = invite.json()["inviteToken"]
+
+        signup = client.post(
+            "/api/v1/auth/signup",
+            json={
+                "inviteToken": token,
+                "fullName": "Role Check",
+                "email": f"rolecheck-{unique}@test.local",
+                "phone": "+6591000044",
+                "username": f"rolecheck{unique}",
+                "password": "fridgehub1",
+                "deviceId": f"rolecheck-device-{unique}",
+                "deviceName": "Test Phone",
+                "deviceType": "phone",
+            },
+        )
+        assert signup.status_code == 200
+
+        db = SessionLocal()
+        try:
+            user = db.query(User).filter_by(username=f"rolecheck{unique}").one()
+            member = db.query(FamilyMember).filter_by(user_id=user.id, is_active=True).one()
+            assert member.role == "child"
+            assert member.role != "admin"
+        finally:
+            db.close()
+
+
+def test_invite_revoke_makes_token_unusable() -> None:
+    """Revoking an invite makes the token invalid for signup."""
+    unique = uuid4().hex[:10]
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+        invite = client.post(
+            "/api/v1/auth/invites",
+            json={"email": f"revoke-{unique}@test.local", "role": "member"},
+            headers=headers,
+        )
+        assert invite.status_code == 201
+        invite_id = invite.json()["id"]
+        token = invite.json()["inviteToken"]
+
+        # Revoke it
+        r = client.delete(f"/api/v1/auth/invites/{invite_id}", headers=headers)
+        assert r.status_code == 204
+
+        # Preview should now 404
+        r = client.get(f"/api/v1/auth/invites/{token}")
+        assert r.status_code == 404
+
+        # Signup should also fail
+        r = client.post(
+            "/api/v1/auth/signup",
+            json={
+                "inviteToken": token,
+                "fullName": "Revoked User",
+                "email": f"revoke-{unique}@test.local",
+                "phone": "+6591000033",
+                "username": f"revokeduser{unique}",
+                "password": "fridgehub1",
+                "deviceId": f"revoke-device-{unique}",
+                "deviceName": "Test Phone",
+                "deviceType": "phone",
+            },
+        )
+        assert r.status_code == 404
+
+
+def test_invite_list_shows_recent_invites() -> None:
+    """List invites returns invites created in the last 30 days."""
+    unique = uuid4().hex[:10]
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+        invite = client.post(
+            "/api/v1/auth/invites",
+            json={"email": f"listtest-{unique}@test.local", "role": "member"},
+            headers=headers,
+        )
+        assert invite.status_code == 201
+        invite_id = invite.json()["id"]
+
+        r = client.get("/api/v1/auth/invites", headers=headers)
+        assert r.status_code == 200
+        ids = [i["id"] for i in r.json()]
+        assert invite_id in ids
+
+
+def test_invite_list_requires_manage_family_permission() -> None:
+    """Child cannot list or create invites."""
+    unique = uuid4().hex[:10]
+    with TestClient(app) as client:
+        child_headers = auth_headers(client, "ava")
+        assert client.get("/api/v1/auth/invites", headers=child_headers).status_code == 403
+        r = client.post(
+            "/api/v1/auth/invites",
+            json={"email": f"child-invite-{unique}@test.local", "role": "member"},
+            headers=child_headers,
+        )
+        assert r.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# Purge family data
+# ---------------------------------------------------------------------------
+
+
+def test_purge_family_data_admin_only() -> None:
+    """Non-admin (child) cannot purge family data."""
+    with TestClient(app) as client:
+        child_headers = auth_headers(client, "ava")
+        r = client.delete("/api/v1/family/data", headers=child_headers)
+        assert r.status_code == 403
+
+
+def test_purge_family_data_requires_auth() -> None:
+    """Purge endpoint requires authentication."""
+    with TestClient(app) as client:
+        r = client.delete("/api/v1/family/data")
+        assert r.status_code == 401
+
+
+def test_purge_family_data_clears_operational_data() -> None:
+    """Admin purge deletes groceries, tasks, meals, recipes, contacts, announcements, notifications."""
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+
+        # Seed some data to ensure there's something to purge
+        client.post("/api/v1/grocery/items", json={"itemName": "PurgeTestItem", "listTypeId": 1, "quantity": 1, "unit": "Kg", "purchaseFrequency": "weekly"}, headers=headers)
+        client.post("/api/v1/tasks", json={"title": "PurgeTestTask", "category": "chore", "priority": "low", "dueAt": "2025-12-01T10:00:00", "assignedTo": 1}, headers=headers)
+        client.post("/api/v1/family/announcements", json={"title": "PurgeAnn", "message": "Will be purged"}, headers=headers)
+        client.post("/api/v1/family/emergency-contacts", json={"label": "PurgeContact", "value": "000"}, headers=headers)
+
+        # Purge
+        r = client.delete("/api/v1/family/data", headers=headers)
+        assert r.status_code == 200
+        counts = r.json()
+        # Should return deletion counts per type
+        assert isinstance(counts, dict)
+        assert any(v > 0 for v in counts.values()), "Expected at least some records deleted"
+
+        # Verify data is gone
+        groceries = client.get("/api/v1/grocery/items", headers=headers)
+        assert groceries.status_code == 200
+        assert groceries.json() == []
+
+        tasks = client.get("/api/v1/tasks", headers=headers)
+        assert tasks.status_code == 200
+        assert tasks.json() == []
+
+        # Members and family should still exist
+        bootstrap = client.get("/api/v1/family/bootstrap", headers=headers)
+        assert bootstrap.status_code == 200
+        assert bootstrap.json()["family"]["familyName"] == "FridgeHub"
+        assert len(bootstrap.json()["members"]) >= 1
+
+
+def test_purge_creates_audit_log() -> None:
+    """Purge operation writes a family_data_purged audit log entry."""
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+
+        # Add something so purge has work to do
+        client.post("/api/v1/tasks", json={"title": "AuditPurgeTask", "category": "chore", "priority": "low", "dueAt": "2025-12-01T10:00:00", "assignedTo": 1}, headers=headers)
+
+        client.delete("/api/v1/family/data", headers=headers)
+
+        r = client.get("/api/v1/family/audit-logs?limit=200&entity_type=family", headers=headers)
+        assert r.status_code == 200
+        logs = r.json()
+        purge_logs = [log for log in logs if log["action"] == "family_data_purged"]
+        assert len(purge_logs) >= 1
+        assert purge_logs[0]["entityType"] == "family"
+
+
+def test_purge_idempotent_second_purge_returns_zero_counts() -> None:
+    """Purging an already-empty family returns zero counts without error."""
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+
+        # First purge clears everything
+        client.delete("/api/v1/family/data", headers=headers)
+
+        # Second purge on empty family
+        r = client.delete("/api/v1/family/data", headers=headers)
+        assert r.status_code == 200
+        counts = r.json()
+        assert all(v == 0 for v in counts.values())
+
+
+# ---------------------------------------------------------------------------
+# OTP email + phone verification tests
+# ---------------------------------------------------------------------------
+
+def _make_unverified_user(db, username: str = "otpuser") -> "User":
+    """Create a user with email_verified=False, phone_verified=False."""
+    from app.core.security import hash_password
+    from app.models import User
+    existing = db.query(User).filter_by(username=username).first()
+    if existing:
+        existing.email_verified = False
+        existing.phone_verified = False
+        existing.is_active = True
+        db.commit()
+        return existing
+    # Use a unique phone per username to avoid UNIQUE constraint collisions
+    phone_suffix = abs(hash(username)) % 100000000
+    user = User(
+        email=f"{username}@fridgehub.test",
+        username=username,
+        password_hash=hash_password("Test1234"),
+        full_name="OTP Test User",
+        family_role="member",
+        phone=f"+65{phone_suffix:08d}",
+        email_verified=False,
+        phone_verified=False,
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+def test_login_blocked_for_unverified_user() -> None:
+    """Login must be rejected with 403 when email/phone not verified."""
+    from app.core.database import SessionLocal
+    with TestClient(app) as client:
+        db = SessionLocal()
+        try:
+            user = _make_unverified_user(db, "unveriflogin")
+            user_id = user.id
+        finally:
+            db.close()
+        r = client.post("/api/v1/auth/login", json={"username": "unveriflogin", "password": "Test1234"})
+    assert r.status_code == 403
+    detail = r.json()["error"]["detail"]
+    assert "verified" in detail.lower()
+    assert f"userId={user_id}" in detail
+
+
+def test_verify_otp_correct_codes_marks_verified() -> None:
+    """Correct email+phone OTP marks user as verified."""
+    import hashlib
+    from datetime import datetime, timedelta, timezone
+    from app.core.database import SessionLocal
+    from app.models import User, VerificationOtp
+    with TestClient(app) as client:
+        db = SessionLocal()
+        try:
+            user = _make_unverified_user(db, "verifcorrect")
+            email_otp, phone_otp = "123456", "654321"
+            db.query(VerificationOtp).filter_by(entity_type="user", entity_id=user.id).update({"is_used": True})
+            row = VerificationOtp(
+                entity_type="user", entity_id=user.id,
+                email_otp_hash=hashlib.sha256(email_otp.encode()).hexdigest(),
+                phone_otp_hash=hashlib.sha256(phone_otp.encode()).hexdigest(),
+                email_target=user.email, phone_target=user.phone or "",
+                expires_at=datetime.now(timezone.utc) + timedelta(minutes=10),
+            )
+            db.add(row)
+            db.commit()
+            user_id = user.id
+        finally:
+            db.close()
+
+        r = client.post("/api/v1/auth/verify", json={
+            "userId": user_id, "emailOtp": email_otp, "phoneOtp": phone_otp,
+        })
+        assert r.status_code == 200
+        body = r.json()
+        assert body["emailVerified"] is True
+        assert body["phoneVerified"] is True
+        assert body["verified"] is True
+
+        # Confirm DB state via a fresh connection
+        db2 = SessionLocal()
+        try:
+            from sqlalchemy import text as sa_text
+            row_check = db2.execute(
+                sa_text("SELECT email_verified, phone_verified FROM users WHERE id = :uid"),
+                {"uid": user_id},
+            ).one()
+            assert row_check.email_verified in (True, 1)
+            assert row_check.phone_verified in (True, 1)
+        finally:
+            db2.close()
+
+
+def test_verify_otp_wrong_email_code_rejected() -> None:
+    """Wrong email OTP returns 400 with specific message."""
+    import hashlib
+    from app.core.database import SessionLocal
+    from app.models import VerificationOtp
+    from datetime import datetime, timedelta, timezone
+    db = SessionLocal()
+    try:
+        user = _make_unverified_user(db, "verifwrongemail")
+        db.query(VerificationOtp).filter_by(entity_type="user", entity_id=user.id).update({"is_used": True})
+        row = VerificationOtp(
+            entity_type="user",
+            entity_id=user.id,
+            email_otp_hash=hashlib.sha256("111111".encode()).hexdigest(),
+            phone_otp_hash=hashlib.sha256("222222".encode()).hexdigest(),
+            email_target=user.email,
+            phone_target=user.phone or "",
+            expires_at=datetime.now(timezone.utc) + timedelta(minutes=10),
+        )
+        db.add(row)
+        db.commit()
+
+        with TestClient(app) as client:
+            r = client.post("/api/v1/auth/verify", json={
+                "userId": user.id,
+                "emailOtp": "999999",  # wrong
+                "phoneOtp": "222222",  # correct
+            })
+        assert r.status_code == 400
+        assert "email" in r.json()["error"]["detail"].lower()
+    finally:
+        db.close()
+
+
+def test_verify_otp_expired_code_rejected() -> None:
+    """Expired OTP returns 400."""
+    import hashlib
+    from app.core.database import SessionLocal
+    from app.models import VerificationOtp
+    from datetime import datetime, timedelta, timezone
+    db = SessionLocal()
+    try:
+        user = _make_unverified_user(db, "verifexpired")
+        db.query(VerificationOtp).filter_by(entity_type="user", entity_id=user.id).update({"is_used": True})
+        row = VerificationOtp(
+            entity_type="user",
+            entity_id=user.id,
+            email_otp_hash=hashlib.sha256("111111".encode()).hexdigest(),
+            phone_otp_hash=hashlib.sha256("222222".encode()).hexdigest(),
+            email_target=user.email,
+            phone_target=user.phone or "",
+            expires_at=datetime.now(timezone.utc) - timedelta(minutes=1),  # already expired
+        )
+        db.add(row)
+        db.commit()
+
+        with TestClient(app) as client:
+            r = client.post("/api/v1/auth/verify", json={
+                "userId": user.id,
+                "emailOtp": "111111",
+                "phoneOtp": "222222",
+            })
+        assert r.status_code == 400
+        assert "expired" in r.json()["error"]["detail"].lower()
+    finally:
+        db.close()
+
+
+def test_verify_otp_max_attempts_lockout() -> None:
+    """After 5 wrong attempts the OTP row is locked out."""
+    import hashlib
+    from app.core.database import SessionLocal
+    from app.models import VerificationOtp
+    from datetime import datetime, timedelta, timezone
+    db = SessionLocal()
+    try:
+        user = _make_unverified_user(db, "veriflockout")
+        db.query(VerificationOtp).filter_by(entity_type="user", entity_id=user.id).update({"is_used": True})
+        row = VerificationOtp(
+            entity_type="user",
+            entity_id=user.id,
+            email_otp_hash=hashlib.sha256("111111".encode()).hexdigest(),
+            phone_otp_hash=hashlib.sha256("222222".encode()).hexdigest(),
+            email_target=user.email,
+            phone_target=user.phone or "",
+            expires_at=datetime.now(timezone.utc) + timedelta(minutes=10),
+            attempts=5,  # already at max
+        )
+        db.add(row)
+        db.commit()
+
+        with TestClient(app) as client:
+            r = client.post("/api/v1/auth/verify", json={
+                "userId": user.id,
+                "emailOtp": "111111",
+                "phoneOtp": "222222",
+            })
+        assert r.status_code == 400
+        assert "too many" in r.json()["error"]["detail"].lower()
+    finally:
+        db.close()
+
+
+def test_resend_otp_issues_new_codes() -> None:
+    """Resend endpoint invalidates old OTP and issues a fresh one."""
+    import hashlib
+    from app.core.database import SessionLocal
+    from app.models import VerificationOtp
+    from datetime import datetime, timedelta, timezone
+    db = SessionLocal()
+    try:
+        user = _make_unverified_user(db, "verifresend")
+        db.query(VerificationOtp).filter_by(entity_type="user", entity_id=user.id).update({"is_used": True})
+        old_row = VerificationOtp(
+            entity_type="user",
+            entity_id=user.id,
+            email_otp_hash=hashlib.sha256("000000".encode()).hexdigest(),
+            phone_otp_hash=hashlib.sha256("000000".encode()).hexdigest(),
+            email_target=user.email,
+            phone_target=user.phone or "",
+            expires_at=datetime.now(timezone.utc) + timedelta(minutes=10),
+        )
+        db.add(old_row)
+        db.commit()
+        old_id = old_row.id
+
+        with TestClient(app) as client:
+            r = client.post("/api/v1/auth/resend", json={"userId": user.id})
+        assert r.status_code == 200
+        assert r.json()["verified"] is False
+
+        db.expire_all()
+        # Old row must be invalidated
+        old = db.get(VerificationOtp, old_id)
+        assert old.is_used is True
+        # A new active row must exist
+        new_row = db.query(VerificationOtp).filter_by(
+            entity_type="user", entity_id=user.id, is_used=False
+        ).first()
+        assert new_row is not None
+        assert new_row.id != old_id
+    finally:
+        db.close()
+
+
+def test_verified_user_can_login_normally() -> None:
+    """After verification, login succeeds."""
+    from app.core.database import SessionLocal
+    with TestClient(app) as client:
+        db = SessionLocal()
+        try:
+            user = _make_unverified_user(db, "verifloginok")
+            user.email_verified = True
+            user.phone_verified = True
+            # Attach to meera's family so membership lookup works
+            from app.models import FamilyMember
+            meera = db.query(User).filter_by(username="meera").first()
+            existing_member = db.query(FamilyMember).filter_by(user_id=user.id).first()
+            if not existing_member and meera:
+                family_id = db.query(FamilyMember).filter_by(user_id=meera.id).first().family_id
+                db.add(FamilyMember(
+                    family_id=family_id, user_id=user.id, role="member",
+                    initial="O", color_class="bg-slate-500", status="Active", permissions=[],
+                ))
+            db.commit()
+        finally:
+            db.close()
+        r = client.post("/api/v1/auth/login", json={"username": "verifloginok", "password": "Test1234"})
+    assert r.status_code == 200
+    assert "accessToken" in r.json()
+
+
+def test_already_verified_user_verify_endpoint_returns_ok() -> None:
+    """Calling /verify for an already-verified user returns 200 immediately."""
+    from app.core.database import SessionLocal
+    from app.models import User
+    db = SessionLocal()
+    try:
+        user = _make_unverified_user(db, "verifidempotent")
+        user.email_verified = True
+        user.phone_verified = True
+        db.commit()
+
+        with TestClient(app) as client:
+            r = client.post("/api/v1/auth/verify", json={
+                "userId": user.id,
+                "emailOtp": "000000",
+                "phoneOtp": "000000",
+            })
+        assert r.status_code == 200
+        assert r.json()["verified"] is True
+    finally:
+        db.close()

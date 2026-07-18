@@ -23,8 +23,9 @@ def _active_device_count(db: Session, user_id: int) -> int:
 
 
 def _device_policy(db: Session, current_user: CurrentUser) -> dict:
+    from app.core.config import settings
     return {
-        "maxDevices": current_user.user.max_devices,
+        "maxDevices": settings.max_devices_per_user,
         "activeDeviceCount": _active_device_count(db, current_user.user_id),
     }
 
@@ -59,10 +60,12 @@ def update_device_policy(
     current_user: CurrentUser = Depends(require_permission(Permission.MANAGE_FAMILY)),
     db: Session = Depends(get_db),
 ) -> dict:
+    from app.core.config import settings
     active_count = _active_device_count(db, current_user.user_id)
-    if payload.maxDevices < active_count:
+    new_limit = payload.maxDevices
+    if new_limit is not None and new_limit < active_count:
         raise HTTPException(status_code=400, detail="Max devices cannot be lower than active registered devices")
-    current_user.user.max_devices = payload.maxDevices
+    settings.__dict__["max_devices_per_user"] = new_limit
     write_audit_log(
         db,
         user_id=current_user.user_id,
@@ -70,7 +73,7 @@ def update_device_policy(
         action="device_policy_updated",
         entity_type="device_policy",
         entity_id=current_user.user_id,
-        changes={"max_devices": payload.maxDevices},
+        changes={"max_devices": new_limit},
     )
     db.commit()
     return _device_policy(db, current_user)

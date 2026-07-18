@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useState } from 'react'
-import { api, clearAccessToken, parseAccessToken, setAccessToken } from '@/services/api'
-import type { BootstrapSignupInput, InviteSignupInput, Permission, SignupDeviceInput } from '@/types/familyHub'
+import { isUnverifiedAccountError, api, clearAccessToken, parseAccessToken, setAccessToken } from '@/services/api'
+import type { BootstrapSignupInput, InviteSignupInput, Permission, SignupDeviceInput, VerificationStatus } from '@/types/familyHub'
 
 export const useAuth = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(() => !!api.getAccessToken())
   const [isCheckingAuth, setIsCheckingAuth] = useState(true)
   const [authError, setAuthError] = useState<string | null>(null)
   const [isDeviceBlocked, setIsDeviceBlocked] = useState(false)
+  const [pendingVerification, setPendingVerification] = useState<VerificationStatus | null>(null)
   const [username, setUsername] = useState<string | null>(() => parseAccessToken()?.username ?? null)
   const [userId, setUserId] = useState<number | null>(() => Number(parseAccessToken()?.sub) || null)
   const [role, setRole] = useState<string | null>(() => parseAccessToken()?.role ?? null)
@@ -38,6 +39,10 @@ export const useAuth = () => {
       const tokens = await api.loginUser(user, password, device)
       applyToken(tokens.accessToken)
     } catch (error) {
+      if (isUnverifiedAccountError(error)) {
+        setPendingVerification({ userId: error.userId, emailVerified: false, phoneVerified: false, verified: false, hasPhone: true })
+        return
+      }
       const message = error instanceof Error ? error.message : 'Login failed'
       if (message.toLowerCase().includes('revoked')) {
         setIsDeviceBlocked(true)
@@ -51,27 +56,50 @@ export const useAuth = () => {
     setAuthError(null)
     setIsDeviceBlocked(false)
     try {
-      const tokens = await api.bootstrapSignup(payload)
-      applyToken(tokens.accessToken)
+      const { userId: newUserId } = await api.bootstrapSignup(payload)
+      setPendingVerification({ userId: newUserId, emailVerified: false, phoneVerified: false, verified: false, hasPhone: Boolean(payload.phone) })
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Signup failed'
       setAuthError(message)
       throw error
     }
-  }, [applyToken])
+  }, [])
 
   const inviteSignup = useCallback(async (payload: InviteSignupInput) => {
     setAuthError(null)
     setIsDeviceBlocked(false)
     try {
-      const tokens = await api.signupWithInvite(payload)
-      applyToken(tokens.accessToken)
+      const { userId: newUserId } = await api.signupWithInvite(payload)
+      setPendingVerification({ userId: newUserId, emailVerified: false, phoneVerified: false, verified: false, hasPhone: Boolean(payload.phone) })
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Signup failed'
       setAuthError(message)
       throw error
     }
-  }, [applyToken])
+  }, [])
+
+  const verifyOtp = useCallback(async (emailOtp: string, phoneOtp: string) => {
+    if (!pendingVerification) return
+    const result = await api.verifyOtp(pendingVerification.userId, emailOtp, phoneOtp)
+    if (result.verified) {
+      setPendingVerification(null)
+      // Token is already in memory from signup; trigger a refresh to get a clean session
+      const token = await api.refreshAccessToken().catch(() => null)
+      if (token) applyToken(token)
+    } else {
+      setPendingVerification((prev) => prev ? { ...prev, ...result } : prev)
+    }
+  }, [applyToken, pendingVerification])
+
+  const resendOtp = useCallback(async () => {
+    if (!pendingVerification) return
+    await api.resendOtp(pendingVerification.userId)
+  }, [pendingVerification])
+
+  const dismissVerification = useCallback(() => {
+    setPendingVerification(null)
+    clearAccessToken()
+  }, [])
 
   const logout = useCallback(async () => {
     await api.logoutUser()
@@ -128,6 +156,7 @@ export const useAuth = () => {
     isCheckingAuth,
     authError,
     isDeviceBlocked,
+    pendingVerification,
     username,
     userId,
     role,
@@ -138,5 +167,8 @@ export const useAuth = () => {
     inviteSignup,
     logout,
     retryFromBlocked,
+    verifyOtp,
+    resendOtp,
+    dismissVerification,
   }
 }

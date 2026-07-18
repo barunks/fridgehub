@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import QRCode from 'qrcode'
 import {
+  AlertTriangle,
   Bot,
   CalendarDays,
   ChefHat,
@@ -44,18 +45,7 @@ import type {
 } from '@/types/familyHub'
 import { cn } from '@/utils/style'
 
-type Tab = 'members' | 'contacts' | 'grocery-types' | 'meal-plans' | 'recipes' | 'tasks' | 'insights' | 'security'
-
-const tabs: { key: Tab; label: string; icon: typeof Users }[] = [
-  { key: 'members', label: 'Members', icon: Users },
-  { key: 'meal-plans', label: 'Meal Plans', icon: CalendarDays },
-  { key: 'contacts', label: 'Contacts', icon: Phone },
-  { key: 'grocery-types', label: 'Grocery Places', icon: Store },
-  { key: 'recipes', label: 'Recipes', icon: ChefHat },
-  { key: 'tasks', label: 'Tasks', icon: ClipboardList },
-  { key: 'insights', label: 'Insights', icon: Bot },
-  { key: 'security', label: 'Security', icon: Key },
-]
+type Tab = 'members' | 'contacts' | 'grocery-types' | 'meal-plans' | 'recipes' | 'tasks' | 'insights' | 'security' | 'danger'
 
 interface Props {
   store: FridgeHubStore
@@ -74,6 +64,19 @@ const defaultDueLocalValue = () => {
 
 export const CommandCenterView = ({ store }: Props) => {
   const [activeTab, setActiveTab] = useState<Tab>('members')
+  const isAdmin = store.state.currentUser.role === 'admin'
+
+  const tabs: { key: Tab; label: string; icon: typeof Users; adminOnly?: boolean }[] = [
+    { key: 'members', label: 'Members', icon: Users },
+    { key: 'meal-plans', label: 'Meal Plans', icon: CalendarDays },
+    { key: 'contacts', label: 'Contacts', icon: Phone },
+    { key: 'grocery-types', label: 'Grocery Places', icon: Store },
+    { key: 'recipes', label: 'Recipes', icon: ChefHat },
+    { key: 'tasks', label: 'Tasks', icon: ClipboardList },
+    { key: 'insights', label: 'Insights', icon: Bot },
+    { key: 'security', label: 'Security', icon: Key },
+    ...(isAdmin ? [{ key: 'danger' as const, label: 'Purge Data', icon: AlertTriangle, adminOnly: true }] : []),
+  ]
 
   return (
     <div className="grid gap-6">
@@ -106,7 +109,11 @@ export const CommandCenterView = ({ store }: Props) => {
             <button
               className={cn(
                 'flex items-center gap-2 whitespace-nowrap rounded-xl px-4 py-2.5 text-xs font-semibold transition-all',
-                active
+                tab.adminOnly
+                  ? active
+                    ? 'bg-gradient-to-r from-rose-600 to-red-600 text-white shadow-md'
+                    : 'text-rose-500 hover:bg-rose-50 hover:text-rose-700'
+                  : active
                   ? 'bg-gradient-to-r from-indigo-600 to-blue-600 text-white shadow-md'
                   : 'text-slate-500 hover:bg-slate-100 hover:text-slate-800',
               )}
@@ -131,6 +138,7 @@ export const CommandCenterView = ({ store }: Props) => {
         {activeTab === 'tasks' && <TasksPanel store={store} />}
         {activeTab === 'insights' && <InsightsPanel store={store} />}
         {activeTab === 'security' && <SecurityPanel store={store} />}
+        {activeTab === 'danger' && isAdmin && <PurgeDataPanel store={store} />}
       </div>
     </div>
   )
@@ -1004,6 +1012,124 @@ const MealPlansPanel = ({ store }: Props) => {
   )
 }
 
+/* ─── Purge Data Panel ─── */
+const PurgeDataPanel = ({ store }: Props) => {
+  const [step, setStep] = useState<1 | 2>(1)
+  const [confirmed, setConfirmed] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [result, setResult] = useState<{ counts: Record<string, number>; error?: string } | null>(null)
+
+  const handlePurge = async () => {
+    if (!confirmed) return
+    setLoading(true)
+    setResult(null)
+    try {
+      const counts = await api.purgeAllFamilyData()
+      setResult({ counts })
+      setStep(1)
+      setConfirmed(false)
+      // Reload app state so UI reflects empty data
+      store.resetDemoData()
+    } catch (err) {
+      setResult({ counts: {}, error: err instanceof Error ? err.message : 'Purge failed. Please try again.' })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const totalDeleted = result ? Object.values(result.counts).reduce((sum, n) => sum + n, 0) : 0
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center gap-3">
+          <div className="flex size-10 items-center justify-center rounded-xl bg-rose-100">
+            <AlertTriangle className="size-5 text-rose-600" />
+          </div>
+          <div>
+            <CardTitle className="text-rose-700">Purge All Family Data</CardTitle>
+            <p className="mt-0.5 text-xs text-slate-500">Permanently deletes all groceries, tasks, meals, recipes, contacts, announcements, and notifications. Family account, members, and shopping places are kept.</p>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="grid gap-5">
+        {result && (
+          <div className={cn('rounded-xl border px-4 py-3 text-sm font-medium', result.error ? 'border-rose-200 bg-rose-50 text-rose-800' : 'border-emerald-200 bg-emerald-50 text-emerald-800')}>
+            {result.error
+              ? `Purge failed: ${result.error}`
+              : `Purge complete — ${totalDeleted} records deleted across ${Object.keys(result.counts).length} data types.`}
+          </div>
+        )}
+
+        {/* Step 1 — first warning */}
+        {step === 1 && (
+          <div className="grid gap-4 rounded-2xl border-2 border-rose-200 bg-rose-50/40 p-5">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="mt-0.5 size-5 shrink-0 text-rose-500" />
+              <div>
+                <p className="text-sm font-bold text-rose-800">This action cannot be undone.</p>
+                <p className="mt-1 text-sm text-rose-700">All grocery items, purchase cycles, tasks, meal plans, meal templates, recipes, emergency contacts, announcements, and notifications for your family will be permanently deleted.</p>
+                <p className="mt-2 text-sm font-semibold text-rose-800">Your family account, members, and login credentials will not be affected.</p>
+              </div>
+            </div>
+            <Button
+              onClick={() => setStep(2)}
+              className="w-fit border-rose-300 bg-rose-100 text-rose-700 hover:bg-rose-200"
+              variant="outline"
+            >
+              <AlertTriangle className="size-4" />
+              I understand — proceed to confirmation
+            </Button>
+          </div>
+        )}
+
+        {/* Step 2 — final confirmation with radio */}
+        {step === 2 && (
+          <div className="grid gap-4 rounded-2xl border-2 border-rose-400 bg-rose-50 p-5">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="mt-0.5 size-5 shrink-0 text-rose-600" />
+              <div>
+                <p className="text-sm font-bold text-rose-900">Final confirmation required</p>
+                <p className="mt-1 text-sm text-rose-800">You are about to permanently delete all operational data for your family. This cannot be reversed.</p>
+              </div>
+            </div>
+
+            <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-rose-300 bg-white p-4 transition hover:bg-rose-50/60">
+              <input
+                type="radio"
+                checked={confirmed}
+                onChange={() => setConfirmed(true)}
+                className="mt-0.5 size-4 accent-rose-600"
+              />
+              <span className="text-sm font-semibold text-rose-800">
+                Yes, I am the family admin and I want to permanently delete all family data. I understand this cannot be undone.
+              </span>
+            </label>
+
+            <div className="flex gap-3">
+              <Button
+                onClick={handlePurge}
+                disabled={!confirmed || loading}
+                className="bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-40"
+              >
+                <Trash2 className="size-4" />
+                {loading ? 'Purging data…' : 'Permanently delete all data'}
+              </Button>
+              <Button
+                variant="ghost"
+                onClick={() => { setStep(1); setConfirmed(false) }}
+                disabled={loading}
+              >
+                Cancel
+              </Button>
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
 /* ─── Security Panel ─── */
 const SecurityPanel = ({ store: _store }: Props) => {
   const [currentPassword, setCurrentPassword] = useState('')
@@ -1022,8 +1148,6 @@ const SecurityPanel = ({ store: _store }: Props) => {
   const [inviteForm, setInviteForm] = useState({
     email: '',
     role: 'member',
-    expiresInDays: 7,
-    maxUses: 1,
   })
   const [latestInviteLink, setLatestInviteLink] = useState('')
   const [latestInviteQr, setLatestInviteQr] = useState('')
@@ -1055,18 +1179,14 @@ const SecurityPanel = ({ store: _store }: Props) => {
   const inviteLinkFromToken = (token: string) => `${window.location.origin}/?invite=${encodeURIComponent(token)}`
 
   const handleCreateInvite = () => {
-    const allowedRoles = new Set(['member', 'child', 'parent', 'admin'])
+    const allowedRoles = new Set(['member', 'child', 'parent'])
     const email = inviteForm.email.trim()
-    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      setStatus({ type: 'error', message: 'Enter a valid invite email or leave it blank for an open invite' })
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setStatus({ type: 'error', message: 'A valid email address is required to send the invite.' })
       return
     }
     if (!allowedRoles.has(inviteForm.role)) {
-      setStatus({ type: 'error', message: 'Choose a valid invite role' })
-      return
-    }
-    if (inviteForm.expiresInDays < 1 || inviteForm.expiresInDays > 30 || inviteForm.maxUses < 1 || inviteForm.maxUses > 10) {
-      setStatus({ type: 'error', message: 'Invite expiry must be 1-30 days and uses must be 1-10' })
+      setStatus({ type: 'error', message: 'Choose a valid invite role. Admin role cannot be assigned via invite.' })
       return
     }
     setInvitesLoading(true)
@@ -1075,10 +1195,8 @@ const SecurityPanel = ({ store: _store }: Props) => {
     setLatestInviteQr('')
     api
       .createSignupInvite({
-        email: email || undefined,
+        email,
         role: inviteForm.role,
-        expiresInDays: inviteForm.expiresInDays,
-        maxUses: inviteForm.maxUses,
       })
       .then(async (invite) => {
         await loadInvites()
@@ -1212,12 +1330,12 @@ const SecurityPanel = ({ store: _store }: Props) => {
           </Button>
         </CardHeader>
         <CardContent className="grid gap-4">
-          <div className="grid gap-3 lg:grid-cols-[minmax(180px,1fr)_140px_120px_120px_auto]">
-            <FormField label="Email">
+          <div className="grid gap-3 lg:grid-cols-[minmax(200px,1fr)_160px_auto]">
+            <FormField label="Email (required — invite will be sent to this address)">
               <input
                 className={inputClass}
                 onChange={(event) => setInviteForm((current) => ({ ...current, email: event.target.value }))}
-                placeholder="Optional"
+                placeholder="member@example.com"
                 type="email"
                 value={inviteForm.email}
               />
@@ -1231,33 +1349,12 @@ const SecurityPanel = ({ store: _store }: Props) => {
                 <option value="member">Member</option>
                 <option value="child">Child</option>
                 <option value="parent">Parent</option>
-                <option value="admin">Admin</option>
               </select>
-            </FormField>
-            <FormField label="Days">
-              <input
-                className={inputClass}
-                max={30}
-                min={1}
-                onChange={(event) => setInviteForm((current) => ({ ...current, expiresInDays: Number(event.target.value) }))}
-                type="number"
-                value={inviteForm.expiresInDays}
-              />
-            </FormField>
-            <FormField label="Uses">
-              <input
-                className={inputClass}
-                max={10}
-                min={1}
-                onChange={(event) => setInviteForm((current) => ({ ...current, maxUses: Number(event.target.value) }))}
-                type="number"
-                value={inviteForm.maxUses}
-              />
             </FormField>
             <div className="flex items-end">
               <Button className="w-full" onClick={handleCreateInvite} disabled={invitesLoading}>
                 <Plus className="size-4" />
-                Create
+                Send Invite
               </Button>
             </div>
           </div>

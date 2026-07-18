@@ -44,6 +44,31 @@ class Settings(BaseSettings):
     require_device_id_on_login: bool = False
     allow_memory_cache_in_production: bool = False
 
+    # Set to a positive integer to enforce limits; leave unset (None) for no restriction
+    max_devices_per_user: int | None = None
+    max_family_members: int | None = None
+
+    # SMTP email
+    smtp_host: str = "smtp.gmail.com"
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from_email: str = ""
+    smtp_use_tls: bool = True
+
+    # Twilio SMS
+    twilio_account_sid: str = ""
+    twilio_auth_token: str = ""
+    twilio_from_number: str = ""
+
+    @property
+    def email_enabled(self) -> bool:
+        return bool(self.smtp_username and self.smtp_password and self.smtp_from_email)
+
+    @property
+    def sms_enabled(self) -> bool:
+        return bool(self.twilio_account_sid and self.twilio_auth_token and self.twilio_from_number)
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     @model_validator(mode="after")

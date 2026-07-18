@@ -6,6 +6,7 @@ import {
   DragOverlay,
   KeyboardSensor,
   PointerSensor,
+  TouchSensor,
   useDraggable,
   useDroppable,
   useSensor,
@@ -333,7 +334,7 @@ const TaskCard = ({
       {/* Delete button — top right */}
       {canManageTasks && (
         <button
-          className="absolute right-3 top-3 flex size-7 items-center justify-center rounded-lg bg-white/80 text-slate-300 opacity-0 shadow-sm backdrop-blur-sm transition-all duration-200 hover:bg-rose-50 hover:text-rose-500 hover:shadow-md group-hover:opacity-100"
+          className="absolute right-3 top-3 flex size-7 items-center justify-center rounded-lg bg-white/80 text-slate-300 opacity-100 shadow-sm backdrop-blur-sm transition-all duration-200 hover:bg-rose-50 hover:text-rose-500 hover:shadow-md sm:opacity-0 sm:group-hover:opacity-100"
           onClick={(event) => {
             event.stopPropagation()
             if (window.confirm(`Delete "${task.title}"?`)) deleteTask(task.id)
@@ -560,7 +561,11 @@ export const TasksView = ({ store }: { store: FridgeHubStore }) => {
   const [activeTaskId, setActiveTaskId] = useState<number | null>(null)
   const [selectedTask, setSelectedTask] = useState<ScheduledTask | null>(null)
   const [taskEditDraft, setTaskEditDraft] = useState<TaskEditDraft | null>(null)
-  const sensors = useSensors(useSensor(PointerSensor), useSensor(KeyboardSensor))
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 8 } }),
+    useSensor(KeyboardSensor),
+  )
   const [draft, setDraft] = useState<NewTaskInput>({
     title: '',
     description: '',
@@ -1320,7 +1325,7 @@ export const TasksView = ({ store }: { store: FridgeHubStore }) => {
         >
           <section
             aria-modal="true"
-            className="max-h-[90vh] w-full max-w-2xl overflow-auto rounded-2xl border border-slate-200 bg-white shadow-2xl"
+            className="modal-max-h w-full max-w-2xl overflow-auto rounded-2xl border border-slate-200 bg-white shadow-2xl"
             onClick={(event) => event.stopPropagation()}
             role="dialog"
           >

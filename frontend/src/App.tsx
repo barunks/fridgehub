@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { DeviceBlocked } from '@/components/auth/DeviceBlocked'
 import { LoginPage } from '@/components/auth/LoginPage'
+import { VerificationPage } from '@/components/auth/VerificationPage'
 import { AnalyticsView } from '@/components/analytics/AnalyticsView'
 import { AssistantView } from '@/components/assistant/AssistantView'
 import { CommandCenterView } from '@/components/command-center/CommandCenterView'
@@ -39,6 +40,16 @@ const App = () => {
     }
     if (auth.isDeviceBlocked) {
       return <DeviceBlocked onRetry={auth.retryFromBlocked} />
+    }
+    if (auth.pendingVerification) {
+      return (
+        <VerificationPage
+          status={auth.pendingVerification}
+          onVerify={auth.verifyOtp}
+          onResend={auth.resendOtp}
+          onCancel={auth.dismissVerification}
+        />
+      )
     }
     return (
       <LoginPage

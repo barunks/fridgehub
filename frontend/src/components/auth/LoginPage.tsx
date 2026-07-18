@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
-import { ArrowRight, CheckCircle2, Home, KeyRound, LayoutDashboard, Mail, UserRound } from 'lucide-react'
+import { ArrowRight, CheckCircle2, Home, KeyRound, LayoutDashboard, Mail, Phone, UserRound } from 'lucide-react'
 import { api } from '@/services/api'
 import type {
   BootstrapSignupInput,
@@ -19,7 +19,7 @@ interface LoginPageProps {
 }
 
 const inputClass =
-  'min-h-12 w-full rounded-lg border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-3 focus:ring-blue-100'
+  'min-h-12 w-full rounded-lg border bg-white px-3.5 py-2.5 text-sm text-slate-950 outline-none transition placeholder:text-slate-400 focus:ring-3 focus:ring-blue-100'
 
 const extractInviteToken = (value: string) => {
   const trimmed = value.trim()
@@ -32,8 +32,19 @@ const extractInviteToken = (value: string) => {
   }
 }
 
+const passwordHint = (value: string): string | null => {
+  if (!value) return null
+  if (value.length < 8) return 'Password must be at least 8 characters.'
+  if (!/[a-zA-Z]/.test(value)) return 'Password must include at least one letter.'
+  if (!/[0-9]/.test(value)) return 'Password must include at least one number.'
+  if (/\s/.test(value)) return 'Password cannot contain spaces.'
+  return null
+}
+
 const Field = ({
   autoComplete,
+  error,
+  hint,
   icon: Icon,
   label,
   onChange,
@@ -43,6 +54,8 @@ const Field = ({
   value,
 }: {
   autoComplete?: string
+  error?: string | null
+  hint?: string | null
   icon: typeof UserRound
   label: string
   onChange: (value: string) => void
@@ -51,14 +64,14 @@ const Field = ({
   type?: string
   value: string
 }) => (
-  <label className="grid gap-2 text-sm font-semibold text-slate-700">
+  <label className="grid gap-1.5 text-sm font-semibold text-slate-700">
     <span>{label}</span>
     <span className="relative block">
       <Icon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" aria-hidden="true" />
       <input
         aria-label={label}
         autoComplete={autoComplete}
-        className={`${inputClass} pl-10`}
+        className={`${inputClass} pl-10 ${error ? 'border-rose-400 focus:border-rose-400 focus:ring-rose-100' : 'border-slate-300 focus:border-blue-500'}`}
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
         required={required}
@@ -66,6 +79,8 @@ const Field = ({
         value={value}
       />
     </span>
+    {error && <span className="text-xs font-medium text-rose-600">{error}</span>}
+    {!error && hint && <span className="text-xs text-amber-600">{hint}</span>}
   </label>
 )
 
@@ -80,19 +95,26 @@ export const LoginPage = ({ onBootstrapSignup, onInviteSignup, onLogin, error }:
   const [invitePreview, setInvitePreview] = useState<SignupInvitePreview | null>(null)
   const [localError, setLocalError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
+
   const [inviteToken, setInviteToken] = useState(initialInvite)
-  const [joinForm, setJoinForm] = useState({ fullName: '', email: '', username: '', password: '' })
+  const [joinForm, setJoinForm] = useState({ fullName: '', email: '', phone: '', username: '', password: '' })
+  const [joinTouched, setJoinTouched] = useState<Record<string, boolean>>({})
+
   const [setupForm, setSetupForm] = useState({
     familyName: 'FridgeHub',
     homeBase: 'Singapore',
     timezone: 'Asia/Singapore',
     fullName: '',
     email: '',
+    phone: '',
     username: '',
     password: '',
   })
+  const [setupTouched, setSetupTouched] = useState<Record<string, boolean>>({})
+
   const showDemoCredentials = import.meta.env.DEV && import.meta.env.VITE_SHOW_DEMO_CREDENTIALS === 'true'
 
   useEffect(() => {
@@ -124,17 +146,16 @@ export const LoginPage = ({ onBootstrapSignup, onInviteSignup, onLogin, error }:
       .catch(() => {
         if (active) setInvitePreview(null)
       })
-    return () => {
-      active = false
-    }
+    return () => { active = false }
   }, [inviteToken])
 
   const currentError = localError || error
   const getDevice = async () => api.getCurrentDeviceInput()
+
   const tabs: Array<{ key: AuthMode; label: string }> = [
     { key: 'signin', label: 'Sign in' },
-    { key: 'join', label: 'Join' },
-    ...(status?.bootstrapAllowed ? [{ key: 'setup' as const, label: 'Setup' }] : []),
+    { key: 'join', label: 'Join family' },
+    ...(status?.bootstrapAllowed ? [{ key: 'setup' as const, label: 'First setup' }] : []),
   ]
 
   const handleSignIn = async (event: FormEvent) => {
@@ -144,7 +165,7 @@ export const LoginPage = ({ onBootstrapSignup, onInviteSignup, onLogin, error }:
     try {
       await onLogin(username, password, await getDevice())
     } catch (err) {
-      setLocalError(err instanceof Error ? err.message : 'Sign in failed')
+      setLocalError(err instanceof Error ? err.message : 'Sign in failed. Please try again.')
     } finally {
       setLoading(false)
     }
@@ -152,6 +173,8 @@ export const LoginPage = ({ onBootstrapSignup, onInviteSignup, onLogin, error }:
 
   const handleJoin = async (event: FormEvent) => {
     event.preventDefault()
+    const pwError = passwordHint(joinForm.password)
+    if (pwError) { setLocalError(pwError); return }
     setLoading(true)
     setLocalError(null)
     try {
@@ -161,7 +184,7 @@ export const LoginPage = ({ onBootstrapSignup, onInviteSignup, onLogin, error }:
         ...(await getDevice()),
       })
     } catch (err) {
-      setLocalError(err instanceof Error ? err.message : 'Signup failed')
+      setLocalError(err instanceof Error ? err.message : 'Account creation failed. Please try again.')
     } finally {
       setLoading(false)
     }
@@ -169,23 +192,41 @@ export const LoginPage = ({ onBootstrapSignup, onInviteSignup, onLogin, error }:
 
   const handleSetup = async (event: FormEvent) => {
     event.preventDefault()
+    const pwError = passwordHint(setupForm.password)
+    if (pwError) { setLocalError(pwError); return }
     setLoading(true)
     setLocalError(null)
     try {
-      await onBootstrapSignup({
-        ...setupForm,
-        ...(await getDevice()),
-      })
+      await onBootstrapSignup({ ...setupForm, ...(await getDevice()) })
     } catch (err) {
-      setLocalError(err instanceof Error ? err.message : 'Setup failed')
+      setLocalError(err instanceof Error ? err.message : 'Family setup failed. Please try again.')
     } finally {
       setLoading(false)
     }
   }
 
+  const joinField = (key: keyof typeof joinForm) => ({
+    value: joinForm[key],
+    onChange: (value: string) => {
+      setJoinForm((current) => ({ ...current, [key]: value }))
+      setJoinTouched((current) => ({ ...current, [key]: true }))
+    },
+  })
+
+  const setupField = (key: keyof typeof setupForm) => ({
+    value: setupForm[key],
+    onChange: (value: string) => {
+      setSetupForm((current) => ({ ...current, [key]: value }))
+      setSetupTouched((current) => ({ ...current, [key]: true }))
+    },
+  })
+
+  const joinPasswordHint = joinTouched.password ? passwordHint(joinForm.password) : null
+  const setupPasswordHint = setupTouched.password ? passwordHint(setupForm.password) : null
+
   return (
-    <div className="min-h-screen bg-slate-50 px-4 py-8 text-slate-950 sm:px-6">
-      <div className="mx-auto flex min-h-[calc(100vh-4rem)] w-full max-w-5xl items-center">
+    <div className="min-h-dvh bg-slate-50 px-4 py-8 text-slate-950 sm:px-6">
+      <div className="mx-auto flex min-h-[calc(100dvh-4rem)] w-full max-w-5xl items-center">
         <div className="grid w-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl shadow-slate-200/70 lg:grid-cols-[0.9fr_1.1fr]">
           <section className="hidden border-r border-slate-200 bg-slate-900 p-10 text-white lg:grid lg:content-between">
             <div>
@@ -220,20 +261,24 @@ export const LoginPage = ({ onBootstrapSignup, onInviteSignup, onLogin, error }:
                 {mode === 'signin' ? 'Welcome back' : mode === 'join' ? 'Create your account' : 'Set up FridgeHub'}
               </h2>
               <p className="mt-1 text-sm text-slate-500">
-                {mode === 'signin' ? 'Use your family account to continue.' : mode === 'join' ? 'Use the invite shared by your family admin.' : 'Create the first admin account.'}
+                {mode === 'signin'
+                  ? 'Sign in with your family account credentials.'
+                  : mode === 'join'
+                  ? 'Use the invite link or code shared by your family admin.'
+                  : 'Create the first admin account and family workspace.'}
               </p>
             </div>
 
-            <div className="mb-6 grid gap-1 rounded-xl border border-slate-200 bg-slate-100 p-1" style={{ gridTemplateColumns: `repeat(${tabs.length}, minmax(0, 1fr))` }}>
+            <div
+              className="mb-6 grid gap-1 rounded-xl border border-slate-200 bg-slate-100 p-1"
+              style={{ gridTemplateColumns: `repeat(${tabs.length}, minmax(0, 1fr))` }}
+            >
               {tabs.map((tab) => (
                 <button
                   aria-label={`Show ${tab.label} form`}
                   className={`min-h-10 rounded-lg px-3 text-sm font-semibold transition ${mode === tab.key ? 'bg-white text-slate-950 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
                   key={tab.key}
-                  onClick={() => {
-                    setMode(tab.key)
-                    setLocalError(null)
-                  }}
+                  onClick={() => { setMode(tab.key); setLocalError(null) }}
                   type="button"
                 >
                   {tab.label}
@@ -249,14 +294,14 @@ export const LoginPage = ({ onBootstrapSignup, onInviteSignup, onLogin, error }:
 
             {mode === 'signin' && (
               <form className="grid gap-4" onSubmit={handleSignIn}>
-                <Field autoComplete="username" icon={UserRound} label="Username or email" onChange={setUsername} value={username} />
+                <Field autoComplete="username" icon={UserRound} label="Username or email" onChange={setUsername} value={username} placeholder="e.g. meera or meera@example.com" />
                 <Field autoComplete="current-password" icon={KeyRound} label="Password" onChange={setPassword} type="password" value={password} />
                 <button
                   className="mt-2 inline-flex min-h-12 items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-3 text-sm font-bold text-white transition hover:bg-blue-700 focus:outline-none focus:ring-3 focus:ring-blue-200 disabled:pointer-events-none disabled:opacity-50"
                   disabled={loading || !username || !password}
                   type="submit"
                 >
-                  {loading ? 'Signing in...' : 'Sign in'}
+                  {loading ? 'Signing in…' : 'Sign in'}
                   <ArrowRight className="size-4" aria-hidden="true" />
                 </button>
               </form>
@@ -264,22 +309,32 @@ export const LoginPage = ({ onBootstrapSignup, onInviteSignup, onLogin, error }:
 
             {mode === 'join' && (
               <form className="grid gap-4" onSubmit={handleJoin}>
-                <Field icon={KeyRound} label="Invite link or code" onChange={setInviteToken} value={inviteToken} />
+                <Field icon={KeyRound} label="Invite link or code" onChange={setInviteToken} value={inviteToken} placeholder="Paste the invite link or token" />
                 {invitePreview && (
                   <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
-                    Joining {invitePreview.familyName} as {invitePreview.role}. Invite expires {new Date(invitePreview.expiresAt).toLocaleDateString()}.
+                    Joining <strong>{invitePreview.familyName}</strong> as <strong>{invitePreview.role}</strong>.
+                    {' '}Invite expires {new Date(invitePreview.expiresAt).toLocaleDateString()}.
                   </div>
                 )}
-                <Field autoComplete="name" icon={UserRound} label="Full name" onChange={(value) => setJoinForm((current) => ({ ...current, fullName: value }))} value={joinForm.fullName} />
-                <Field autoComplete="email" icon={Mail} label="Email" onChange={(value) => setJoinForm((current) => ({ ...current, email: value }))} type="email" value={joinForm.email} />
-                <Field autoComplete="username" icon={UserRound} label="Username" onChange={(value) => setJoinForm((current) => ({ ...current, username: value }))} value={joinForm.username} />
-                <Field autoComplete="new-password" icon={KeyRound} label="Password" onChange={(value) => setJoinForm((current) => ({ ...current, password: value }))} type="password" value={joinForm.password} />
+                <Field autoComplete="name" icon={UserRound} label="Full name" {...joinField('fullName')} placeholder="Your full name" />
+                <Field autoComplete="email" icon={Mail} label="Email" {...joinField('email')} type="email" placeholder="The email that received the invite" />
+                <Field autoComplete="tel" icon={Phone} label="Phone number" {...joinField('phone')} type="tel" placeholder="+65 9123 4567" />
+                <Field autoComplete="username" icon={UserRound} label="Username" {...joinField('username')} placeholder="Choose a unique username" />
+                <Field
+                  autoComplete="new-password"
+                  icon={KeyRound}
+                  label="Password"
+                  {...joinField('password')}
+                  type="password"
+                  hint={joinPasswordHint}
+                  placeholder="Min 8 chars, include a letter and a number"
+                />
                 <button
                   className="mt-2 inline-flex min-h-12 items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-3 text-sm font-bold text-white transition hover:bg-blue-700 focus:outline-none focus:ring-3 focus:ring-blue-200 disabled:pointer-events-none disabled:opacity-50"
-                  disabled={loading || !inviteToken.trim() || !joinForm.fullName || !joinForm.email || !joinForm.username || !joinForm.password}
+                  disabled={loading || !inviteToken.trim() || !joinForm.fullName || !joinForm.email || !joinForm.phone || !joinForm.username || !joinForm.password || !!joinPasswordHint}
                   type="submit"
                 >
-                  {loading ? 'Creating account...' : 'Create account'}
+                  {loading ? 'Creating account…' : 'Create account'}
                   <ArrowRight className="size-4" aria-hidden="true" />
                 </button>
               </form>
@@ -287,17 +342,26 @@ export const LoginPage = ({ onBootstrapSignup, onInviteSignup, onLogin, error }:
 
             {mode === 'setup' && (
               <form className="grid gap-4" onSubmit={handleSetup}>
-                <Field icon={Home} label="Family name" onChange={(value) => setSetupForm((current) => ({ ...current, familyName: value }))} value={setupForm.familyName} />
-                <Field autoComplete="name" icon={UserRound} label="Admin full name" onChange={(value) => setSetupForm((current) => ({ ...current, fullName: value }))} value={setupForm.fullName} />
-                <Field autoComplete="email" icon={Mail} label="Admin email" onChange={(value) => setSetupForm((current) => ({ ...current, email: value }))} type="email" value={setupForm.email} />
-                <Field autoComplete="username" icon={UserRound} label="Admin username" onChange={(value) => setSetupForm((current) => ({ ...current, username: value }))} value={setupForm.username} />
-                <Field autoComplete="new-password" icon={KeyRound} label="Password" onChange={(value) => setSetupForm((current) => ({ ...current, password: value }))} type="password" value={setupForm.password} />
+                <Field icon={Home} label="Family name" {...setupField('familyName')} placeholder="e.g. The Krishnamurthy Family" />
+                <Field autoComplete="name" icon={UserRound} label="Admin full name" {...setupField('fullName')} placeholder="Your full name" />
+                <Field autoComplete="email" icon={Mail} label="Admin email" {...setupField('email')} type="email" placeholder="admin@example.com" />
+                <Field autoComplete="tel" icon={Phone} label="Admin phone number" {...setupField('phone')} type="tel" placeholder="+65 9123 4567" />
+                <Field autoComplete="username" icon={UserRound} label="Admin username" {...setupField('username')} placeholder="Choose a unique username" />
+                <Field
+                  autoComplete="new-password"
+                  icon={KeyRound}
+                  label="Password"
+                  {...setupField('password')}
+                  type="password"
+                  hint={setupPasswordHint}
+                  placeholder="Min 8 chars, include a letter and a number"
+                />
                 <button
                   className="mt-2 inline-flex min-h-12 items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-3 text-sm font-bold text-white transition hover:bg-blue-700 focus:outline-none focus:ring-3 focus:ring-blue-200 disabled:pointer-events-none disabled:opacity-50"
-                  disabled={loading || !status?.bootstrapAllowed || !setupForm.familyName || !setupForm.fullName || !setupForm.email || !setupForm.username || !setupForm.password}
+                  disabled={loading || !status?.bootstrapAllowed || !setupForm.familyName || !setupForm.fullName || !setupForm.email || !setupForm.phone || !setupForm.username || !setupForm.password || !!setupPasswordHint}
                   type="submit"
                 >
-                  {loading ? 'Creating family...' : 'Create family'}
+                  {loading ? 'Creating family…' : 'Create family'}
                   <ArrowRight className="size-4" aria-hidden="true" />
                 </button>
               </form>

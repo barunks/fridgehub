@@ -130,17 +130,19 @@ def _register_device(
         device = _matching_device(db, user, device_name, device_type, platform, user_agent)
 
     if not device:
-        # Enforce max devices per user (stored on user row, default 5)
-        active_device_count = (
-            db.query(Device)
-            .filter(Device.user_id == user.id, Device.is_active.is_(True), Device.is_revoked.is_(False))
-            .count()
-        )
-        if active_device_count >= user.max_devices:
-            raise HTTPException(
-                status_code=403,
-                detail=f"Maximum number of devices ({user.max_devices}) reached. Revoke an existing device to register a new one.",
+        # Enforce max devices per user if configured (None = unlimited)
+        limit = settings.max_devices_per_user
+        if limit is not None:
+            active_device_count = (
+                db.query(Device)
+                .filter(Device.user_id == user.id, Device.is_active.is_(True), Device.is_revoked.is_(False))
+                .count()
             )
+            if active_device_count >= limit:
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"Maximum number of devices ({limit}) reached. Revoke an existing device to register a new one.",
+                )
         device = Device(
             user_id=user.id,
             family_id=family_id,
@@ -214,8 +216,13 @@ def _serialize_invite(invite: FamilyInvite, token: str | None = None) -> dict[st
 
 
 def _require_unique_user(db: Session, email: str, username: str) -> None:
-    if db.query(User).filter((User.email == email) | (User.username == username)).first():
-        raise HTTPException(status_code=409, detail="Email or username already exists")
+    existing = db.query(User).filter((User.email == email) | (User.username == username)).first()
+    if existing:
+        if existing.email == email and existing.username == username:
+            raise HTTPException(status_code=409, detail="Both that email address and username are already registered. Please use different values.")
+        if existing.email == email:
+            raise HTTPException(status_code=409, detail=f"The email address '{email}' is already registered. Use a different email or sign in instead.")
+        raise HTTPException(status_code=409, detail=f"The username '{username}' is already taken. Please choose a different username.")
 
 
 def _create_default_grocery_places(db: Session, family_id: int, user_id: int) -> None:
@@ -285,18 +292,29 @@ def create_signup_invite(
     payload: SignupInviteCreate,
     family_id: int,
     user_id: int,
+    base_url: str = "",
 ) -> dict[str, object]:
+    from app.services.notification_service import send_invite_email
+
+    if sanitize_text(payload.role) == "admin":
+        raise HTTPException(
+            status_code=400,
+            detail="Invites cannot be issued with the 'admin' role. Family admins must sign up independently via the bootstrap flow.",
+        )
+    # Always single use
     token = _invite_token()
+    # None expiresInDays = never expires (100 years)
+    expires_days = payload.expiresInDays if payload.expiresInDays else 36500
     invite = FamilyInvite(
         family_id=family_id,
         invited_by=user_id,
         token_hash=_token_hash(token),
-        email=sanitize_text(payload.email.lower()) if payload.email else None,
+        email=sanitize_text(payload.email.lower()),
         role=sanitize_text(payload.role),
         permissions=_clean_permissions(payload.permissions),
-        max_uses=payload.maxUses,
+        max_uses=1,
         used_count=0,
-        expires_at=datetime.now(timezone.utc) + timedelta(days=payload.expiresInDays),
+        expires_at=datetime.now(timezone.utc) + timedelta(days=expires_days),
     )
     db.add(invite)
     db.flush()
@@ -307,17 +325,30 @@ def create_signup_invite(
         action="signup_invite_created",
         entity_type="family_invite",
         entity_id=invite.id,
-        changes={"email": invite.email, "role": invite.role, "max_uses": invite.max_uses},
+        changes={"email": invite.email, "role": invite.role},
     )
     db.commit()
     db.refresh(invite)
+
+    # Send invite email
+    family = db.get(Family, family_id)
+    inviter = db.get(User, user_id)
+    invite_link = f"{base_url}/?invite={token}" if base_url else f"/?invite={token}"
+    send_invite_email(
+        to=invite.email,
+        family_name=family.family_name if family else "FridgeHub",
+        role=invite.role,
+        invite_link=invite_link,
+        invited_by=inviter.full_name or inviter.username if inviter else "Admin",
+    )
     return _serialize_invite(invite, token)
 
 
 def list_signup_invites(db: Session, family_id: int) -> list[dict[str, object]]:
+    cutoff = datetime.now(timezone.utc) - timedelta(days=30)
     invites = (
         db.query(FamilyInvite)
-        .filter(FamilyInvite.family_id == family_id)
+        .filter(FamilyInvite.family_id == family_id, FamilyInvite.created_at >= cutoff)
         .order_by(FamilyInvite.created_at.desc())
         .all()
     )
@@ -343,10 +374,10 @@ def revoke_signup_invite(db: Session, invite_id: int, family_id: int, user_id: i
 def preview_signup_invite(db: Session, token: str) -> dict[str, object]:
     invite = db.query(FamilyInvite).filter(FamilyInvite.token_hash == _token_hash(token)).first()
     if not invite or not _invite_is_available(invite):
-        raise HTTPException(status_code=404, detail="Invite is invalid or expired")
+        raise HTTPException(status_code=404, detail="This invite link is invalid, has already been used, or has expired. Ask your family admin for a new invite.")
     family = db.get(Family, invite.family_id)
     if not family or not family.is_active:
-        raise HTTPException(status_code=404, detail="Invite is invalid or expired")
+        raise HTTPException(status_code=404, detail="The family associated with this invite no longer exists or has been deactivated.")
     return {
         "familyName": family.family_name,
         "email": invite.email,
@@ -374,6 +405,7 @@ def bootstrap_signup(
         password_hash=hash_password(payload.password),
         full_name=sanitize_text(payload.fullName),
         family_role="admin",
+        phone=sanitize_text(payload.phone),
     )
     db.add(user)
     db.flush()
@@ -423,6 +455,8 @@ def bootstrap_signup(
         entity_id=family.id,
         changes={"username": user.username, "device_id": registered_device_id},
     )
+    from app.services.verification_service import issue_otp
+    issue_otp(db, user)
     db.commit()
     invalidate_family_cache(family.id)
     return tokens
@@ -436,17 +470,39 @@ def signup_with_invite(
 ) -> dict[str, str]:
     invite = db.query(FamilyInvite).filter(FamilyInvite.token_hash == _token_hash(payload.inviteToken)).with_for_update().first()
     if not invite or not _invite_is_available(invite):
-        raise HTTPException(status_code=404, detail="Invite is invalid or expired")
+        raise HTTPException(status_code=404, detail="This invite link is invalid, has already been used, or has expired. Ask your family admin for a new invite.")
 
     email = sanitize_text(payload.email.lower())
     if invite.email and invite.email.lower() != email:
-        raise HTTPException(status_code=403, detail="This invite is assigned to a different email address")
+        raise HTTPException(status_code=403, detail="This invite was sent to a different email address. Sign up using the email address that received the invite.")
     username = sanitize_text(payload.username)
     _require_unique_user(db, email, username)
 
     family = db.get(Family, invite.family_id)
     if not family or not family.is_active:
-        raise HTTPException(status_code=404, detail="Invite is invalid or expired")
+        raise HTTPException(status_code=404, detail="The family associated with this invite no longer exists or has been deactivated.")
+
+    # Enforce one admin per family
+    if sanitize_text(invite.role) == "admin":
+        from app.core.permissions import ROLE_DEFAULT_PERMISSIONS
+        from sqlalchemy import func as sa_func
+        admin_roles = {role for role, perms in ROLE_DEFAULT_PERMISSIONS.items() if "manage_family" in perms}
+        existing_admin = (
+            db.query(FamilyMember)
+            .join(User, FamilyMember.user_id == User.id)
+            .filter(
+                FamilyMember.family_id == family.id,
+                FamilyMember.is_active.is_(True),
+                User.is_active.is_(True),
+                (sa_func.lower(FamilyMember.role).in_(admin_roles)) | (sa_func.lower(User.family_role).in_(admin_roles)),
+            )
+            .first()
+        )
+        if existing_admin:
+            raise HTTPException(
+                status_code=409,
+                detail="This family already has an admin. The invite role cannot be 'admin'. Ask the current admin to update the invite role.",
+            )
 
     user = User(
         email=email,
@@ -454,6 +510,7 @@ def signup_with_invite(
         password_hash=hash_password(payload.password),
         full_name=sanitize_text(payload.fullName),
         family_role=sanitize_text(invite.role),
+        phone=sanitize_text(payload.phone),
     )
     db.add(user)
     db.flush()
@@ -496,6 +553,8 @@ def signup_with_invite(
         entity_id=member.user_id,
         changes={"invite_id": invite.id, "username": user.username, "role": member.role, "device_id": registered_device_id},
     )
+    from app.services.verification_service import issue_otp
+    issue_otp(db, user)
     db.commit()
     invalidate_entity("members", family.id)
     invalidate_entity("family", family.id)
@@ -554,8 +613,13 @@ def login(
     ip_address: str | None = None,
 ) -> dict[str, str]:
     user = db.query(User).filter((User.username == username) | (User.email == username)).first()
-    if not user or not user.is_active or not verify_password(password, user.password_hash):
-        raise HTTPException(status_code=401, detail="Invalid username or password")
+    if not user or not user.is_active:
+        raise HTTPException(status_code=401, detail="No active account found for that username or email.")
+    if not verify_password(password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Incorrect password. Please try again.")
+
+    from app.services.verification_service import require_verified_or_resend
+    require_verified_or_resend(db, user)
 
     membership = _select_membership(db, user, family_id)
     registered_device_id = _register_device(

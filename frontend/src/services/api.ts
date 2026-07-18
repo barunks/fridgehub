@@ -29,6 +29,7 @@ import type {
   SignupStatus,
   InviteSignupInput,
   Task,
+  VerificationStatus,
 } from '@/types/familyHub'
 
 const defaultBaseUrl =
@@ -173,10 +174,13 @@ const authRequired = () => {
 
 const readError = async (response: Response) => {
   const body = await response.json().catch(() => null)
-  const validationMessage = Array.isArray(body?.validationErrors)
-    ? body.validationErrors.map((item: { field?: string; message?: string }) => `${item.field || 'field'}: ${item.message || 'invalid'}`).join(', ')
+  const fieldMessages = Array.isArray(body?.validationErrors) && body.validationErrors.length > 0
+    ? body.validationErrors.map((item: { field?: string; message?: string }) => {
+        const field = item.field ? item.field.replace(/^body\./, '') : null
+        return field ? `${field}: ${item.message || 'invalid'}` : (item.message || 'invalid')
+      }).join('; ')
     : null
-  return body?.error?.detail || body?.detail || validationMessage || response.statusText || 'Request failed'
+  return fieldMessages || body?.error?.detail || body?.detail || response.statusText || 'Request failed'
 }
 
 const requestPublic = async <T>(path: string, init?: RequestInit): Promise<T> => {
@@ -196,6 +200,21 @@ const requestPublic = async <T>(path: string, init?: RequestInit): Promise<T> =>
   return response.json() as Promise<T>
 }
 
+// Typed error for unverified accounts — carries userId so the UI can show the verification screen
+export interface UnverifiedAccountError extends Error {
+  userId: number
+}
+
+const makeUnverifiedError = (userId: number): UnverifiedAccountError => {
+  const err = new Error('Account not verified') as UnverifiedAccountError
+  err.name = 'UnverifiedAccountError'
+  err.userId = userId
+  return err
+}
+
+export const isUnverifiedAccountError = (err: unknown): err is UnverifiedAccountError =>
+  err instanceof Error && err.name === 'UnverifiedAccountError' && 'userId' in err
+
 export const loginUser = async (username: string, password: string, device?: Partial<SignupDeviceInput>) => {
   const currentDevice = await getCurrentDeviceInput(device?.deviceName, device?.deviceType)
   const response = await fetch(apiUrl('/api/v1/auth/login'), {
@@ -205,7 +224,13 @@ export const loginUser = async (username: string, password: string, device?: Par
     body: JSON.stringify({ username, password, ...currentDevice, ...device }),
   })
   if (!response.ok) {
-    throw new Error(await readError(response))
+    const body = await response.json().catch(() => null)
+    const detail: string = body?.detail || body?.error?.detail || response.statusText || 'Login failed'
+    if (response.status === 403) {
+      const match = detail.match(/userId=(\d+)/)
+      if (match) throw makeUnverifiedError(Number(match[1]))
+    }
+    throw new Error(detail)
   }
   const tokens = (await response.json()) as TokenResponse
   setAccessToken(tokens.accessToken)
@@ -218,7 +243,7 @@ export const getSignupStatus = () => requestPublic<SignupStatus>('/api/v1/auth/s
 export const previewSignupInvite = (inviteToken: string) =>
   requestPublic<SignupInvitePreview>(`/api/v1/auth/invites/${encodeURIComponent(inviteToken)}`)
 
-export const bootstrapSignup = async (payload: BootstrapSignupInput) => {
+export const bootstrapSignup = async (payload: BootstrapSignupInput): Promise<{ userId: number }> => {
   const response = await fetch(apiUrl('/api/v1/auth/signup/bootstrap'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -231,10 +256,11 @@ export const bootstrapSignup = async (payload: BootstrapSignupInput) => {
   const tokens = (await response.json()) as TokenResponse
   setAccessToken(tokens.accessToken)
   syncDeviceIdFromToken(tokens.accessToken)
-  return tokens
+  const userId = Number(parseAccessToken(tokens.accessToken)?.sub) || 0
+  return { userId }
 }
 
-export const signupWithInvite = async (payload: InviteSignupInput) => {
+export const signupWithInvite = async (payload: InviteSignupInput): Promise<{ userId: number }> => {
   const response = await fetch(apiUrl('/api/v1/auth/signup'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -247,7 +273,8 @@ export const signupWithInvite = async (payload: InviteSignupInput) => {
   const tokens = (await response.json()) as TokenResponse
   setAccessToken(tokens.accessToken)
   syncDeviceIdFromToken(tokens.accessToken)
-  return tokens
+  const userId = Number(parseAccessToken(tokens.accessToken)?.sub) || 0
+  return { userId }
 }
 
 export const refreshAccessToken = async () => {
@@ -619,9 +646,21 @@ export const api = {
     }),
   deleteRecipe: (recipeId: number) =>
     request(`/api/v1/meal-plan/recipes/${recipeId}`, { method: 'DELETE' }),
+  purgeAllFamilyData: () =>
+    request<Record<string, number>>('/api/v1/family/data', { method: 'DELETE' }),
   askAssistant: (query: string) =>
     request<{ answer: string; insights: AssistantInsight[] }>('/api/v1/assistant/recommendations', {
       method: 'POST',
       body: JSON.stringify({ query }),
+    }),
+  verifyOtp: (userId: number, emailOtp: string, phoneOtp: string) =>
+    requestPublic<VerificationStatus>('/api/v1/auth/verify', {
+      method: 'POST',
+      body: JSON.stringify({ userId, emailOtp, phoneOtp }),
+    }),
+  resendOtp: (userId: number) =>
+    requestPublic<VerificationStatus>('/api/v1/auth/resend', {
+      method: 'POST',
+      body: JSON.stringify({ userId }),
     }),
 }

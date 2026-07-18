@@ -23,7 +23,7 @@ export const DeviceRegistration = ({ onRegister, onSkip, defaultName }: DeviceRe
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center px-4">
+    <div className="flex min-h-dvh items-center justify-center px-4">
       <div className="absolute inset-0 bg-gradient-to-br from-indigo-50 via-white to-cyan-50" />
       <div className="relative w-full max-w-[420px] animate-scale-in rounded-3xl border border-slate-200/60 bg-white/80 p-9 shadow-2xl shadow-slate-200/50 backdrop-blur-xl">
         <div className="mb-6 text-center">

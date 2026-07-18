@@ -97,11 +97,15 @@ def create_app() -> FastAPI:
         errors = []
         for err in exc.errors():
             loc = ".".join(str(part) for part in err.get("loc", []) if part != "body")
-            errors.append({"field": loc, "message": err.get("msg", "Invalid value")})
+            raw_msg = err.get("msg", "Invalid value")
+            # Strip pydantic's "Value error, " prefix from custom validators
+            msg = raw_msg.removeprefix("Value error, ")
+            errors.append({"field": loc, "message": msg})
+        summary = "; ".join(f"{e['field']}: {e['message']}" for e in errors) if errors else "Validation failed"
         return JSONResponse(
             status_code=422,
             content={
-                "error": {"detail": "Validation failed", "code": "validation_error"},
+                "error": {"detail": summary, "code": "validation_error"},
                 "validationErrors": errors,
             },
         )

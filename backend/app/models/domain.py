@@ -33,7 +33,11 @@ class User(Base, TimestampMixin, ActiveMixin):
     full_name: Mapped[str | None] = mapped_column(String(255))
     family_role: Mapped[str | None] = mapped_column(String(50))
     token_version: Mapped[int] = mapped_column(default=0, nullable=False)
-    max_devices: Mapped[int] = mapped_column(default=5, nullable=False)
+    max_devices: Mapped[int | None] = mapped_column(default=None, nullable=True)
+    phone: Mapped[str | None] = mapped_column(String(20), unique=True, index=True)
+    email_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    phone_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    max_families: Mapped[int] = mapped_column(default=5, nullable=False)
 
     family_memberships: Mapped[list["FamilyMember"]] = relationship(back_populates="user")
     devices: Mapped[list["Device"]] = relationship(back_populates="user")
@@ -97,8 +101,14 @@ class Family(Base, TimestampMixin, ActiveMixin):
     id: Mapped[int] = mapped_column(primary_key=True)
     uuid: Mapped[str] = mapped_column(String(36), default=uuid_string, unique=True, nullable=False)
     family_name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    slug: Mapped[str | None] = mapped_column(String(100), unique=True, index=True)
     home_base: Mapped[str] = mapped_column(String(255), default="Singapore", nullable=False)
     timezone: Mapped[str] = mapped_column(String(64), default="Asia/Singapore", nullable=False)
+    contact_email: Mapped[str | None] = mapped_column(String(255), unique=True, index=True)
+    contact_phone: Mapped[str | None] = mapped_column(String(20), unique=True, index=True)
+    pincode: Mapped[str | None] = mapped_column(String(6))
+    email_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    phone_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
 
     members: Mapped[list["FamilyMember"]] = relationship(back_populates="family", cascade="all, delete-orphan")
@@ -413,3 +423,24 @@ class EmergencyContact(Base):
     family_id: Mapped[int] = mapped_column(ForeignKey("families.id", ondelete="CASCADE"), nullable=False, index=True)
     label: Mapped[str] = mapped_column(String(100), nullable=False)
     value: Mapped[str] = mapped_column(String(100), nullable=False)
+
+
+class VerificationOtp(Base):
+    __tablename__ = "verification_otps"
+    __table_args__ = (
+        Index("idx_otps_entity", "entity_type", "entity_id"),
+        Index("idx_otps_expires", "expires_at"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    uuid: Mapped[str] = mapped_column(String(36), default=uuid_string, unique=True, nullable=False)
+    entity_type: Mapped[str] = mapped_column(String(10), nullable=False)  # user | family
+    entity_id: Mapped[int] = mapped_column(nullable=False)
+    email_otp_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    phone_otp_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    email_target: Mapped[str] = mapped_column(String(255), nullable=False)
+    phone_target: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    attempts: Mapped[int] = mapped_column(default=0, nullable=False)
+    is_used: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)

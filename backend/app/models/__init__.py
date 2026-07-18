@@ -19,6 +19,7 @@ from app.models.domain import (
     Recipe,
     Task,
     User,
+    VerificationOtp,
 )
 
 __all__ = [
@@ -42,4 +43,5 @@ __all__ = [
     "Recipe",
     "Task",
     "User",
+    "VerificationOtp",
 ]

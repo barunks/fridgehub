@@ -325,7 +325,10 @@ def ensure_current_week_family_plan(db: Session, family_id: int, user_id: int | 
         .count()
     )
 
-    _, templates = _resolve_templates(db, family_id)
+    try:
+        _, templates = _resolve_templates(db, family_id)
+    except Exception:
+        return False
     if current_count >= len(templates):
         return False
 
