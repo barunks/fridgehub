@@ -80,7 +80,7 @@ class Settings(BaseSettings):
 
     @property
     def _twilio_from(self) -> str:
-        return self.twilio_from_number.strip()
+        return self.twilio_from_number.strip().strip("'\"")
 
     @property
     def sms_enabled(self) -> bool:
