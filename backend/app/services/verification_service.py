@@ -28,7 +28,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.models import User, VerificationOtp
-from app.services.notification_service import check_verify_sms, send_otp_email, send_otp_sms
+from app.services.notification_service import check_verify_sms, send_verify_sms, send_otp_email, send_otp_sms
 
 _OTP_TTL_MINUTES = 10
 _MAX_ATTEMPTS = 5
