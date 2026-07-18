@@ -28,7 +28,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.models import User, VerificationOtp
-from app.services.notification_service import check_verify_sms, send_verify_sms, send_otp_email, send_otp_sms
+from app.services.notification_service import send_otp_email, send_otp_sms
 
 _OTP_TTL_MINUTES = 10
 _MAX_ATTEMPTS = 5
@@ -153,6 +153,7 @@ def verify_otp(db: Session, user_id: int, email_otp: str, phone_otp: str) -> dic
     if row.phone_otp_hash is None:
         phone_ok = True
     elif row.phone_otp_hash == _TWILIO_VERIFY_PHONE_OTP:
+        from app.services.notification_service import check_verify_sms
         phone_ok = email_ok and bool(user.phone) and check_verify_sms(user.phone, phone_otp.strip())
     else:
         phone_ok = _hash_otp(phone_otp.strip()) == row.phone_otp_hash

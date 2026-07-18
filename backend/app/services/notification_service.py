@@ -170,7 +170,7 @@ def send_sms(to: str, body: str) -> bool:
         return False
 
 
-def send_verify_sms(to: str, otp: str) -> bool:
+def send_verify_sms(to: str) -> bool:
     if not settings.twilio_verify_enabled:
         return False
     logger.info(
@@ -184,7 +184,7 @@ def send_verify_sms(to: str, otp: str) -> bool:
             client.verify.v2
             .services(settings.twilio_verify_sid)
             .verifications
-            .create(to=to, channel="sms", custom_code=otp)
+            .create(to=to, channel="sms")
         )
         logger.info(
             "VERIFY SMS sent OK to=%s verification_sid=%s status=%s",
@@ -194,6 +194,32 @@ def send_verify_sms(to: str, otp: str) -> bool:
     except Exception:
         logger.exception(
             "VERIFY SMS FAILED to=%s service_sid=%s account_sid=%s",
+            to, _mask_secret(settings.twilio_verify_sid), _mask_secret(settings.twilio_account_sid),
+        )
+        return False
+
+
+def check_verify_sms(to: str, code: str) -> bool:
+    if not settings.twilio_verify_enabled:
+        return False
+    logger.info(
+        "VERIFY SMS checking to=%s service_sid=%s account_sid=%s",
+        to, _mask_secret(settings.twilio_verify_sid), _mask_secret(settings.twilio_account_sid),
+    )
+    try:
+        from twilio.rest import Client
+        client = Client(settings.twilio_account_sid, settings.twilio_auth_token)
+        check = (
+            client.verify.v2
+            .services(settings.twilio_verify_sid)
+            .verification_checks
+            .create(to=to, code=code)
+        )
+        logger.info("VERIFY SMS check result to=%s status=%s", to, check.status)
+        return check.status == "approved"
+    except Exception:
+        logger.exception(
+            "VERIFY SMS CHECK FAILED to=%s service_sid=%s account_sid=%s",
             to, _mask_secret(settings.twilio_verify_sid), _mask_secret(settings.twilio_account_sid),
         )
         return False
@@ -262,6 +288,6 @@ def send_otp_email(to: str, otp: str, purpose: str = "signup") -> bool:
 
 def send_otp_sms(to: str, otp: str, purpose: str = "signup") -> bool:
     if settings.twilio_verify_enabled:
-        return send_verify_sms(to, otp)
+        return send_verify_sms(to)
     body = f"Your FridgeHub {purpose} code is {otp}. Valid for 10 minutes. Do not share this code."
     return send_sms(to, body)

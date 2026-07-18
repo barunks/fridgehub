@@ -63,8 +63,9 @@ Set them to enable real email delivery.
 When these are unset, SMS OTPs fall back to console logging only.
 Users without a phone number skip SMS verification entirely — no Twilio required for them.
 For OTPs, prefer Twilio Verify: set `TWILIO_VERIFY_SID` and no `TWILIO_FROM_NUMBER`
-is required. If you use Programmable Messaging instead, set either
-`TWILIO_MESSAGING_SERVICE_SID` or `TWILIO_FROM_NUMBER`.
+is required. In Verify mode, Twilio generates and checks the phone OTP while
+FridgeHub continues to generate and check the email OTP. If you use Programmable
+Messaging instead, set either `TWILIO_MESSAGING_SERVICE_SID` or `TWILIO_FROM_NUMBER`.
 
 | Variable | Where to find |
 |----------|--------------|

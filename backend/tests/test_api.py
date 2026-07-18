@@ -3337,8 +3337,54 @@ def test_send_otp_sms_uses_twilio_verify_when_configured(monkeypatch) -> None:
     assert calls["verification"] == {
         "to": "+6591234567",
         "channel": "sms",
-        "custom_code": "123456",
     }
+
+
+def test_verify_otp_with_twilio_verify_check_marks_verified(monkeypatch) -> None:
+    """When Twilio Verify sends the phone OTP, verify via Verification Check."""
+    import hashlib
+    from datetime import datetime, timedelta, timezone
+    from app.core.database import SessionLocal
+    from app.models import VerificationOtp
+
+    checks: list[tuple[str, str]] = []
+
+    def fake_check(to: str, code: str) -> bool:
+        checks.append((to, code))
+        return code == "654321"
+
+    monkeypatch.setattr("app.services.notification_service.check_verify_sms", fake_check)
+
+    db = SessionLocal()
+    try:
+        user = _make_unverified_user(db, "veriftwilioverify")
+        db.query(VerificationOtp).filter_by(entity_type="user", entity_id=user.id).update({"is_used": True})
+        row = VerificationOtp(
+            entity_type="user",
+            entity_id=user.id,
+            email_otp_hash=hashlib.sha256("123456".encode()).hexdigest(),
+            phone_otp_hash="twilio_verify",
+            email_target=user.email,
+            phone_target=user.phone or "",
+            expires_at=datetime.now(timezone.utc) + timedelta(minutes=10),
+        )
+        db.add(row)
+        db.commit()
+        user_id = user.id
+        phone = user.phone
+    finally:
+        db.close()
+
+    with TestClient(app) as client:
+        response = client.post("/api/v1/auth/verify", json={
+            "userId": user_id,
+            "emailOtp": "123456",
+            "phoneOtp": "654321",
+        })
+
+    assert response.status_code == 200
+    assert response.json()["verified"] is True
+    assert checks == [(phone, "654321")]
 
 
 def test_verified_user_can_login_normally() -> None:
