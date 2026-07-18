@@ -6,7 +6,6 @@ import type {
   InviteSignupInput,
   SignupDeviceInput,
   SignupInvitePreview,
-  SignupStatus,
 } from '@/types/familyHub'
 
 type AuthMode = 'signin' | 'signup'
@@ -93,7 +92,6 @@ export const LoginPage = ({ onBootstrapSignup, onInviteSignup, onLogin, error }:
 
   const [mode, setMode] = useState<AuthMode>(initialInvite ? 'signup' : 'signin')
   const [signupSubMode, setSignupSubMode] = useState<SignupSubMode>(initialInvite ? 'join' : 'admin')
-  const [status, setStatus] = useState<SignupStatus | null>(null)
   const [invitePreview, setInvitePreview] = useState<SignupInvitePreview | null>(null)
   const [localError, setLocalError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -118,10 +116,6 @@ export const LoginPage = ({ onBootstrapSignup, onInviteSignup, onLogin, error }:
   const [setupTouched, setSetupTouched] = useState<Record<string, boolean>>({})
 
   const showDemoCredentials = import.meta.env.DEV && import.meta.env.VITE_SHOW_DEMO_CREDENTIALS === 'true'
-
-  useEffect(() => {
-    api.getSignupStatus().then(setStatus).catch(() => setStatus({ bootstrapAllowed: false }))
-  }, [])
 
   useEffect(() => {
     if (initialInvite) { setMode('signup'); setSignupSubMode('join') }
@@ -372,7 +366,7 @@ export const LoginPage = ({ onBootstrapSignup, onInviteSignup, onLogin, error }:
                 />
                 <button
                   className="mt-2 inline-flex min-h-12 items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-3 text-sm font-bold text-white transition hover:bg-blue-700 focus:outline-none focus:ring-3 focus:ring-blue-200 disabled:pointer-events-none disabled:opacity-50"
-                  disabled={loading || !status?.bootstrapAllowed || !setupForm.familyName || !setupForm.fullName || !setupForm.email || !setupForm.phone || !setupForm.username || !setupForm.password || !!setupPasswordHint}
+                  disabled={loading || !setupForm.familyName || !setupForm.fullName || !setupForm.email || !setupForm.phone || !setupForm.username || !setupForm.password || !!setupPasswordHint}
                   type="submit"
                 >
                   {loading ? 'Creating family…' : 'Create family'}

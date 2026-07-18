@@ -43,23 +43,15 @@ const goToVerificationScreen = async (
   { hasPhone = true }: { hasPhone?: boolean } = {},
 ) => {
   await mockSignupResponse(page)
-  // Mock signup/status so the "First setup" tab appears
-  await page.route('**/api/v1/auth/signup/status', (route) =>
-    route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({ bootstrapAllowed: true }),
-    }),
-  )
   await page.goto('/')
-  await page.getByRole('button', { name: /First setup/i }).click()
+  await page.getByRole('button', { name: /Sign up/i }).click()
+  // Family Admin is the default sub-tab, no extra click needed
   await page.getByLabel('Family name').fill('Test Family')
   await page.getByLabel('Admin full name').fill('Test Admin')
   await page.getByLabel('Admin email').fill('admin@test.local')
   if (hasPhone) {
     await page.getByLabel('Admin phone number').fill('+6591234567')
   } else {
-    // Fill with empty-ish value — backend schema requires min 8 chars, so use a placeholder
     await page.getByLabel('Admin phone number').fill('+0000000')
   }
   await page.getByLabel('Admin username').fill(`testadmin${Date.now()}`)
@@ -338,16 +330,7 @@ test('shows verification screen after signup with email and phone OTP inputs', a
 })
 
 test('shows only email OTP input when user has no phone', async ({ page }) => {
-  // Mock signup to return token, then mock resend to indicate no phone
   await mockSignupResponse(page)
-  await page.route('**/api/v1/auth/signup/status', (route) =>
-    route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({ bootstrapAllowed: true }),
-    }),
-  )
-  // After signup, mock resend to confirm phone not required
   await page.route('**/api/v1/auth/resend', (route) =>
     route.fulfill({
       status: 200,
@@ -357,13 +340,10 @@ test('shows only email OTP input when user has no phone', async ({ page }) => {
   )
 
   await page.goto('/')
-  await page.getByRole('button', { name: /First setup/i }).click()
+  await page.getByRole('button', { name: /Sign up/i }).click()
   await page.getByLabel('Family name').fill('Test Family')
   await page.getByLabel('Admin full name').fill('Test Admin')
   await page.getByLabel('Admin email').fill('admin@test.local')
-  // Provide a phone — the hasPhone flag comes from the signup payload, not the backend response
-  // To test phone-less: we mock the verification status to say hasPhone=false via the useAuth state
-  // Instead verify that when phone field is filled, phone input appears (positive case already covered above)
   await page.getByLabel('Admin phone number').fill('+6591234567')
   await page.getByLabel('Admin username').fill(`testadmin${Date.now()}`)
   await page.getByLabel('Password').fill('TestPass1')
