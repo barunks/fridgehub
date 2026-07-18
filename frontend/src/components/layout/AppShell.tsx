@@ -179,7 +179,7 @@ export const AppShell = ({ activeView, onLogout, onNavigate, onToggleTheme, stor
 
       {/* Main content */}
       <div className="min-w-0 pb-safe-nav lg:pb-0">
-        <header className="glass-panel sticky top-0 z-20 border-x-0 border-t-0 px-4 py-4 lg:px-8">
+        <header className="glass-panel sticky top-0 z-20 border-x-0 border-t-0 px-4 py-3 sm:py-4 lg:px-8">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="min-w-0">
               <div className="flex items-center gap-2">
@@ -191,21 +191,23 @@ export const AppShell = ({ activeView, onLogout, onNavigate, onToggleTheme, stor
               </h1>
             </div>
 
-            <div className="surface-secondary flex flex-wrap items-center gap-2 rounded-2xl px-3 py-2">
+            <div className="surface-secondary flex flex-wrap items-center gap-2 rounded-xl px-2.5 py-2 sm:rounded-2xl sm:px-3">
               <Badge mode="pill" tone="indigo">{stats.todayTasks.length} reminders</Badge>
               <Badge mode="pill" tone="amber">{stats.pendingPurchases.length} purchases</Badge>
               <Badge mode="pill" tone="green">{state.members.length} members</Badge>
               {store.isLoading && <Badge mode="pill" tone="slate">Syncing</Badge>}
               {store.isOffline && <Badge tone="rose">{store.isBrowserOffline ? 'Offline' : 'API unavailable'}</Badge>}
-              <Button
-                className="hidden gap-2 px-3 sm:inline-flex"
-                onClick={() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true }))}
-                title="Search (Ctrl K)"
-                variant="secondary"
-              >
-                <Search className="size-4" aria-hidden="true" />
-                <kbd className="rounded-md border border-slate-200 px-1.5 py-0.5 text-[10px] font-medium text-slate-400">Ctrl K</kbd>
-              </Button>
+              <span className="hidden sm:inline-flex">
+                <Button
+                  className="gap-2 px-3"
+                  onClick={() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true }))}
+                  title="Search (Ctrl K)"
+                  variant="secondary"
+                >
+                  <Search className="size-4" aria-hidden="true" />
+                  <kbd className="rounded-md border border-slate-200 px-1.5 py-0.5 text-[10px] font-medium text-slate-400">Ctrl K</kbd>
+                </Button>
+              </span>
               <Button iconOnly onClick={onToggleTheme} title={themeLabel} variant="icon">
                 <ThemeIcon className="size-4" aria-hidden="true" />
                 <span className="sr-only">{themeLabel}</span>
@@ -226,16 +228,18 @@ export const AppShell = ({ activeView, onLogout, onNavigate, onToggleTheme, stor
                 <span className="sr-only">Notifications</span>
               </Button>
               {store.can('use_assistant') && (
-                <Button variant="secondary" onClick={() => onNavigate('assistant')} title="Ask AI">
+                <Button className="px-3 sm:px-5" variant="secondary" onClick={() => onNavigate('assistant')} title="Ask AI">
                   <Bot className="size-4" aria-hidden="true" />
-                  Ask AI
+                  <span className="hidden sm:inline">Ask AI</span>
                 </Button>
               )}
               {username && (
-                <Button className="hidden sm:inline-flex" variant="ghost" onClick={onLogout} title="Sign out">
-                  <LogOut className="size-4" aria-hidden="true" />
-                  <span className="text-xs">{username}</span>
-                </Button>
+                <span className="hidden lg:inline-flex">
+                  <Button variant="ghost" onClick={onLogout} title="Sign out">
+                    <LogOut className="size-4" aria-hidden="true" />
+                    <span className="text-xs">{username}</span>
+                  </Button>
+                </span>
               )}
             </div>
           </div>
