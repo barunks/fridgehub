@@ -82,6 +82,9 @@ def serialize_family(family: Family) -> dict[str, Any]:
         "familyName": family.family_name,
         "homeBase": family.home_base,
         "timezone": family.timezone,
+        "country": family.country,
+        "address": family.address or "",
+        "postalCode": family.postal_code or "",
         "planStatus": "api-ready",
     }
 

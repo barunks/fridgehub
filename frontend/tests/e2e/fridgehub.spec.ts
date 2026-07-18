@@ -49,11 +49,10 @@ const goToVerificationScreen = async (
   await page.getByLabel('Family name').fill('Test Family')
   await page.getByLabel('Admin full name').fill('Test Admin')
   await page.getByLabel('Admin email').fill('admin@test.local')
-  if (hasPhone) {
-    await page.getByLabel('Admin phone number').fill('+6591234567')
-  } else {
-    await page.getByLabel('Admin phone number').fill('+0000000')
-  }
+  // Phone: type into the local number input (ISD prefix is a separate read-only-ish span)
+  await page.getByLabel('Admin phone number').fill(hasPhone ? '91234567' : '00000000')
+  await page.getByLabel('Postal code').fill('529234')
+  await page.getByLabel('Address').fill('Tampines Street 34')
   await page.getByLabel('Admin username').fill(`testadmin${Date.now()}`)
   await page.getByLabel('Password').fill('TestPass1')
   await page.getByRole('button', { name: /Create family/i }).click()
@@ -344,7 +343,9 @@ test('shows only email OTP input when user has no phone', async ({ page }) => {
   await page.getByLabel('Family name').fill('Test Family')
   await page.getByLabel('Admin full name').fill('Test Admin')
   await page.getByLabel('Admin email').fill('admin@test.local')
-  await page.getByLabel('Admin phone number').fill('+6591234567')
+  await page.getByLabel('Admin phone number').fill('91234567')
+  await page.getByLabel('Postal code').fill('529234')
+  await page.getByLabel('Address').fill('Tampines Street 34')
   await page.getByLabel('Admin username').fill(`testadmin${Date.now()}`)
   await page.getByLabel('Password').fill('TestPass1')
   await page.getByRole('button', { name: /Create family/i }).click()

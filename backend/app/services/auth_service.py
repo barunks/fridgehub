@@ -417,6 +417,9 @@ def bootstrap_signup(
         family_name=sanitize_text(payload.familyName),
         home_base=sanitize_text(payload.homeBase),
         timezone=sanitize_text(payload.timezone),
+        country=sanitize_text(payload.country),
+        address=sanitize_text(payload.address) or None,
+        postal_code=sanitize_text(payload.postalCode) or None,
         created_by=user.id,
     )
     db.add(family)

@@ -24,6 +24,9 @@ const family: Family = {
   familyName: 'FridgeHub',
   homeBase: 'Singapore',
   timezone: 'Asia/Singapore',
+  country: 'Singapore',
+  address: '',
+  postalCode: '',
   planStatus: 'api-ready',
 }
 
@@ -605,6 +608,9 @@ export const createEmptyFridgeHubState = (): FridgeHubState => ({
     familyName: '',
     homeBase: '',
     timezone: 'UTC',
+    country: '',
+    address: '',
+    postalCode: '',
     planStatus: 'api-ready',
   },
   members: [],

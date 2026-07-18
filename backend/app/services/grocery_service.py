@@ -308,6 +308,7 @@ def _ensure_cycle_for_item(db: Session, item: GroceryItem, today: date | None = 
                 is_purchased=satisfied,
                 purchased_quantity=item.quantity if satisfied else Decimal("0.00"),
                 notes=item.notes,
+                carried_forward=False,
             )
         )
         db.flush()
@@ -371,7 +372,6 @@ def create_item(db: Session, payload: GroceryItemCreate, family_id: int, user_id
     db.add(item)
     db.flush()
     item.item_number = f"GRC-{item.id:04d}"
-    _ensure_cycle_for_item(db, item)
     write_audit_log(
         db,
         user_id=user_id,
@@ -765,12 +765,15 @@ def delete_item(db: Session, item_id: int, family_id: int, user_id: int) -> None
 def regenerate_cycles(db: Session, family_id: int, user_id: int | None = None) -> list[dict]:
     items = db.query(GroceryItem).filter_by(family_id=family_id, is_active=True).all()
 
-    # Collect unpurchased items from current active cycles for carry-forward
+    # Snapshot sub_item IDs that exist in active cycles before this regen
+    pre_regen_sub_ids: set[int] = set()
     carry_forward_items: list[tuple[int, int]] = []  # (item_id, list_type_id)
     for cycle in db.query(GroceryPurchaseCycle).filter_by(family_id=family_id, is_completed=False).all():
         for sub_item in cycle.sub_list_items:
+            pre_regen_sub_ids.add(sub_item.id)
             if sub_item.item and sub_item.item.is_active and not sub_item.item.current_stock and not sub_item.is_purchased:
                 carry_forward_items.append((sub_item.item_id, cycle.list_type_id))
+            sub_item.carried_forward = False
         cycle.is_completed = True
     db.flush()
 
@@ -779,11 +782,13 @@ def regenerate_cycles(db: Session, family_id: int, user_id: int | None = None) -
     for item in items:
         cycle = _ensure_cycle_for_item(db, item, today)
         cycle.is_completed = False
-        # Mark carried-forward items
-        if (item.id, item.list_type_id) in carry_forward_items:
-            sub_item = db.query(GrocerySubList).filter_by(purchase_cycle_id=cycle.id, item_id=item.id).first()
-            if sub_item:
-                sub_item.carried_forward = True
+        sub_item = db.query(GrocerySubList).filter_by(purchase_cycle_id=cycle.id, item_id=item.id).first()
+        if sub_item:
+            # Only carry forward if this sub_item existed before this regen (not newly created)
+            sub_item.carried_forward = (
+                sub_item.id in pre_regen_sub_ids
+                and (item.id, item.list_type_id) in carry_forward_items
+            )
         if cycle not in cycles:
             cycles.append(cycle)
 

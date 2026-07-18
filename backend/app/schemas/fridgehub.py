@@ -4,6 +4,20 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+
+DEFAULT_COUNTRY = "Singapore"
+DEFAULT_ADDRESS = "Tampines Street 34"
+DEFAULT_POSTAL_CODE = "529234"
+DEFAULT_HOME_BASE = "Singapore"
+DEFAULT_TIMEZONE = "Asia/Singapore"
+
+
+def default_country() -> str: return DEFAULT_COUNTRY
+def default_address() -> str: return DEFAULT_ADDRESS
+def default_postal_code() -> str: return DEFAULT_POSTAL_CODE
+def default_home_base() -> str: return DEFAULT_HOME_BASE
+def default_timezone() -> str: return DEFAULT_TIMEZONE
+
 Priority = Literal["low", "medium", "high"]
 TaskStatus = Literal["pending", "in_progress", "completed", "cancelled"]
 RecurrenceType = Literal["none", "daily", "weekly", "monthly", "quarterly", "semi_annually", "yearly"]
@@ -126,8 +140,11 @@ class SignupInvitePreviewOut(CamelModel):
 
 class BootstrapSignupRequest(DeviceRegistrationRequest):
     familyName: str = Field(min_length=1, max_length=255)
-    homeBase: str = Field(default="Singapore", min_length=1, max_length=255)
-    timezone: str = Field(default="Asia/Singapore", min_length=1, max_length=64)
+    homeBase: str = Field(default_factory=default_home_base, min_length=1, max_length=255)
+    timezone: str = Field(default_factory=default_timezone, min_length=1, max_length=64)
+    country: str = Field(default_factory=default_country, min_length=1, max_length=100)
+    address: str = Field(default_factory=default_address, max_length=500)
+    postalCode: str = Field(default_factory=default_postal_code, max_length=20)
     fullName: str = Field(min_length=1, max_length=255)
     email: str = Field(min_length=3, max_length=255)
     phone: str = Field(min_length=8, max_length=20)
@@ -159,6 +176,9 @@ class FamilyOut(CamelModel):
     familyName: str
     homeBase: str
     timezone: str
+    country: str = Field(default_factory=default_country)
+    address: str = Field(default_factory=default_address)
+    postalCode: str = Field(default_factory=default_postal_code)
     planStatus: Literal["demo", "api-ready"] = "api-ready"
 
 

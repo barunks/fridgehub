@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
-import { ArrowRight, CheckCircle2, Home, KeyRound, LayoutDashboard, Mail, Phone, UserRound } from 'lucide-react'
+import { ArrowRight, CheckCircle2, Home, KeyRound, LayoutDashboard, Mail, UserRound } from 'lucide-react'
 import { api } from '@/services/api'
+import { LocationFields, defaultLocationValue, type LocationValue } from '@/components/auth/LocationFields'
 import type {
   BootstrapSignupInput,
   InviteSignupInput,
@@ -100,8 +101,9 @@ export const LoginPage = ({ onBootstrapSignup, onInviteSignup, onLogin, error }:
   const [password, setPassword] = useState('')
 
   const [inviteToken, setInviteToken] = useState(initialInvite)
-  const [joinForm, setJoinForm] = useState({ fullName: '', email: '', phone: '', username: '', password: '' })
+  const [joinForm, setJoinForm] = useState({ fullName: '', email: '', username: '', password: '' })
   const [joinTouched, setJoinTouched] = useState<Record<string, boolean>>({})
+  const [joinLocation, setJoinLocation] = useState<LocationValue>(defaultLocationValue)
 
   const [setupForm, setSetupForm] = useState({
     familyName: '',
@@ -109,11 +111,11 @@ export const LoginPage = ({ onBootstrapSignup, onInviteSignup, onLogin, error }:
     timezone: 'Asia/Singapore',
     fullName: '',
     email: '',
-    phone: '',
     username: '',
     password: '',
   })
   const [setupTouched, setSetupTouched] = useState<Record<string, boolean>>({})
+  const [setupLocation, setSetupLocation] = useState<LocationValue>(defaultLocationValue)
 
   const showDemoCredentials = import.meta.env.DEV && import.meta.env.VITE_SHOW_DEMO_CREDENTIALS === 'true'
 
@@ -173,6 +175,10 @@ export const LoginPage = ({ onBootstrapSignup, onInviteSignup, onLogin, error }:
     try {
       await onInviteSignup({
         ...joinForm,
+        phone: `${joinLocation.country.isd}${joinLocation.localPhone.replace(/\s/g, '')}`,
+        country: joinLocation.country.name,
+        address: joinLocation.address,
+        postalCode: joinLocation.postalCode,
         inviteToken: extractInviteToken(inviteToken),
         ...(await getDevice()),
       })
@@ -190,7 +196,16 @@ export const LoginPage = ({ onBootstrapSignup, onInviteSignup, onLogin, error }:
     setLoading(true)
     setLocalError(null)
     try {
-      await onBootstrapSignup({ ...setupForm, ...(await getDevice()) })
+      await onBootstrapSignup({
+        ...setupForm,
+        phone: `${setupLocation.country.isd}${setupLocation.localPhone.replace(/\s/g, '')}`,
+        country: setupLocation.country.name,
+        address: setupLocation.address,
+        postalCode: setupLocation.postalCode,
+        homeBase: setupLocation.country.name,
+        timezone: setupLocation.country.timezone,
+        ...(await getDevice()),
+      })
     } catch (err) {
       setLocalError(err instanceof Error ? err.message : 'Family setup failed. Please try again.')
     } finally {
@@ -326,7 +341,7 @@ export const LoginPage = ({ onBootstrapSignup, onInviteSignup, onLogin, error }:
                 )}
                 <Field autoComplete="name" icon={UserRound} label="Full name" {...joinField('fullName')} placeholder="Your full name" />
                 <Field autoComplete="email" icon={Mail} label="Email" {...joinField('email')} type="email" placeholder="The email that received the invite" />
-                <Field autoComplete="tel" icon={Phone} label="Phone number" {...joinField('phone')} type="tel" placeholder="+65 9123 4567" />
+                <LocationFields value={joinLocation} onChange={setJoinLocation} />
                 <Field autoComplete="username" icon={UserRound} label="Username" {...joinField('username')} placeholder="Choose a unique username" />
                 <Field
                   autoComplete="new-password"
@@ -339,7 +354,7 @@ export const LoginPage = ({ onBootstrapSignup, onInviteSignup, onLogin, error }:
                 />
                 <button
                   className="mt-2 inline-flex min-h-12 items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-3 text-sm font-bold text-white transition hover:bg-blue-700 focus:outline-none focus:ring-3 focus:ring-blue-200 disabled:pointer-events-none disabled:opacity-50"
-                  disabled={loading || !inviteToken.trim() || !joinForm.fullName || !joinForm.email || !joinForm.phone || !joinForm.username || !joinForm.password || !!joinPasswordHint}
+                  disabled={loading || !inviteToken.trim() || !joinForm.fullName || !joinForm.email || !joinLocation.localPhone || !joinLocation.postalCode || !joinLocation.address || !joinForm.username || !joinForm.password || !!joinPasswordHint}
                   type="submit"
                 >
                   {loading ? 'Creating account…' : 'Create account'}
@@ -353,7 +368,7 @@ export const LoginPage = ({ onBootstrapSignup, onInviteSignup, onLogin, error }:
                 <Field icon={Home} label="Family name" {...setupField('familyName')} placeholder="e.g. The Krishnamurthy Family" />
                 <Field autoComplete="name" icon={UserRound} label="Admin full name" {...setupField('fullName')} placeholder="Your full name" />
                 <Field autoComplete="email" icon={Mail} label="Admin email" {...setupField('email')} type="email" placeholder="admin@example.com" />
-                <Field autoComplete="tel" icon={Phone} label="Admin phone number" {...setupField('phone')} type="tel" placeholder="+65 9123 4567" />
+                <LocationFields value={setupLocation} onChange={setSetupLocation} phoneLabel="Admin phone number" />
                 <Field autoComplete="username" icon={UserRound} label="Admin username" {...setupField('username')} placeholder="Choose a unique username" />
                 <Field
                   autoComplete="new-password"
@@ -366,7 +381,7 @@ export const LoginPage = ({ onBootstrapSignup, onInviteSignup, onLogin, error }:
                 />
                 <button
                   className="mt-2 inline-flex min-h-12 items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-3 text-sm font-bold text-white transition hover:bg-blue-700 focus:outline-none focus:ring-3 focus:ring-blue-200 disabled:pointer-events-none disabled:opacity-50"
-                  disabled={loading || !setupForm.familyName || !setupForm.fullName || !setupForm.email || !setupForm.phone || !setupForm.username || !setupForm.password || !!setupPasswordHint}
+                  disabled={loading || !setupForm.familyName || !setupForm.fullName || !setupForm.email || !setupLocation.localPhone || !setupLocation.postalCode || !setupLocation.address || !setupForm.username || !setupForm.password || !!setupPasswordHint}
                   type="submit"
                 >
                   {loading ? 'Creating family…' : 'Create family'}

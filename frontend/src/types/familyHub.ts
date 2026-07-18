@@ -65,6 +65,9 @@ export interface Family {
   familyName: string
   homeBase: string
   timezone: string
+  country: string
+  address: string
+  postalCode: string
   planStatus: 'demo' | 'api-ready'
 }
 
@@ -445,6 +448,9 @@ export interface BootstrapSignupInput extends SignupDeviceInput {
   familyName: string
   homeBase: string
   timezone: string
+  country: string
+  address: string
+  postalCode: string
   fullName: string
   email: string
   phone: string
@@ -454,6 +460,9 @@ export interface BootstrapSignupInput extends SignupDeviceInput {
 
 export interface InviteSignupInput extends SignupDeviceInput {
   inviteToken: string
+  country: string
+  address: string
+  postalCode: string
   fullName: string
   email: string
   phone: string

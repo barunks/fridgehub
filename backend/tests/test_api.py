@@ -15,7 +15,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 from app.core.database import SessionLocal  # noqa: E402
 from app.core.security import decode_token, hash_password  # noqa: E402
 from app.main import app  # noqa: E402
-from app.models import Device, DeviceSession, FamilyInvite, FamilyMember, MealPlan, User  # noqa: E402
+from app.models import Device, DeviceSession, FamilyInvite, FamilyMember, MealPlan, User, GroceryItem, GroceryPurchaseCycle, GrocerySubList  # noqa: E402
 
 
 def auth_headers(client: TestClient, username: str = "meera") -> dict[str, str]:
@@ -34,6 +34,10 @@ def add_months(value: date, months: int) -> date:
 
 def meal_targets_member(meal: dict, member_id: int) -> bool:
     return meal.get("assignedTo") == member_id or member_id in meal.get("targetMemberIds", [])
+
+
+def setup_module() -> None:
+    Path("test_fridgehub.db").unlink(missing_ok=True)
 
 
 def teardown_module() -> None:
@@ -179,6 +183,9 @@ def test_second_family_can_be_created_with_unique_phone() -> None:
                 "familyName": f"Family {unique}",
                 "homeBase": "Singapore",
                 "timezone": "Asia/Singapore",
+                "country": "Singapore",
+                "address": "123 Test Street",
+                "postalCode": "123456",
                 "fullName": f"Admin {unique}",
                 "email": f"admin-{unique}@test.local",
                 "phone": f"+6590{unique[:6]}",
@@ -199,6 +206,9 @@ def test_same_phone_cannot_create_two_families() -> None:
     payload = {
         "homeBase": "Singapore",
         "timezone": "Asia/Singapore",
+        "country": "Singapore",
+        "address": "123 Test Street",
+        "postalCode": "123456",
         "fullName": f"Admin {unique}",
         "phone": phone,
         "password": "AdminPass1",
@@ -985,6 +995,101 @@ def test_grocery_purchase_cycle_flow() -> None:
         assert r2.status_code == 200
 
         # Clean up
+        client.delete(f"/api/v1/grocery/items/{item_id}", headers=headers)
+
+
+def test_grocery_regenerate_cycles_carries_forward_unpurchased_items() -> None:
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+        item_name = f"CarryForward-{uuid4().hex[:8]}"
+        payload = {
+            "itemName": item_name,
+            "listTypeId": 1,
+            "quantity": 2,
+            "unit": "Pack",
+            "purchaseFrequency": "weekly",
+            "currentStock": False,
+            "notes": "Unpurchased carry-forward test",
+        }
+        # Create item and run first regen — item enters its first cycle, carried_forward must be False
+        created = client.post("/api/v1/grocery/items", json=payload, headers=headers)
+        assert created.status_code == 200
+        item_id = created.json()["id"]
+
+        first_regen = client.post("/api/v1/grocery/regenerate-cycles", headers=headers)
+        assert first_regen.status_code == 200
+
+        db = SessionLocal()
+        try:
+            first_sub_item = (
+                db.query(GrocerySubList)
+                .join(GroceryPurchaseCycle)
+                .filter(GrocerySubList.item_id == item_id, GroceryPurchaseCycle.is_completed.is_(False))
+                .one()
+            )
+            # After first regen the item is in its first active cycle — not yet carried forward
+            assert first_sub_item.carried_forward is False
+        finally:
+            db.close()
+
+        # Second regen — item was unpurchased in the previous cycle, so it must be carried forward
+        second_regen = client.post("/api/v1/grocery/regenerate-cycles", headers=headers)
+        assert second_regen.status_code == 200
+
+        db = SessionLocal()
+        try:
+            second_sub_item = (
+                db.query(GrocerySubList)
+                .join(GroceryPurchaseCycle)
+                .filter(GrocerySubList.item_id == item_id, GroceryPurchaseCycle.is_completed.is_(False))
+                .one()
+            )
+            assert second_sub_item.carried_forward is True
+        finally:
+            db.close()
+
+        client.delete(f"/api/v1/grocery/items/{item_id}", headers=headers)
+
+
+def test_grocery_regenerate_cycles_builds_cycles_for_each_master_item() -> None:
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+        item_name = f"CycleBuild-{uuid4().hex[:8]}"
+        payload = {
+            "itemName": item_name,
+            "listTypeId": 2,
+            "quantity": 1,
+            "unit": "Bottle",
+            "purchaseFrequency": "monthly",
+            "currentStock": False,
+            "notes": "Cycle generation test",
+        }
+        created = client.post("/api/v1/grocery/items", json=payload, headers=headers)
+        assert created.status_code == 200
+        item_id = created.json()["id"]
+
+        r = client.post("/api/v1/grocery/regenerate-cycles", headers=headers)
+        assert r.status_code == 200
+        cycles = r.json()
+        assert any(c["listTypeId"] == 2 and c["frequency"] == "monthly" for c in cycles)
+
+        db = SessionLocal()
+        try:
+            cycle = (
+                db.query(GroceryPurchaseCycle)
+                .join(GrocerySubList)
+                .filter(
+                    GroceryPurchaseCycle.list_type_id == 2,
+                    GroceryPurchaseCycle.frequency == "monthly",
+                    GrocerySubList.item_id == item_id,
+                    GroceryPurchaseCycle.is_completed.is_(False),
+                )
+                .one()
+            )
+            assert cycle.cycle_start_date <= cycle.cycle_end_date
+        finally:
+            db.close()
+
         client.delete(f"/api/v1/grocery/items/{item_id}", headers=headers)
 
 
