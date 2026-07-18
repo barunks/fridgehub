@@ -28,7 +28,11 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     logger.info("Starting FridgeHub API", extra={"version": settings.app_version, "environment": settings.environment})
 
     if settings.run_migrations_on_startup:
-        init_db()
+        try:
+            init_db()
+        except Exception:
+            logger.exception("Startup migrations failed")
+            raise
     else:
         logger.info("Skipping startup migrations; expecting migrations to be run before the API starts")
 
@@ -47,6 +51,8 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
                     except Exception:
                         pass
                 logger.info("Cache warmed for %d families", len(families))
+        except Exception:
+            logger.exception("Startup seed/cache-warm failed — continuing anyway")
         finally:
             db.close()
 
