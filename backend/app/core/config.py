@@ -2,7 +2,7 @@ import secrets
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import AliasChoices, Field, model_validator
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     app_name: str = "FridgeHub API"
     app_version: str = "1.0.0"
     environment: Literal["local", "test", "development", "production"] = "local"
-    debug: bool = Field(default=False, validation_alias=AliasChoices("APP_DEBUG", "FAMILYHUB_DEBUG"))
+    debug: bool = Field(default=False, validation_alias="APP_DEBUG")
 
     database_url: str = "sqlite:///./fridgehub.db"
     db_pool_size: int = 20

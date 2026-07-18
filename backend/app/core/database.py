@@ -17,11 +17,17 @@ def _engine_kwargs() -> dict:
     if settings.database_url.startswith("sqlite"):
         return {"connect_args": {"check_same_thread": False}}
 
-    return {
+    kwargs: dict = {
         "pool_size": settings.db_pool_size,
         "pool_recycle": settings.db_pool_recycle,
         "pool_pre_ping": True,
     }
+
+    # PostgreSQL: disable prepared statements (required for pgbouncer / Fly.io)
+    if settings.database_url.startswith("postgresql") or settings.database_url.startswith("postgres"):
+        kwargs["connect_args"] = {"options": "-c timezone=UTC"}
+
+    return kwargs
 
 
 engine = create_engine(settings.database_url, echo=settings.debug, **_engine_kwargs())

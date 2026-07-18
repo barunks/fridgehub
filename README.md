@@ -1,6 +1,6 @@
 # FridgeHub
 
-FridgeHub is a full-stack family command center built from `docs/Family_Hub.docx` and the reference images in `docs/`.
+FridgeHub is a full-stack family command center built from `docs/Fridge_Hub.docx` and the reference images in `docs/`.
 
 The implementation now includes the React UI, FastAPI backend, SQLAlchemy data model, MySQL schema, Redis cache abstraction, Celery schedules, Docker deployment files, seeded meal/grocery/task templates, JWT auth/RBAC, audit logging, and tests.
 

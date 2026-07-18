@@ -25,7 +25,7 @@ jobs:
 
       - name: Run tests
         env:
-          DATABASE_URL: sqlite:///./test_familyhub.db
+          DATABASE_URL: sqlite:///./test_fridgehub.db
           SEED_ON_STARTUP: "true"
           CACHE_ENABLED: "false"
           SECRET_KEY: ci-test-secret-key-that-is-long-enough

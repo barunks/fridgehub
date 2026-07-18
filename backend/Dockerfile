@@ -8,7 +8,7 @@ ENV SEED_ON_STARTUP=false
 WORKDIR /app
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends build-essential default-libmysqlclient-dev pkg-config curl \
+    && apt-get install -y --no-install-recommends build-essential default-libmysqlclient-dev libpq-dev pkg-config curl \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
